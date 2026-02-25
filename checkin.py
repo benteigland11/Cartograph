@@ -114,7 +114,10 @@ def _scan_contamination(path: str, widget: dict) -> dict:
     dep_names = set()
     for d in deps:
         name = d if isinstance(d, str) else d.get("name", "")
-        dep_names.add(name.lower().split("[")[0])  # strip extras like pkg[opt]
+        # strip extras [opt] and version specifiers >=, ==, ~=, etc.
+        bare = re.split(r'[><=!~;\[]', name)[0].strip().lower()
+        if bare:
+            dep_names.add(bare)
 
     # Widget's own module names (everything under src/)
     own_modules = set()

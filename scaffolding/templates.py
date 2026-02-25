@@ -13,6 +13,7 @@ import re
 def python(target_dir, module_name, display_name, **_):
     with open(os.path.join(target_dir, "src", "__init__.py"), "w") as f:
         f.write(f"from .{module_name} import {module_name}\n")
+        f.write(f"__all__ = ['{module_name}']\n")
     with open(os.path.join(target_dir, "src", f"{module_name}.py"), "w") as f:
         f.write(f'def {module_name}(value):\n    """{display_name}: process a value."""\n    return value\n')
     with open(os.path.join(target_dir, "tests", f"test_{module_name}.py"), "w") as f:

@@ -632,6 +632,15 @@ class Cartographer:
             self._print_checklist(checklist, errors, failed=True)
             return {"status": "error", "message": f"Unknown language '{language}'"}
 
+        print(f"\n🔍 Running language checks...")
+        lang_check = engine.validate_widget(path, dependencies)
+        if not check("Language checks pass", lang_check["passed"],
+                     lang_check.get("error", "")):
+            self._print_checklist(checklist, errors, failed=True,
+                                  test_output=lang_check.get("error"))
+            return {"status": "error", "message": lang_check.get("error", "Language checks failed"),
+                    "test_output": lang_check.get("error", "")}
+
         print(f"\n📦 Installing dependencies...")
         try:
             engine.install_deps(path, dependencies)
