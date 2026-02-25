@@ -1,204 +1,314 @@
 """
-Check-in workflow: submit, version, restore, review, and compare widgets.
+Check-in workflow: push edits from an installed widget back to the library.
 
-All public functions take `carto` (a Cartographer instance) as the first argument
-so they can access the in-memory widget index and shared helpers without circular imports.
+Primary flow:
+    install(widget_id) → edit files in place → checkin(path, reason="why")
+
+checkin() auto-detects the widget ID from widget.json and whether it already
+exists in the library (update) or is new. It scans for project-specific
+contamination before accepting anything.
+
+Contamination scanning
+----------------------
+Hard blocks (checkin fails, no override):
+  - Absolute paths baked into source strings (/home/, /Users/, C:\\, C:/)
+  - Apparent credential assignments (api_key = "...", token = "abc123", etc.)
+
+Warnings (checkin pauses, agent must pass override_warnings=True + override_reason):
+  - os.getenv / os.environ calls
+  - Hardcoded non-local URLs / IP addresses
+  - Imports that aren't stdlib, listed dependencies, or the widget's own src/
+
+On override the reason is recorded in the changelog entry as an audit trail.
 """
 
 import datetime
 import glob
 import json
 import os
+import re
 import shutil
 import sys
 
 
-def checkin_item(carto, path, differentiation="", update=True, reason="", version_bump="minor"):
-    """Validate and move an item into the library. Removes local copy on success."""
-    from cartographer import PENDING_WIDGETS_PATH
+# ---------------------------------------------------------------------------
+# Contamination scanner
+# ---------------------------------------------------------------------------
 
+_ABS_PATH_RE = re.compile(
+    r'["\'](?:/home/|/Users/|/root/|[A-Za-z]:[/\\\\])[^"\']{3,}["\']'
+)
+
+_CREDENTIAL_RE = re.compile(
+    r'(?:api_key|api_secret|secret_key|access_token|auth_token|password|passwd|credential)\s*=\s*["\'][^"\']{6,}["\']',
+    re.IGNORECASE,
+)
+
+_ENVVAR_RE = re.compile(r'os\.getenv\(|os\.environ')
+
+_URL_RE = re.compile(
+    r'["\']https?://(?!(?:localhost|127\.0\.0\.1|example\.com|schemas?\.))[^"\']{8,}["\']'
+)
+
+_IP_RE = re.compile(r'["\'](?:\d{1,3}\.){3}\d{1,3}(?::\d+)?["\']')
+
+_IMPORT_RE = re.compile(r'^\s*(?:import|from)\s+([\w.]+)', re.MULTILINE)
+
+_STDLIB = frozenset([
+    "abc", "ast", "asyncio", "base64", "collections", "contextlib", "copy",
+    "csv", "datetime", "enum", "functools", "glob", "hashlib", "html",
+    "http", "importlib", "inspect", "io", "itertools", "json", "logging",
+    "math", "operator", "os", "pathlib", "pickle", "platform", "pprint",
+    "queue", "random", "re", "shutil", "signal", "socket", "sqlite3",
+    "string", "struct", "subprocess", "sys", "tempfile", "threading",
+    "time", "traceback", "typing", "unittest", "urllib", "uuid", "warnings",
+    "weakref", "xml", "zipfile",
+])
+
+
+def _scan_contamination(path: str, widget: dict) -> dict:
+    """
+    Scan Python source files for project-specific contamination.
+    Returns {"blocks": [...], "warnings": [...]}.
+    """
+    blocks, warnings = [], []
+
+    # Collect declared dependency names for import check
+    deps = widget.get("dependencies", [])
+    dep_names = set()
+    for d in deps:
+        name = d if isinstance(d, str) else d.get("name", "")
+        dep_names.add(name.lower().split("[")[0])  # strip extras like pkg[opt]
+
+    # Widget's own module names (everything under src/)
+    own_modules = set()
+    src_dir = os.path.join(path, "src")
+    if os.path.isdir(src_dir):
+        for f in os.listdir(src_dir):
+            if f.endswith(".py"):
+                own_modules.add(f[:-3])
+
+    src_files = glob.glob(os.path.join(path, "src", "**", "*.py"), recursive=True)
+    all_files = src_files + glob.glob(os.path.join(path, "tests", "**", "*.py"), recursive=True)
+
+    for fpath in all_files:
+        rel = os.path.relpath(fpath, path)
+        try:
+            code = open(fpath).read()
+        except Exception:
+            continue
+
+        for line_no, line in enumerate(code.splitlines(), 1):
+            loc = f"{rel}:{line_no}"
+
+            if _ABS_PATH_RE.search(line):
+                blocks.append(f"Absolute path in {loc}: {line.strip()}")
+
+            if _CREDENTIAL_RE.search(line):
+                blocks.append(f"Possible credential in {loc}: {line.strip()}")
+
+        for m in _ENVVAR_RE.finditer(code):
+            line_no = code[:m.start()].count("\n") + 1
+            warnings.append(f"os.environ/getenv call in {rel}:{line_no} — verify it's not project-specific")
+
+        for m in _URL_RE.finditer(code):
+            line_no = code[:m.start()].count("\n") + 1
+            warnings.append(f"Hardcoded URL in {rel}:{line_no}: {m.group()}")
+
+        for m in _IP_RE.finditer(code):
+            line_no = code[:m.start()].count("\n") + 1
+            warnings.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
+
+        if fpath in src_files:
+            for m in _IMPORT_RE.finditer(code):
+                top = m.group(1).split(".")[0].lower()
+                if top and top not in _STDLIB and top not in dep_names and top not in own_modules:
+                    line_no = code[:m.start()].count("\n") + 1
+                    warnings.append(
+                        f"Unlisted import '{top}' in {rel}:{line_no} — add to dependencies or remove"
+                    )
+
+    return {"blocks": blocks, "warnings": warnings}
+
+
+# ---------------------------------------------------------------------------
+# checkin
+# ---------------------------------------------------------------------------
+
+def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
+            override_warnings: bool = False, override_reason: str = "") -> dict:
+    """
+    Push an edited widget back to the library.
+
+    Detects update vs new from whether the widget ID already exists in the
+    library. Never deletes or moves the source — the installed copy is left
+    intact after a successful checkin.
+
+    Args:
+        path:              Directory containing widget.json and src/
+        reason:            Human/agent description of what changed
+        version_bump:      "major" | "minor" | "patch"  (default "minor")
+        override_warnings: Pass True to proceed despite contamination warnings
+        override_reason:   Required when override_warnings=True — recorded in changelog
+    """
+    if not os.path.isdir(path):
+        return {"status": "error", "message": f"Path not found: {path}"}
+
+    # --- Read manifest ---
+    manifest_path = os.path.join(path, "widget.json")
+    if not os.path.exists(manifest_path):
+        return {"status": "error", "message": "No widget.json found. Blueprint checkin not supported in v0.1."}
+
+    try:
+        with open(manifest_path) as f:
+            data = json.load(f)
+    except Exception as e:
+        return {"status": "error", "message": f"Invalid widget.json: {e}"}
+
+    meta = data.get("meta", {})
+    item_id = meta.get("id", "").strip()
+    if not item_id:
+        return {"status": "error", "message": "widget.json is missing meta.id"}
+
+    # --- Validate ---
     val = carto.validate_item(path)
     if val["status"] != "success":
         return val
 
-    manifest_path = os.path.join(path, "widget.json")
-    item_type = "widget"
-    if not os.path.exists(manifest_path):
-        manifest_path = os.path.join(path, "blueprint.json")
-        item_type = "blueprint"
+    # --- Contamination scan ---
+    widget_record = next((w for w in carto.widgets if w["id"] == item_id), None)
+    scan = _scan_contamination(path, data.get("tech_stack", {}))
 
-    with open(manifest_path) as f:
-        data = json.load(f)
-    meta = data.get("meta", {})
-    item_id = meta["id"]
-    item_name = meta["name"]
-    domain = meta["domain"]
-    tags = meta.get("tags", [])
+    if scan["blocks"]:
+        return {
+            "status": "error",
+            "message": "Checkin blocked: project-specific content detected.",
+            "blocks": scan["blocks"],
+        }
+
+    if scan["warnings"] and not override_warnings:
+        return {
+            "status": "warnings",
+            "message": "Checkin paused: potential contamination found. "
+                       "Review warnings and re-run with override_warnings=True and override_reason=<explanation>.",
+            "warnings": scan["warnings"],
+        }
+
+    if override_warnings and not override_reason:
+        return {"status": "error", "message": "override_reason is required when override_warnings=True"}
+
+    # --- Determine update vs new ---
+    is_update = widget_record is not None
+
+    # --- Version bump ---
     version = meta.get("version", "1.0.0")
-
-    # Auto version bump
-    if update and version_bump:
-        parts = version.split(".")
-        if len(parts) == 3:
-            major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
-            if version_bump == "major":
-                major, minor, patch = major + 1, 0, 0
-            elif version_bump == "minor":
-                major, minor, patch = major, minor + 1, 0
-            elif version_bump == "patch":
-                major, minor, patch = major, minor, patch + 1
-            version = f"{major}.{minor}.{patch}"
-            data["meta"]["version"] = version
-            with open(manifest_path, "w") as f:
-                json.dump(data, f, indent=2)
-            print(f"📦 Version bumped to {version} ({version_bump})", file=sys.stderr)
-
-    # Auto-append language suffix to ID
-    if item_type == "widget":
-        language = data.get("tech_stack", {}).get("language", "")
-        if isinstance(language, list):
-            language = language[0] if language else "unknown"
-        normalized_lang = carto._normalize_language(language)
-        if not item_id.endswith(f"-{normalized_lang}"):
-            item_id = f"{item_id}-{normalized_lang}"
-            data["meta"]["id"] = item_id
-            with open(manifest_path, "w") as f:
-                json.dump(data, f, indent=2)
-
-    # Diff review
-    diff_review = carto._diff_against_library(path, item_id) if update else None
-
-    # Duplicate detection (new items only)
-    high_similarity = []
-    needs_review = False
-
-    if not update:
-        print(f"\n🔍 Checking for duplicates in {item_type}s...", file=sys.stderr)
-        if item_type == "widget":
-            current_hash = carto._calculate_implementation_hash(path)
-            exact = next((w for w in carto.widgets if w.get("implementation_hash") == current_hash), None)
-            if exact:
-                return {"status": "error",
-                        "message": f"Identical code already exists in widget '{exact['id']}'"}
-        if item_type == "blueprint":
-            current_comps = set(carto._extract_composed_ids(data.get("composed_of", [])))
-            exact = next((w for w in carto.widgets
-                          if w["type"] == "blueprint"
-                          and set(carto._extract_composed_ids(w.get("composed_of", []))) == current_comps), None)
-            if exact:
-                return {"status": "error",
-                        "message": f"A blueprint with identical components already exists: {exact['id']}"}
-
-        search_query = f"{item_name} {' '.join(tags)}"
-        search_result = carto.search(search_query, domain_filter=domain, top_k=5)
-        candidates = search_result.get("library", []) + search_result.get("installed", [])
-        similar = [w for w in candidates if w.get("type", "widget") == item_type]
-        high_similarity = [w for w in similar if w["relevance_score"] > 2.0]
-        needs_review = len(high_similarity) > 0
-
-    # Determine destination
-    if item_type == "widget":
-        target_lib = PENDING_WIDGETS_PATH if needs_review else carto.library_path
+    parts = version.split(".")
+    if len(parts) == 3:
+        major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+        if version_bump == "major":
+            major, minor, patch = major + 1, 0, 0
+        elif version_bump == "minor":
+            minor, patch = minor + 1, 0
+        elif version_bump == "patch":
+            patch += 1
+        new_version = f"{major}.{minor}.{patch}"
     else:
-        target_lib = PENDING_WIDGETS_PATH if needs_review else carto.blueprint_path
+        new_version = version
 
-    existing_item = next((w for w in carto.widgets if w["id"] == item_id), None)
-    if existing_item and update:
-        dest_path = existing_item["path"]
-    else:
-        folder_name = item_id.replace("-", ".", 1)
-        dest_path = os.path.join(target_lib, folder_name)
-
-    changelog_entry = {
-        "version": version,
-        "reason": reason or ("No reason provided" if update else "Initial release"),
-        "timestamp": datetime.datetime.now().isoformat(),
-    }
-
-    if os.path.exists(dest_path):
-        if update:
-            current_manifest = "blueprint.json" if item_type == "blueprint" else "widget.json"
-            try:
-                with open(os.path.join(dest_path, current_manifest)) as f:
-                    old_version = json.load(f).get("meta", {}).get("version", "unknown")
-                history_path = os.path.join(dest_path, "history", old_version)
-                os.makedirs(history_path, exist_ok=True)
-                print(f"🔄 UPDATING: Archiving v{old_version} to history...", file=sys.stderr)
-                for item in os.listdir(dest_path):
-                    if item in ("history", "changelog.json"):
-                        continue
-                    shutil.move(os.path.join(dest_path, item), history_path)
-            except Exception as e:
-                print(f"⚠️  Warning: Could not archive old version: {e}", file=sys.stderr)
-                shutil.rmtree(dest_path)
-        else:
-            return {"status": "error",
-                    "message": f"Item already exists in library: {dest_path}. Use --update to overwrite."}
-
-    data["meta"]["needs_review"] = needs_review
-    if differentiation:
-        data["meta"]["differentiation"] = differentiation
+    data["meta"]["version"] = new_version
     with open(manifest_path, "w") as f:
         json.dump(data, f, indent=2)
 
-    # Changelog
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache")
-    resolved_path = os.path.realpath(path)
-    is_install_dir = (os.sep + "cartographer" + os.sep + "widgets" + os.sep in resolved_path or
-                      os.sep + "cartographer" + os.sep + "blueprints" + os.sep in resolved_path)
-
-    if update:
-        os.makedirs(dest_path, exist_ok=True)
-        changelog_path = os.path.join(dest_path, "changelog.json")
-        changelog = []
-        if os.path.exists(changelog_path):
-            try:
-                with open(changelog_path) as f:
-                    changelog = json.load(f)
-            except Exception:
-                pass
-        changelog.insert(0, changelog_entry)
-        with open(changelog_path, "w") as f:
-            json.dump(changelog, f, indent=2)
-
-        for item in os.listdir(path):
-            if item in ("history", "changelog.json", "__pycache__", ".pytest_cache"):
-                continue
-            s = os.path.join(path, item)
-            d = os.path.join(dest_path, item)
-            if os.path.isdir(s):
-                shutil.copytree(s, d, dirs_exist_ok=True, ignore=ignore)
-            else:
-                shutil.copy2(s, d)
-
-        if is_install_dir:
-            print(f"📦 Source is in install directory — left in place: {path}", file=sys.stderr)
-        else:
-            checkedin_dir = os.path.join(os.path.dirname(path), "checkedin")
-            os.makedirs(checkedin_dir, exist_ok=True)
-            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            shutil.move(path, os.path.join(checkedin_dir, f"{item_id}_{version}_{ts}"))
-            print(f"📦 Checkout archived to checkedin/", file=sys.stderr)
+    # --- Determine destination ---
+    if is_update:
+        dest_path = widget_record["path"]
     else:
-        with open(os.path.join(path, "changelog.json"), "w") as f:
-            json.dump([changelog_entry], f, indent=2)
-        os.makedirs(target_lib, exist_ok=True)
-        if is_install_dir:
-            shutil.copytree(path, dest_path, dirs_exist_ok=True, ignore=ignore)
+        folder_name = item_id
+        dest_path = os.path.join(carto.library_path, folder_name)
+        if os.path.exists(dest_path):
+            return {"status": "error",
+                    "message": f"Directory already exists but widget is not in index: {dest_path}"}
+
+    # --- Archive current library version to history/ ---
+    if is_update and os.path.exists(dest_path):
+        old_version = widget_record.get("version", "unknown")
+        history_path = os.path.join(dest_path, "history", old_version)
+        os.makedirs(history_path, exist_ok=True)
+        ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "history", "changelog.json")
+        for item in os.listdir(dest_path):
+            if item in ("history", "changelog.json"):
+                continue
+            src = os.path.join(dest_path, item)
+            dst = os.path.join(history_path, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, ignore=ignore)
+            else:
+                shutil.copy2(src, dst)
+
+    # --- Copy working copy → library (never move — leave source intact) ---
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache")
+    os.makedirs(dest_path, exist_ok=True)
+    for item in os.listdir(path):
+        if item in ("history", "changelog.json", "__pycache__", ".pytest_cache"):
+            continue
+        src = os.path.join(path, item)
+        dst = os.path.join(dest_path, item)
+        if os.path.isdir(src):
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst, ignore=ignore)
         else:
-            shutil.move(path, dest_path)
+            shutil.copy2(src, dst)
 
-    carto._log_registration(item_id, item_name, high_similarity, differentiation, needs_review, dest_path)
+    # --- Changelog ---
+    changelog_entry = {
+        "version": new_version,
+        "reason": reason or ("No reason provided" if is_update else "Initial release"),
+        "timestamp": datetime.datetime.now().isoformat(),
+    }
+    if override_warnings and override_reason:
+        changelog_entry["override_reason"] = override_reason
 
-    print(f"\n✅ Successfully {'updated' if update else 'registered'} {item_id}!", file=sys.stderr)
-    result = {"status": "success", "path": dest_path, "needs_review": needs_review,
-              "action": "update" if update else "register"}
-    if diff_review:
-        result["diff_review"] = diff_review
-        result["ai_review_prompt"] = ("Review the diff for project-specific code, hardcoded paths, "
-                                      "credentials, or non-generic patterns.")
+    changelog_path = os.path.join(dest_path, "changelog.json")
+    changelog = []
+    if os.path.exists(changelog_path):
+        try:
+            with open(changelog_path) as f:
+                changelog = json.load(f)
+        except Exception:
+            pass
+    changelog.insert(0, changelog_entry)
+    with open(changelog_path, "w") as f:
+        json.dump(changelog, f, indent=2)
+
+    # --- Diff for AI review ---
+    diff = carto._diff_against_library(path, item_id) if is_update else None
+
+    action = "updated" if is_update else "registered"
+    print(f"\n✅ Successfully {action} {item_id} → v{new_version}", file=sys.stderr)
+
+    result = {
+        "status": "success",
+        "id": item_id,
+        "version": new_version,
+        "action": action,
+        "path": dest_path,
+    }
+    if scan["warnings"] and override_warnings:
+        result["overridden_warnings"] = scan["warnings"]
+        result["override_reason"] = override_reason
+    if diff:
+        result["diff"] = diff
+        result["diff_prompt"] = (
+            "Review this diff for any remaining project-specific code, hardcoded values, "
+            "or patterns that would break generic reuse."
+        )
     return result
 
+
+# ---------------------------------------------------------------------------
+# restore, add_review, compare_versions, compare_all_installed
+# ---------------------------------------------------------------------------
 
 def restore(carto, item_id, version, reason):
     """Restore a historical version to become the new head."""
@@ -210,9 +320,8 @@ def restore(carto, item_id, version, reason):
     if not os.path.exists(history_path):
         return {"status": "error", "message": f"Version '{version}' not found in history for {item_id}"}
 
-    print(f"🔄 RESTORE: Promoting v{version} of {item_id} to HEAD...")
-
-    temp_dir = os.path.join(os.getcwd(), f"temp_restore_{item_id}")
+    # Copy history version to a temp dir, then checkin as update
+    temp_dir = os.path.join(os.getcwd(), f"_restore_{item_id}")
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
     shutil.copytree(history_path, temp_dir)
@@ -225,46 +334,42 @@ def restore(carto, item_id, version, reason):
     else:
         next_version = current_version + ".1"
 
-    manifest_name = "blueprint.json" if item["type"] == "blueprint" else "widget.json"
-    manifest_path = os.path.join(temp_dir, manifest_name)
+    manifest_path = os.path.join(temp_dir, "widget.json")
     with open(manifest_path) as f:
         manifest = json.load(f)
     manifest["meta"]["version"] = next_version
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 
-    result = checkin_item(carto, temp_dir, update=True,
-                          reason=f"RESTORE: {reason} (Promoted from v{version})")
-    if result["status"] == "success":
-        print(f"🚀 Restored {item_id} to v{next_version} (from v{version})", file=sys.stderr)
+    result = checkin(carto, temp_dir, reason=f"RESTORE from v{version}: {reason}",
+                     version_bump="patch")
+    shutil.rmtree(temp_dir, ignore_errors=True)
     return result
 
 
-def add_review(carto, item_id_or_path, rating, comment, author="AI", version=None):
-    """Add a review. Path-based (proof of installation) or ID-based."""
-    item_id = item_id_or_path
+def add_review(carto, installed_path, rating, comment, author="AI"):
+    """
+    Add a review to a widget. Requires the local installed path as proof of use.
+    rating must be 1–5.
+    """
+    if not os.path.exists(installed_path):
+        return {"status": "error", "message": "Rating requires a local installed path (proof of use)."}
 
-    if os.path.exists(item_id_or_path):
-        for fname in ("widget.json", "blueprint.json"):
-            mp = os.path.join(item_id_or_path, fname)
-            if os.path.exists(mp):
-                try:
-                    with open(mp) as f:
-                        local_data = json.load(f)
-                    meta = local_data.get("meta", {})
-                    item_id = meta.get("id")
-                    version = meta.get("version")
-                except Exception as e:
-                    return {"status": "error", "message": f"Failed to read local manifest: {e}"}
-                break
-        else:
-            return {"status": "error", "message": f"No widget/blueprint.json at {item_id_or_path}"}
-    else:
-        return {"status": "error", "message": "Rating requires a local install path (proof of installation)."}
+    manifest_path = os.path.join(installed_path, "widget.json")
+    if not os.path.exists(manifest_path):
+        return {"status": "error", "message": f"No widget.json at {installed_path}"}
+
+    try:
+        with open(manifest_path) as f:
+            local_data = json.load(f)
+        item_id = local_data["meta"]["id"]
+        version = local_data["meta"].get("version")
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to read manifest: {e}"}
 
     widget = next((w for w in carto.widgets if w["id"] == item_id), None)
     if not widget:
-        return {"status": "error", "message": f"Item '{item_id}' not found in library."}
+        return {"status": "error", "message": f"Widget '{item_id}' not found in library"}
 
     try:
         rating = float(rating)
@@ -294,19 +399,18 @@ def add_review(carto, item_id_or_path, rating, comment, author="AI", version=Non
     with open(review_path, "w") as f:
         json.dump(reviews_data, f, indent=2)
 
-    return {"status": "success", "message": f"Added {rating}★ review to {item_id}", "item_id": item_id}
+    return {"status": "success", "message": f"Added {rating}★ review to {item_id}"}
 
 
 def compare_versions(carto, item_id):
     """Compare an installed widget's version and integrity to the library."""
     widget = next((w for w in carto.widgets if w["id"] == item_id), None)
     if not widget:
-        return {"status": "error", "message": f"Item '{item_id}' not found in library"}
+        return {"status": "error", "message": f"'{item_id}' not found in library"}
 
     installed_paths = carto._get_installed_info(item_id)
     if not installed_paths:
-        return {"status": "not_installed", "message": f"Item '{item_id}' is not installed",
-                "library_version": widget.get("version", "current")}
+        return {"status": "not_installed", "library_version": widget.get("version", "current")}
 
     if isinstance(installed_paths, list) and installed_paths:
         installed_path = (installed_paths[0].get("path")
@@ -314,11 +418,9 @@ def compare_versions(carto, item_id):
     else:
         installed_path = installed_paths
 
-    manifest_name = "blueprint.json" if widget.get("type") == "blueprint" else "widget.json"
     try:
-        with open(os.path.join(installed_path, manifest_name)) as f:
-            installed_meta = json.load(f).get("meta", {})
-            installed_version = installed_meta.get("version", "unknown")
+        with open(os.path.join(installed_path, "widget.json")) as f:
+            installed_version = json.load(f).get("meta", {}).get("version", "unknown")
     except Exception as e:
         return {"status": "error", "message": f"Failed to read installed manifest: {e}"}
 
@@ -333,71 +435,53 @@ def compare_versions(carto, item_id):
     else:
         status = "clean"
 
-    changelog_path = os.path.join(widget["path"], "CHANGELOG.md")
-    changelog_content = ""
-    if os.path.exists(changelog_path):
-        try:
-            with open(changelog_path) as f:
-                changelog_content = f.read()
-        except Exception:
-            pass
-
     return {
         "status": status,
         "item_id": item_id,
         "name": widget.get("name"),
-        "domain": widget.get("domain"),
         "installed_version": installed_version,
         "library_version": library_version,
-        "changelog": changelog_content[:1000] if changelog_content else "No changelog available",
     }
 
 
 def compare_all_installed(carto):
-    """Compare all installed widgets/blueprints to their library versions."""
+    """Compare all installed widgets to their library versions."""
     from cartographer import DEFAULT_INSTALL_DIR
 
     if not os.path.exists(DEFAULT_INSTALL_DIR):
-        return {"status": "empty", "total_installed": 0,
-                "message": f"No installations found ('{DEFAULT_INSTALL_DIR}' does not exist)."}
+        return {"status": "empty", "total_installed": 0}
 
     clean, modified, outdated = [], [], []
 
-    def _process(res):
-        bucket = {"id": res["item_id"], "name": res["name"],
-                  "domain": res["domain"], "version": res.get("installed_version")}
-        if res["status"] == "clean":
-            clean.append(bucket)
-        elif res["status"] == "modified":
-            modified.append(bucket)
-        elif res["status"] == "outdated":
-            outdated.append({**bucket, "library_version": res["library_version"]})
+    widgets_dir = os.path.join(DEFAULT_INSTALL_DIR, "widgets")
+    if not os.path.exists(widgets_dir):
+        return {"status": "empty", "total_installed": 0}
 
-    for subdir, manifest_name in [("widgets", "widget.json"), ("blueprints", "blueprint.json")]:
-        d = os.path.join(DEFAULT_INSTALL_DIR, subdir)
-        if not os.path.exists(d):
+    for folder in os.listdir(widgets_dir):
+        mp = os.path.join(widgets_dir, folder, "widget.json")
+        if not os.path.exists(mp):
             continue
-        for folder in os.listdir(d):
-            mp = os.path.join(d, folder, manifest_name)
-            if not os.path.exists(mp):
+        try:
+            with open(mp) as f:
+                item_id = json.load(f).get("meta", {}).get("id")
+            if not item_id:
                 continue
-            try:
-                with open(mp) as f:
-                    item_id = json.load(f).get("meta", {}).get("id")
-                if item_id:
-                    res = compare_versions(carto, item_id)
-                    if res.get("status") not in (None, "error"):
-                        _process(res)
-            except Exception:
-                pass
+            res = compare_versions(carto, item_id)
+            bucket = {"id": item_id, "name": res.get("name"), "version": res.get("installed_version")}
+            if res["status"] == "clean":
+                clean.append(bucket)
+            elif res["status"] == "modified":
+                modified.append(bucket)
+            elif res["status"] == "outdated":
+                outdated.append({**bucket, "library_version": res["library_version"]})
+        except Exception:
+            pass
 
     total = len(clean) + len(modified) + len(outdated)
-    pct = lambda n: round((n / total * 100) if total > 0 else 0, 1)
     return {
-        "status": "success", "total_installed": total,
-        "clean": clean, "clean_count": len(clean),
-        "modified": modified, "modified_count": len(modified),
-        "outdated": outdated, "outdated_count": len(outdated),
-        "summary": {"clean_percent": pct(len(clean)), "modified_percent": pct(len(modified)),
-                    "outdated_percent": pct(len(outdated))},
+        "status": "success",
+        "total_installed": total,
+        "clean": clean,
+        "modified": modified,
+        "outdated": outdated,
     }

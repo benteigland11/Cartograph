@@ -859,16 +859,17 @@ class Cartographer:
 
         print("=" * 60 + "\n")
 
-    def checkin_item(self, path, differentiation="", update=True, reason="", version_bump="minor"):
-        from checkin import checkin_item
-        return checkin_item(self, path, differentiation=differentiation, update=update,
-                            reason=reason, version_bump=version_bump)
+    def checkin(self, path, reason="", version_bump="minor",
+                override_warnings=False, override_reason=""):
+        from checkin import checkin
+        return checkin(self, path, reason=reason, version_bump=version_bump,
+                       override_warnings=override_warnings, override_reason=override_reason)
     def restore(self, item_id, version, reason):
         from checkin import restore
         return restore(self, item_id, version, reason)
-    def add_review(self, item_id_or_path, rating, comment, author="AI", version=None):
+    def add_review(self, installed_path, rating, comment, author="AI"):
         from checkin import add_review
-        return add_review(self, item_id_or_path, rating, comment, author=author, version=version)
+        return add_review(self, installed_path, rating, comment, author=author)
     def compare_versions(self, item_id):
         from checkin import compare_versions
         return compare_versions(self, item_id)
