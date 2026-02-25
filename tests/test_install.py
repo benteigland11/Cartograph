@@ -6,18 +6,13 @@ import os
 import pytest
 
 
-FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
-WIDGET_LIBRARY = os.path.join(FIXTURES_DIR, "Widget_Library")
-BLUEPRINTS = os.path.join(FIXTURES_DIR, "Blueprints")
-
-
 @pytest.fixture
-def fresh_carto(tmp_path):
+def fresh_carto(fixture_library, fixture_blueprints, tmp_path):
     """A fresh Cartographer instance with an isolated install dir."""
     from cartographer import Cartographer
     c = Cartographer(
-        library_path=WIDGET_LIBRARY,
-        blueprint_path=BLUEPRINTS,
+        library_path=fixture_library,
+        blueprint_path=fixture_blueprints,
         search_backend="bm25",
     )
     return c, tmp_path

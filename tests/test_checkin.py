@@ -11,11 +11,10 @@ import pytest
 
 
 @pytest.fixture
-def tmp_library(tmp_path):
+def tmp_library(fixture_library, tmp_path):
     """A writable copy of the fixture Widget_Library."""
-    src = os.path.join(os.path.dirname(__file__), "fixtures", "Widget_Library")
     dst = tmp_path / "Widget_Library"
-    shutil.copytree(src, dst)
+    shutil.copytree(fixture_library, dst)
     return str(dst)
 
 

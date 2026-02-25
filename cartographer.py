@@ -1,13 +1,4 @@
 import sys
-import subprocess
-import importlib.util
-
-# --- SELF-HEAL: Install dependencies if missing ---
-if importlib.util.find_spec("rank_bm25") is None:
-    print("Installing required dependency: rank_bm25...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "rank_bm25"])
-# --------------------------------------------------
-
 import argparse
 import json
 import os
@@ -199,7 +190,7 @@ class Cartographer:
                     "reviews": reviews,
                     "version_averages": v_averages
                 }
-        except:
+        except (OSError, json.JSONDecodeError, KeyError):
             return {"rating": 0, "count": 0, "reviews": [], "version_averages": {}}
 
     def _load_install_stats(self):
@@ -210,7 +201,7 @@ class Cartographer:
             with open(INSTALL_STATS_PATH, 'r') as f:
                 data = json.load(f)
                 return data.get("installs", {})
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             return {}
 
     def _save_install_stats(self):
@@ -245,7 +236,7 @@ class Cartographer:
                             "path": os.path.dirname(manifest_path),
                             "type": item_type
                         })
-                except Exception:
+                except (OSError, json.JSONDecodeError, KeyError):
                     continue
 
         scan(widget_root, "widget.json", "widget")
@@ -355,7 +346,7 @@ class Cartographer:
                     for src_file in glob.glob(os.path.join(src_dir, "*.*")):
                         try:
                             total_lines += len(open(src_file).read().splitlines())
-                        except Exception:
+                        except (OSError, UnicodeDecodeError):
                             pass
 
                 self.widgets.append({
@@ -379,7 +370,7 @@ class Cartographer:
                     "test_count": test_count,
                     "lines_of_code": total_lines,
                 })
-            except Exception:
+            except (OSError, json.JSONDecodeError, KeyError):
                 continue
 
     def _load_blueprints(self):
@@ -419,7 +410,7 @@ class Cartographer:
                             try:
                                 with open(src_file, 'r') as f:
                                     total_lines += len(f.readlines())
-                            except: pass
+                            except (OSError, UnicodeDecodeError): pass
                     # ------------------------------------------------
 
                     id_token = meta.get('id', os.path.basename(os.path.dirname(manifest_path)))
@@ -469,7 +460,7 @@ class Cartographer:
                         "regression": regression,
                         "lines_of_code": total_lines
                     })
-            except Exception:
+            except (OSError, json.JSONDecodeError, KeyError):
                 continue
 
     def list_popular(self, limit=10):
@@ -503,202 +494,9 @@ class Cartographer:
             top_k=top_k,
         )
 
-    _VALID_DOMAINS = frozenset([
-        "backend", "data", "ml", "security", "infra", "frontend", "universal"
-    ])
-
     def validate_item(self, path):
-        """Validate a Python widget directory before checkin."""
-        checklist = []
-        errors = []
-
-        def check(description, passed, error_detail=None):
-            checklist.append(f"{'✅' if passed else '❌'} {description}")
-            if not passed and error_detail:
-                errors.append(error_detail)
-            return passed
-
-        # 1. Path exists
-        if not check("Path exists", os.path.exists(path), f"Path not found: {path}"):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": f"Path not found: {path}"}
-
-        # 2. widget.json exists
-        manifest_path = os.path.join(path, "widget.json")
-        if not os.path.exists(manifest_path):
-            if os.path.exists(os.path.join(path, "blueprint.json")):
-                return {"status": "error", "message": "Blueprint validation is not supported in v0.1."}
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "Missing widget.json"}
-
-        check("widget.json exists", True)
-
-        # 3. Valid JSON, no TODOs
-        try:
-            content = open(manifest_path).read()
-            data = json.loads(content)
-            check("widget.json is valid JSON", True)
-        except Exception as e:
-            check("widget.json is valid JSON", False, str(e))
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": f"Invalid JSON: {e}"}
-
-        todo_count = content.count("[TODO]")
-        if not check("No [TODO] placeholders", todo_count == 0,
-                     f"Found {todo_count} [TODO] placeholder(s) — fill them in"):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "Replace all [TODO] placeholders in widget.json"}
-
-        # 4. Required meta fields
-        meta = data.get("meta", {})
-        for field in ("id", "name", "domain"):
-            if not check(f"meta.{field} present", bool(meta.get(field)),
-                         f"Missing required field meta.{field}"):
-                self._print_checklist(checklist, errors, failed=True)
-                return {"status": "error", "message": f"meta.{field} is required"}
-
-        # 5. Domain is a known value
-        domain = meta.get("domain", "").lower()
-        valid_domains = sorted(self._VALID_DOMAINS)
-        if not check(f"meta.domain is valid ({domain})",
-                     domain in self._VALID_DOMAINS,
-                     f"'{domain}' is not a valid domain. Choose one of: {', '.join(valid_domains)}"):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error",
-                    "message": f"Invalid domain '{domain}'. Valid domains: {', '.join(valid_domains)}"}
-
-        # 6. tech_stack
-        tech_stack = data.get("tech_stack", {})
-        if not check("tech_stack.language present", bool(tech_stack.get("language")),
-                     "Missing tech_stack.language"):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "Missing tech_stack.language"}
-
-        if not check("tech_stack.dependencies present", "dependencies" in tech_stack,
-                     "Missing tech_stack.dependencies (use [] if none)"):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "Missing tech_stack.dependencies"}
-
-        # 7. Required structure: src/, tests/, examples/
-        for folder in ("src", "tests", "examples"):
-            folder_path = os.path.join(path, folder)
-            ok = os.path.isdir(folder_path) and bool(os.listdir(folder_path))
-            if not check(f"{folder}/ exists and has files", ok,
-                         f"{folder}/ is missing or empty"):
-                self._print_checklist(checklist, errors, failed=True)
-                return {"status": "error", "message": f"{folder}/ is missing or empty"}
-
-        # 7b. example_usage.py exists, has no TODOs, and runs cleanly
-        example_path = os.path.join(path, "examples", "example_usage.py")
-        if not check("examples/example_usage.py exists", os.path.exists(example_path),
-                     "Missing examples/example_usage.py"):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "Missing examples/example_usage.py"}
-
-        example_content = open(example_path).read()
-        example_todos = example_content.count("[TODO]")
-        if not check("No [TODO] in example_usage.py", example_todos == 0,
-                     f"Found {example_todos} [TODO] placeholder(s) in example_usage.py — write real example code"):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "Replace [TODO] placeholders in examples/example_usage.py"}
-
-        import subprocess
-        example_result = subprocess.run(
-            [sys.executable, "examples/example_usage.py"],
-            cwd=path, capture_output=True, text=True, timeout=15
-        )
-        example_ok = example_result.returncode == 0
-        example_err = (example_result.stderr or example_result.stdout)[:500]
-        if not check("example_usage.py runs cleanly", example_ok, example_err):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "example_usage.py failed to run.",
-                    "test_output": example_err}
-
-        # 8. Test files follow naming convention
-        test_files = glob.glob(os.path.join(path, "tests", "test_*.py"))
-        if not check(f"Test files found ({len(test_files)})", len(test_files) > 0,
-                     "No test_*.py files found in tests/"):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "No test_*.py files found in tests/"}
-
-        # 9. Install deps and run tests
-        from languages import get_engine
-        language = tech_stack.get("language", "python").lower()
-        dependencies = tech_stack.get("dependencies", [])
-        engine = get_engine(language)
-
-        if engine is None:
-            check(f"Language '{language}' recognised", False, f"Unknown language '{language}'")
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": f"Unknown language '{language}'"}
-
-        print(f"\n🔍 Running language checks...")
-        lang_check = engine.validate_widget(path, dependencies)
-        if not check("Language checks pass", lang_check["passed"],
-                     lang_check.get("error", "")):
-            self._print_checklist(checklist, errors, failed=True,
-                                  test_output=lang_check.get("error"))
-            return {"status": "error", "message": lang_check.get("error", "Language checks failed"),
-                    "test_output": lang_check.get("error", "")}
-
-        print(f"\n📦 Installing dependencies...")
-        try:
-            engine.install_deps(path, dependencies)
-            check("Dependencies installed", True)
-        except Exception as e:
-            check("Dependencies installed", False, str(e))
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": f"Dependency install failed: {e}"}
-
-        print(f"\n🧪 Running tests...")
-        result = engine.run_tests(path)
-        test_error = result.get("error", "")
-        if not check("All tests pass", result["passed"], test_error):
-            self._print_checklist(checklist, errors, failed=True, test_output=test_error)
-            return {"status": "error", "message": "Tests failed. Fix before checkin.",
-                    "test_output": test_error[:3000]}
-
-        # 10. Uniqueness check
-        current_hash = self._calculate_implementation_hash(path)
-        duplicate = next((w for w in self.widgets
-                          if w.get("implementation_hash") == current_hash
-                          and w["id"] != meta.get("id")), None)
-        check("Implementation is unique",
-              duplicate is None,
-              f"Identical code already exists: {duplicate['id']}" if duplicate else None)
-
-        self._print_checklist(checklist, errors, failed=False)
-        return {"status": "success", "message": "Widget is valid"}
-
-    def _print_checklist(self, checklist, errors, failed, test_output=None):
-        """Print validation checklist with clear pass/fail status."""
-        print("\n" + "=" * 60)
-        if failed:
-            print("❌ VALIDATION FAILED")
-        else:
-            print("✅ VALIDATION PASSED")
-        print("=" * 60)
-
-        for item in checklist:
-            print(f"  {item}")
-
-        if errors:
-            print("\n" + "-" * 60)
-            print("ERRORS:")
-            for i, error in enumerate(errors, 1):
-                print(f"  {i}. {error}")
-
-        if test_output:
-            print("\n" + "-" * 60)
-            print("TEST OUTPUT:")
-            # Truncate very long output
-            if len(test_output) > 500:
-                print(test_output[:500] + "\n... (output truncated)")
-            else:
-                print(test_output)
-
-        print("=" * 60 + "\n")
-
+        from validator import validate_item
+        return validate_item(self, path)
     def checkin(self, path, reason="", version_bump="minor",
                 override_warnings=False, override_reason=""):
         from checkin import checkin

@@ -83,7 +83,7 @@ TIPS:
                 },
                 "domain": {
                     "type": "string",
-                    "enum": ["frontend", "backend", "all"],
+                    "enum": ["backend", "data", "ml", "security", "infra", "frontend", "universal", "all"],
                     "default": "all",
                     "description": "Filter by domain"
                 },
@@ -279,7 +279,7 @@ DEFAULT TARGET:
                 },
                 "domain": {
                     "type": "string",
-                    "enum": ["backend", "frontend", "universal"],
+                    "enum": ["backend", "data", "ml", "security", "infra", "frontend", "universal"],
                     "default": "backend",
                     "description": "Widget/blueprint domain"
                 },
@@ -524,10 +524,9 @@ async def call_tool(name: str, arguments: dict):
             )
 
         elif name == "cartographer_checkin":
-            result = get_carto().checkin_item(
+            result = get_carto().checkin(
                 path=arguments["path"],
                 reason=arguments["reason"],
-                differentiation=arguments.get("differentiation", ""),
                 version_bump=arguments.get("version_bump", "minor")
             )
 
@@ -549,7 +548,7 @@ async def call_tool(name: str, arguments: dict):
 
         elif name == "cartographer_rate":
             result = get_carto().add_review(
-                item_id_or_path=arguments["item"],
+                installed_path=arguments["item"],
                 rating=arguments["score"],
                 comment=arguments["comment"],
                 author=arguments.get("author", "anonymous")

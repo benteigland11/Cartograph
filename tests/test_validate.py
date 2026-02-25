@@ -8,13 +8,9 @@ import json
 import pytest
 
 
-FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
-WIDGET_LIBRARY = os.path.join(FIXTURES_DIR, "Widget_Library")
-
-
-def test_validate_valid_widget(carto):
+def test_validate_valid_widget(carto, fixture_library):
     """A well-formed fixture widget should pass validation."""
-    path = os.path.join(WIDGET_LIBRARY, "http-client")
+    path = os.path.join(fixture_library, "http-client")
     result = carto.validate_item(path)
     assert isinstance(result, dict)
     assert result.get("status") != "error", f"Unexpected error: {result.get('message')}"
