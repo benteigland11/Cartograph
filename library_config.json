@@ -1,4 +1,14 @@
 {
+  "domains": {
+    "backend": "Request handling, APIs, databases, queues, caching.",
+    "data": "Transformation, parsing, serialization, pipelines, file I/O.",
+    "ml": "Model loading, inference, embeddings, training utilities.",
+    "security": "Authentication, authorization, encryption, input sanitization.",
+    "infra": "Deployment, config management, logging, monitoring, health checks.",
+    "frontend": "UI rendering, templating, client-side logic.",
+    "universal": "Pure utilities with no domain dependency (string ops, retry, math, date handling). If a widget could reasonably belong to two domains, it belongs here."
+  },
+
   "general_notes": "Single responsibility — one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. All dependencies must be declared in widget.json tech_stack.dependencies. Do not modify library_notes — it is managed by Cartographer and will be restored on checkin.",
 
   "language_notes": {

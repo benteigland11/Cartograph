@@ -39,21 +39,26 @@ def test_validate_minimal_widget(carto, tmp_path):
     widget_dir = tmp_path / "minimal-widget"
     widget_dir.mkdir()
     manifest = {
-        "meta": {
-            "id": "minimal-widget",
-            "name": "Minimal Widget",
-            "version": "1.0.0",
-            "tags": ["test"],
-            "domain": "backend",
-            "maturity": "experimental"
-        },
+        "meta": {"id": "minimal-widget", "name": "Minimal Widget",
+                 "version": "1.0.0", "tags": ["test"], "domain": "backend"},
         "description": "A minimal widget for testing.",
         "tech_stack": {"language": "python", "dependencies": []},
-        "depends_on": [],
-        "integration_guide": {}
     }
     (widget_dir / "widget.json").write_text(json.dumps(manifest))
     result = carto.validate_item(str(widget_dir))
     assert isinstance(result, dict)
-    # Without src/ the widget cannot pass
     assert result.get("status") == "error"
+
+
+def test_validate_invalid_domain(carto, tmp_path):
+    widget_dir = tmp_path / "bad-domain"
+    widget_dir.mkdir()
+    manifest = {
+        "meta": {"id": "bad-domain", "name": "Bad Domain", "domain": "enterprise"},
+        "description": "Test.",
+        "tech_stack": {"language": "python", "dependencies": []},
+    }
+    (widget_dir / "widget.json").write_text(json.dumps(manifest))
+    result = carto.validate_item(str(widget_dir))
+    assert result.get("status") == "error"
+    assert "domain" in result.get("message", "").lower()

@@ -337,86 +337,48 @@ class Cartographer:
             try:
                 with open(manifest_path, 'r') as f:
                     data = json.load(f)
-                    # Support both root-level props (legacy) and nested 'meta' (standard)
-                    meta = data.get('meta', data)
-                    
-                    name = meta.get('name', 'Unknown Widget')
-                    tags = meta.get('tags', [])
-                    desc = data.get('description', '')
-                    
-                    # --- SMART DOMAIN INFERENCE ---
-                    domain = meta.get('domain', 'universal').lower()
-                    if domain == 'universal':
-                        tags_str = " ".join(tags).lower()
-                        if any(x in tags_str for x in ['react', 'ui', 'css', 'jsx', 'frontend']):
-                            domain = 'frontend'
-                        elif any(x in tags_str for x in ['python', 'api', 'sql', 'fastapi', 'backend']):
-                            domain = 'backend'
-                    # ------------------------------
+                meta = data.get('meta', data)
 
-                    widget_path = os.path.dirname(manifest_path)
-                    test_count = self._count_tests(widget_path)
-                    review_data = self._load_reviews(widget_path)
-                    
-                    # --- IMPLEMENTATION AWARE SEARCH ---
-                    # Index source code tokens to catch logic similarity
-                    code_tokens = ""
-                    total_lines = 0
-                    src_dir = os.path.join(widget_path, "src")
-                    if os.path.exists(src_dir):
-                        for src_file in glob.glob(os.path.join(src_dir, "*.*")):
-                            try:
-                                with open(src_file, 'r') as f:
-                                    content = f.read()
-                                    code_tokens += " " + self._normalize_code(content)
-                                    total_lines += len(content.splitlines())
-                            except: pass
-                    
-                    # Also index reviews for better search discovery
-                    review_tokens = " ".join(r.get("comment", "") for r in review_data["reviews"])
+                widget_path = os.path.dirname(manifest_path)
+                item_id = meta.get('id', os.path.basename(widget_path))
+                tags = meta.get('tags', [])
+                desc = data.get('description', '')
 
-                    # Index gpu_targets for search (e.g. "gfx1100" queries)
-                    gpu_targets = data.get('tech_stack', {}).get('gpu_targets', [])
-                    gpu_tokens = " ".join(gpu_targets)
+                # Compute stats at load time (not stored in manifest)
+                test_count = self._count_tests(widget_path)
+                review_data = self._load_reviews(widget_path)
+                implementation_hash = self._calculate_implementation_hash(widget_path)
 
-                    full_text = f"{name} {' '.join(tags)} {desc} {code_tokens} {review_tokens} {gpu_tokens}"
-                    implementation_hash = self._calculate_implementation_hash(widget_path)
-                    version = meta.get('version', '1.0.0')
+                total_lines = 0
+                src_dir = os.path.join(widget_path, "src")
+                if os.path.exists(src_dir):
+                    for src_file in glob.glob(os.path.join(src_dir, "*.*")):
+                        try:
+                            total_lines += len(open(src_file).read().splitlines())
+                        except Exception:
+                            pass
 
-                    # Check for regression (current version vs lifetime)
-                    regression = False
-                    if version in review_data["version_averages"]:
-                        current_v_avg = review_data["version_averages"][version]
-                        if review_data["rating"] - current_v_avg > 1.0:
-                            regression = True
-
-                    self.widgets.append({
-                        "id": meta.get('id', os.path.basename(os.path.dirname(manifest_path))),
-                        "name": name,
-                        "version": version,
-                        "type": "widget",
-                        "widget_type": meta.get('widget_type', 'library'),
-                        "path": widget_path,
-                        "tags": tags,
-                        "domain": domain,
-                        "description": desc,
-                        "language": data.get('tech_stack', {}).get('language', 'unknown'),
-                        "dependencies": data.get('tech_stack', {}).get('dependencies', []),
-                        "gpu_targets": gpu_targets,
-                        "depends_on": data.get('depends_on', []),
-                        "integration": data.get('integration_guide', {}),
-                        "test_count": test_count,
-                        "maturity": meta.get('maturity', 'unknown'),
-                        "implementation_hash": implementation_hash,
-                        "installed_at": self._get_installed_info(meta.get('id', os.path.basename(os.path.dirname(manifest_path)))),
-                        "is_installed": bool(self._get_installed_info(meta.get('id', os.path.basename(os.path.dirname(manifest_path))))),
-                        "install_count": self._get_install_count(meta.get('id', os.path.basename(os.path.dirname(manifest_path)))),
-                        "rating": review_data["rating"],
-                        "review_count": review_data["count"],
-                        "reviews": review_data["reviews"],
-                        "regression": regression,
-                        "lines_of_code": total_lines
-                    })
+                self.widgets.append({
+                    "id": item_id,
+                    "name": meta.get('name', 'Unknown Widget'),
+                    "version": meta.get('version', '1.0.0'),
+                    "type": "widget",
+                    "path": widget_path,
+                    "tags": tags,
+                    "domain": meta.get('domain', 'universal').lower(),
+                    "description": desc,
+                    "language": data.get('tech_stack', {}).get('language', 'unknown'),
+                    "dependencies": data.get('tech_stack', {}).get('dependencies', []),
+                    "implementation_hash": implementation_hash,
+                    "installed_at": self._get_installed_info(item_id),
+                    "is_installed": bool(self._get_installed_info(item_id)),
+                    "install_count": self._get_install_count(item_id),
+                    "rating": review_data["rating"],
+                    "review_count": review_data["count"],
+                    "reviews": review_data["reviews"],
+                    "test_count": test_count,
+                    "lines_of_code": total_lines,
+                })
             except Exception:
                 continue
 
@@ -541,16 +503,17 @@ class Cartographer:
             top_k=top_k,
         )
 
+    _VALID_DOMAINS = frozenset([
+        "backend", "data", "ml", "security", "infra", "frontend", "universal"
+    ])
+
     def validate_item(self, path):
-        """Perform a 'Gold Standard' check on an item (widget or blueprint) directory."""
-        # Track validation checklist
+        """Validate a Python widget directory before checkin."""
         checklist = []
         errors = []
 
         def check(description, passed, error_detail=None):
-            """Helper to track a validation check."""
-            status = "✅" if passed else "❌"
-            checklist.append(f"{status} {description}")
+            checklist.append(f"{'✅' if passed else '❌'} {description}")
             if not passed and error_detail:
                 errors.append(error_detail)
             return passed
@@ -560,275 +523,117 @@ class Cartographer:
             self._print_checklist(checklist, errors, failed=True)
             return {"status": "error", "message": f"Path not found: {path}"}
 
-        # 2. Manifest file exists
+        # 2. widget.json exists
         manifest_path = os.path.join(path, "widget.json")
-        item_type = "widget"
         if not os.path.exists(manifest_path):
-            manifest_path = os.path.join(path, "blueprint.json")
-            item_type = "blueprint"
+            if os.path.exists(os.path.join(path, "blueprint.json")):
+                return {"status": "error", "message": "Blueprint validation is not supported in v0.1."}
+            self._print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": "Missing widget.json"}
 
-        if item_type == "blueprint":
+        check("widget.json exists", True)
+
+        # 3. Valid JSON, no TODOs
+        try:
+            content = open(manifest_path).read()
+            data = json.loads(content)
+            check("widget.json is valid JSON", True)
+        except Exception as e:
+            check("widget.json is valid JSON", False, str(e))
+            self._print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": f"Invalid JSON: {e}"}
+
+        todo_count = content.count("[TODO]")
+        if not check("No [TODO] placeholders", todo_count == 0,
+                     f"Found {todo_count} [TODO] placeholder(s) — fill them in"):
+            self._print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": "Replace all [TODO] placeholders in widget.json"}
+
+        # 4. Required meta fields
+        meta = data.get("meta", {})
+        for field in ("id", "name", "domain"):
+            if not check(f"meta.{field} present", bool(meta.get(field)),
+                         f"Missing required field meta.{field}"):
+                self._print_checklist(checklist, errors, failed=True)
+                return {"status": "error", "message": f"meta.{field} is required"}
+
+        # 5. Domain is a known value
+        domain = meta.get("domain", "").lower()
+        valid_domains = sorted(self._VALID_DOMAINS)
+        if not check(f"meta.domain is valid ({domain})",
+                     domain in self._VALID_DOMAINS,
+                     f"'{domain}' is not a valid domain. Choose one of: {', '.join(valid_domains)}"):
             self._print_checklist(checklist, errors, failed=True)
             return {"status": "error",
-                    "message": "Blueprint validation is not supported in v0.1."}
+                    "message": f"Invalid domain '{domain}'. Valid domains: {', '.join(valid_domains)}"}
 
-        manifest_exists = os.path.exists(manifest_path)
-        if not check(f"{item_type}.json exists", manifest_exists, "Missing widget.json or blueprint.json"):
+        # 6. tech_stack
+        tech_stack = data.get("tech_stack", {})
+        if not check("tech_stack.language present", bool(tech_stack.get("language")),
+                     "Missing tech_stack.language"):
             self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "Missing widget.json or blueprint.json"}
+            return {"status": "error", "message": "Missing tech_stack.language"}
 
-        # 3. Valid JSON
-        try:
-            with open(manifest_path, 'r') as f:
-                content = f.read()
-            with open(manifest_path, 'r') as f:
-                data = json.load(f)
-            check(f"{item_type}.json is valid JSON", True)
-        except Exception as e:
-            check(f"{item_type}.json is valid JSON", False, f"Invalid JSON: {e}")
+        if not check("tech_stack.dependencies present", "dependencies" in tech_stack,
+                     "Missing tech_stack.dependencies (use [] if none)"):
             self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": f"Invalid JSON in manifest: {e}"}
+            return {"status": "error", "message": "Missing tech_stack.dependencies"}
 
-        # 4. No [TODO] tags
-        todo_count = content.count("[TODO]")
-        if not check(f"No [TODO] placeholders in {item_type}.json", todo_count == 0,
-                     f"Found {todo_count} [TODO] tag(s) - replace all placeholders"):
+        # 7. Required structure: src/, tests/, examples/
+        for folder in ("src", "tests", "examples"):
+            folder_path = os.path.join(path, folder)
+            ok = os.path.isdir(folder_path) and bool(os.listdir(folder_path))
+            if not check(f"{folder}/ exists and has files", ok,
+                         f"{folder}/ is missing or empty"):
+                self._print_checklist(checklist, errors, failed=True)
+                return {"status": "error", "message": f"{folder}/ is missing or empty"}
+
+        # 8. Test files follow naming convention
+        test_files = glob.glob(os.path.join(path, "tests", "test_*.py"))
+        if not check(f"Test files found ({len(test_files)})", len(test_files) > 0,
+                     "No test_*.py files found in tests/"):
             self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": "Placeholders detected! Replace all [TODO] tags in manifest"}
+            return {"status": "error", "message": "No test_*.py files found in tests/"}
 
-        # 5. Required folders exist and have content
-        src_ok = os.path.exists(os.path.join(path, "src")) and os.listdir(os.path.join(path, "src"))
-        check("src/ folder exists and has files", src_ok, "src/ folder is missing or empty")
-
-        examples_ok = os.path.exists(os.path.join(path, "examples")) and os.listdir(os.path.join(path, "examples"))
-        check("examples/ folder exists and has files", examples_ok, "examples/ folder is missing or empty")
-
-        # Blueprints don't require tests - they're wiring guides, not testable code
-        if item_type == "widget":
-            # Check for Project-level test indicators
-            project_test_indicators = ["Cargo.toml", "CMakeLists.txt", "Makefile", "pom.xml", "build.gradle", "go.mod", "package.json"]
-            has_project_file = any(os.path.exists(os.path.join(path, f)) for f in project_test_indicators)
-            # Check for C# projects (*.csproj)
-            has_csproj = len(glob.glob(os.path.join(path, "*.csproj"))) > 0
-
-            tests_dir_path = os.path.join(path, "tests")
-            tests_ok = (os.path.exists(tests_dir_path) and os.listdir(tests_dir_path)) or has_project_file or has_csproj
-            check("tests/ folder (or project build file) exists", tests_ok, "tests/ folder is missing/empty and no project build files found")
-
-            if not (src_ok and tests_ok and examples_ok):
-                self._print_checklist(checklist, errors, failed=True)
-                return {"status": "error", "message": "Required structure (src, tests, examples) is incomplete"}
-        else:
-            # Blueprint: just need src/ and examples/
-            check("Blueprints don't require tests/ (they're wiring guides)", True)
-            if not (src_ok and examples_ok):
-                self._print_checklist(checklist, errors, failed=True)
-                return {"status": "error", "message": "Required structure (src, examples) is incomplete for blueprint"}
-
-        # ... [Meta fields checks continue] ...
-
-
-        # 6. Required meta fields
-        meta = data.get("meta", {})
-        required_meta = ["id", "name", "domain"]
-        meta_ok = all(field in meta and meta[field] for field in required_meta)
-        missing_fields = [f for f in required_meta if f not in meta or not meta[f]]
-
-        if not check("Required meta fields present (id, name, domain)", meta_ok,
-                     f"Missing required field(s): {', '.join(missing_fields)}"):
-            self._print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": f"Manifest 'meta.{missing_fields[0]}' is required"}
-
-        # 6b. Canonical schema validation for widgets
-        if item_type == "widget":
-            # Check meta.type
-            has_type = meta.get("type") == "widget"
-            check("meta.type = 'widget'", has_type, "meta.type should be 'widget'")
-            
-            # Check tech_stack structure
-            tech_stack = data.get("tech_stack", {})
-            has_lang = "language" in tech_stack
-            has_lang_ver = "language_version" in tech_stack
-            has_deps = "dependencies" in tech_stack
-            check("tech_stack.language present", has_lang, "Missing tech_stack.language")
-            check("tech_stack.language_version present", has_lang_ver, "Missing tech_stack.language_version")
-            check("tech_stack.dependencies present", has_deps, "Missing tech_stack.dependencies")
-            
-            # Check integration_guide structure
-            guide = data.get("integration_guide", {})
-            has_usage = "usage" in guide
-            has_constraints = "constraints" in guide
-            check("integration_guide.usage present", has_usage, "Missing integration_guide.usage (use 'usage' not 'adaptation_notes')")
-            check("integration_guide.constraints present", has_constraints, "Missing integration_guide.constraints")
-            
-            # Check depends_on
-            has_depends = "depends_on" in data
-            check("depends_on array present", has_depends, "Missing depends_on array")
-
-
-        # 7. Blueprint-specific validation
-        if item_type == "blueprint":
-            # 7a. composed_of dependencies exist (handles both old and new format)
-            composed_of_raw = data.get("composed_of", [])
-            composed_ids = self._extract_composed_ids(composed_of_raw)
-            # Check each composed widget exists in library OR in local widgets/ subdirectory
-            local_widgets_dir = os.path.join(path, "widgets")
-            local_widget_ids = set()
-            if os.path.isdir(local_widgets_dir):
-                for wd in os.listdir(local_widgets_dir):
-                    wm = os.path.join(local_widgets_dir, wd, "widget.json")
-                    if os.path.exists(wm):
-                        try:
-                            with open(wm, 'r') as wf:
-                                local_widget_ids.add(json.load(wf).get("meta", {}).get("id", ""))
-                        except Exception:
-                            pass
-            missing_deps = []
-            for comp_id in composed_ids:
-                in_library = any(w['id'] == comp_id for w in self.widgets)
-                in_local = comp_id in local_widget_ids
-                if not in_library and not in_local:
-                    missing_deps.append(comp_id)
-
-            deps_ok = len(missing_deps) == 0
-            if not check(f"All composed_of widgets exist in library or local widgets/ ({len(composed_ids)} total)", deps_ok,
-                         f"Missing dependencies: {', '.join(missing_deps)}"):
-                self._print_checklist(checklist, errors, failed=True)
-                return {"status": "error", "message": f"Dependency error: Widget '{missing_deps[0]}' not found in library. Register it first!"}
-
-            # 7b. integration_guide structure validation
-            guide = data.get("integration_guide", {})
-            has_guide = bool(guide)
-            check("integration_guide present", has_guide, "Blueprints require an integration_guide section")
-
-            if has_guide:
-                has_usage = "usage" in guide
-                check("integration_guide.usage present", has_usage, "Missing integration_guide.usage")
-
-                has_wiring = "runtime_wiring" in guide
-                check("integration_guide.runtime_wiring present", has_wiring,
-                      "Missing integration_guide.runtime_wiring - blueprints need step-by-step wiring instructions")
-
-                if has_wiring:
-                    wiring = guide.get("runtime_wiring", {})
-                    has_steps = "steps" in wiring and len(wiring.get("steps", [])) > 0
-                    check("runtime_wiring.steps defined", has_steps,
-                          "Missing runtime_wiring.steps - add step-by-step widget instantiation guide")
-
-        # 8. Test files follow naming convention (widgets only - blueprints don't have tests)
-        test_files = []
-        if item_type == "widget":
-            # Python/JS/TS: test_*.py, test_*.js, test_*.ts
-            # Go: *_test.go
-            # Rust: *.rs in tests/ directory
-            test_files = glob.glob(os.path.join(path, "tests", "test_*.*"))
-            test_files += glob.glob(os.path.join(path, "tests", "*_test.go"))  # Go pattern
-            test_files += glob.glob(os.path.join(path, "tests", "*.rs"))  # Rust integration tests
-            test_files = list(set(test_files))  # Remove duplicates
-            if not check(f"Test files found ({len(test_files)} total)", len(test_files) > 0,
-                         "No test files found in tests/ directory"):
-                self._print_checklist(checklist, errors, failed=True)
-                return {"status": "error", "message": "No test files found in tests/"}
-
-        # 8.5 & 9. Language-specific dependency install + test execution
+        # 9. Install deps and run tests
         from languages import get_engine
+        language = tech_stack.get("language", "python").lower()
+        dependencies = tech_stack.get("dependencies", [])
+        engine = get_engine(language)
 
-        tests_passed = True
-        test_error = None
-        failed_test = "System"
-
-        if item_type == "widget":
-            language = data.get("tech_stack", {}).get("language", "python").lower()
-            dependencies = data.get("tech_stack", {}).get("dependencies", [])
-
-            # Validate required project files for compiled languages
-            if language == "go" and not os.path.exists(os.path.join(path, "go.mod")):
-                check("go.mod exists for Go widget", False,
-                      "Go widgets require a go.mod file. Run 'go mod init <module-name>' in widget directory.")
-                self._print_checklist(checklist, errors, failed=True)
-                return {"status": "error", "message": "Go widgets require a go.mod file. Add go.mod to your widget."}
-
-            if language == "rust" and not os.path.exists(os.path.join(path, "Cargo.toml")):
-                check("Cargo.toml exists for Rust widget", False,
-                      "Rust widgets require a Cargo.toml file. Run 'cargo init' in widget directory.")
-                self._print_checklist(checklist, errors, failed=True)
-                return {"status": "error", "message": "Rust widgets require a Cargo.toml file. Add Cargo.toml to your widget."}
-
-            engine = get_engine(language)
-            if engine is None:
-                print(f"   ⚠️ No engine for language '{language}' — skipping dep install and tests.")
-            else:
-                print(f"\n📦 Installing dependencies for {item_type}...")
-                try:
-                    engine.install_deps(path, dependencies)
-                    print("   ✅ Dependencies installed")
-                except Exception as e:
-                    print(f"   ⚠️ Warning: Failed to install some dependencies: {e}")
-
-                print(f"\n🧪 Running tests for {item_type}...")
-                result = engine.run_tests(path)
-                if not result["passed"]:
-                    tests_passed = False
-                    test_error = result.get("error", "Unknown error")
-
-                # Give JS engine a chance to clean up node_modules etc.
-                if hasattr(engine, "cleanup"):
-                    engine.cleanup(path)
-
-        if not check("All tests pass", tests_passed, f"Test failure in {failed_test}: {test_error}"):
+        if engine is None:
+            check(f"Language '{language}' recognised", False, f"Unknown language '{language}'")
             self._print_checklist(checklist, errors, failed=True)
-            # Include actual error output so AI agents can self-correct
-            error_detail = str(test_error or "Unknown error")[:3000]  # Cap at 3000 chars
-            return {
-                "status": "error",
-                "message": f"Smoke tests failed in {failed_test}. Fix errors before checkin.",
-                "failed_test": failed_test,
-                "test_output": error_detail
-            }
+            return {"status": "error", "message": f"Unknown language '{language}'"}
 
-        # 10. Maturity level validation (stable requires tests)
-        maturity = meta.get("maturity", "prototype")
-        if maturity == "stable":
-            has_tests = len(test_files) > 0
-            if not check("Maturity 'stable' requires passing tests", has_tests,
-                         "Cannot mark as 'stable' without tests - use 'beta' instead"):
-                self._print_checklist(checklist, errors, failed=True)
-                return {"status": "error", "message": "Widgets marked 'stable' must have tests. Change maturity to 'beta' or add tests."}
-        else:
-            check(f"Maturity level is '{maturity}'", True)
+        print(f"\n📦 Installing dependencies...")
+        try:
+            engine.install_deps(path, dependencies)
+            check("Dependencies installed", True)
+        except Exception as e:
+            check("Dependencies installed", False, str(e))
+            self._print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": f"Dependency install failed: {e}"}
 
-        # 11. Implementation Uniqueness (Warning only in validation, hard-blocked in register)
-        if item_type == "widget":
-            current_hash = self._calculate_implementation_hash(path)
-            exact_duplicate = next((w for w in self.widgets if w.get('implementation_hash') == current_hash), None)
-            check("Implementation is unique", exact_duplicate is None, 
-                  f"WARNING: Identical code exists in library: {exact_duplicate['id']}" if exact_duplicate else None)
-        else: # blueprint
-            current_components = set(self._extract_composed_ids(data.get("composed_of", [])))
-            exact_blueprint = next((w for w in self.widgets if w['type'] == 'blueprint' and set(self._extract_composed_ids(w.get('composed_of', []))) == current_components), None)
-            check("Blueprint composition is unique", exact_blueprint is None,
-                  f"WARNING: Blueprint with identical components exists: {exact_blueprint['id']}" if exact_blueprint else None)
+        print(f"\n🧪 Running tests...")
+        result = engine.run_tests(path)
+        test_error = result.get("error", "")
+        if not check("All tests pass", result["passed"], test_error):
+            self._print_checklist(checklist, errors, failed=True, test_output=test_error)
+            return {"status": "error", "message": "Tests failed. Fix before checkin.",
+                    "test_output": test_error[:3000]}
 
-        # 12. Changes detected (for existing items)
-        existing_item = next((w for w in self.widgets if w['id'] == meta.get('id')), None)
-        if existing_item:
-            current_hash = self._calculate_implementation_hash(path)
-            is_identical = False
-            if item_type == "widget":
-                lib_hash = existing_item.get('implementation_hash')
-                is_identical = (current_hash == lib_hash)
-            else: # blueprint
-                lib_hash = self._calculate_implementation_hash(existing_item['path'])
-                lib_components = set(self._extract_composed_ids(existing_item.get("composed_of", [])))
-                curr_components = set(self._extract_composed_ids(data.get("composed_of", [])))
-                is_identical = (current_hash == lib_hash and lib_components == curr_components)
-            
-            check("Changes detected vs library version", True, 
-                  "Note: Implementation is identical to the library version." if is_identical else None)
+        # 10. Uniqueness check
+        current_hash = self._calculate_implementation_hash(path)
+        duplicate = next((w for w in self.widgets
+                          if w.get("implementation_hash") == current_hash
+                          and w["id"] != meta.get("id")), None)
+        check("Implementation is unique",
+              duplicate is None,
+              f"Identical code already exists: {duplicate['id']}" if duplicate else None)
 
-        # Success!
         self._print_checklist(checklist, errors, failed=False)
-        return {"status": "success", "message": f"{item_type.capitalize()} meets the Gold Standard"}
+        return {"status": "success", "message": "Widget is valid"}
 
     def _print_checklist(self, checklist, errors, failed, test_output=None):
         """Print validation checklist with clear pass/fail status."""

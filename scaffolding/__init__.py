@@ -89,26 +89,14 @@ def create_widget(carto, item_id, language, name=None, domain="backend", tags=No
         module_name = "mod_" + module_name
 
     # Build widget.json
-    meta = {"id": item_id, "name": name, "version": "1.0.0", "type": "widget",
-            "domain": domain, "tags": tags, "maturity": "beta"}
-    if widget_type:
-        meta["widget_type"] = widget_type
+    meta = {"id": item_id, "name": name, "version": "1.0.0", "domain": domain, "tags": tags}
 
-    tech_stack = {"language": normalized_lang,
-                  "language_version": _LANG_VERSIONS.get(normalized_lang, ""),
-                  "dependencies": []}
-    if gpu_targets:
-        tech_stack["gpu_targets"] = gpu_targets
-    if normalized_lang in _COMPILER_DEFAULTS:
-        tech_stack["compiler"] = _COMPILER_DEFAULTS[normalized_lang]
+    tech_stack = {"language": normalized_lang, "dependencies": []}
 
     manifest = {
         "meta": meta,
-        "description": f"{name} widget",
+        "description": f"[TODO] Describe what {name} does",
         "tech_stack": tech_stack,
-        "integration_guide": {"usage": f"Import and use the {name} module from src/",
-                               "constraints": "None"},
-        "depends_on": [],
         "library_notes": _library_notes(normalized_lang),
     }
     with open(os.path.join(target_dir, "widget.json"), "w") as f:

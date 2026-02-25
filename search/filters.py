@@ -52,26 +52,20 @@ def format_results(scored_widgets: list[dict]) -> dict:
                 "path": inst_path, "relevance_score": score,
             })
         else:
-            display_name = res["name"]
-            if res.get("regression"):
-                display_name = f"⚠️ {res['name']} (REGRESSION IN {res['version']})"
             library.append({
                 "id": res["id"],
-                "name": display_name,
+                "name": res["name"],
                 "version": res["version"],
                 "description": res["description"],
                 "language": res.get("language", "unknown"),
                 "dependencies": res.get("dependencies", []),
                 "domain": res["domain"],
-                "maturity": res.get("maturity", "unknown"),
+                "tags": res.get("tags", []),
                 "rating": res.get("rating", 0),
                 "install_count": res.get("install_count", 0),
-                "tags": res.get("tags", []),
-                "relevance_score": score,
                 "test_count": res.get("test_count", 0),
                 "lines_of_code": res.get("lines_of_code", 0),
-                "widget_type": res.get("widget_type", "library"),
-                "gpu_targets": res.get("gpu_targets", []),
+                "relevance_score": score,
             })
 
     return {"installed": installed, "library": library}
