@@ -83,7 +83,7 @@ _CREDENTIAL_RE = re.compile(
 _ENVVAR_RE = re.compile(r'os\.getenv\(|os\.environ')
 
 _URL_RE = re.compile(
-    r'["\']https?://(?!(?:localhost|127\.0\.0\.1|example\.com|schemas?\.))[^"\']{8,}["\']'
+    r'["\']https?://(?!(?:localhost|127\.0\.0\.1|(?:[\w-]+\.)*example\.com|schemas?\.))[^"\']{8,}["\']'
 )
 
 _IP_RE = re.compile(r'["\'](?:\d{1,3}\.){3}\d{1,3}(?::\d+)?["\']')

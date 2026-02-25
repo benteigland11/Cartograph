@@ -130,34 +130,31 @@ def test_checkin_blocks_credential(carto_tmp, installed_widget):
 # Contamination: warnings + override
 # ---------------------------------------------------------------------------
 
-def test_checkin_warns_on_os_getenv(carto_tmp, installed_widget):
+def _add_getenv(installed_widget):
+    """Append a valid os.getenv call to the main src file."""
     src = os.path.join(installed_widget, "src")
-    py_files = [f for f in os.listdir(src) if f.endswith(".py")]
+    py_files = [f for f in os.listdir(src) if f.endswith(".py") and not f.startswith("__")]
     target = os.path.join(src, py_files[0])
     with open(target, "a") as f:
-        f.write('\ntimeout = int(os.getenv("TIMEOUT", "30"))\n')
+        f.write('\nimport os\n_TIMEOUT = int(os.getenv("TIMEOUT", "30"))\n')
+
+
+def test_checkin_warns_on_os_getenv(carto_tmp, installed_widget):
+    _add_getenv(installed_widget)
     result = carto_tmp.checkin(installed_widget, reason="Test")
     assert result["status"] == "warnings"
     assert any("getenv" in w for w in result["warnings"])
 
 
 def test_checkin_override_warnings_requires_reason(carto_tmp, installed_widget):
-    src = os.path.join(installed_widget, "src")
-    py_files = [f for f in os.listdir(src) if f.endswith(".py")]
-    target = os.path.join(src, py_files[0])
-    with open(target, "a") as f:
-        f.write('\ntimeout = int(os.getenv("TIMEOUT", "30"))\n')
+    _add_getenv(installed_widget)
     result = carto_tmp.checkin(installed_widget, reason="Test",
                                override_warnings=True, override_reason="")
     assert result["status"] == "error"
 
 
 def test_checkin_override_warnings_with_reason_succeeds(carto_tmp, installed_widget):
-    src = os.path.join(installed_widget, "src")
-    py_files = [f for f in os.listdir(src) if f.endswith(".py")]
-    target = os.path.join(src, py_files[0])
-    with open(target, "a") as f:
-        f.write('\ntimeout = int(os.getenv("TIMEOUT", "30"))\n')
+    _add_getenv(installed_widget)
     result = carto_tmp.checkin(
         installed_widget, reason="Configurable timeout",
         override_warnings=True,
@@ -169,11 +166,7 @@ def test_checkin_override_warnings_with_reason_succeeds(carto_tmp, installed_wid
 
 def test_checkin_override_reason_in_changelog(carto_tmp, installed_widget):
     widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
-    src = os.path.join(installed_widget, "src")
-    py_files = [f for f in os.listdir(src) if f.endswith(".py")]
-    target = os.path.join(src, py_files[0])
-    with open(target, "a") as f:
-        f.write('\ntimeout = int(os.getenv("TIMEOUT", "30"))\n')
+    _add_getenv(installed_widget)
     carto_tmp.checkin(
         installed_widget, reason="Configurable timeout",
         override_warnings=True,

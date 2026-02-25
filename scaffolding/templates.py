@@ -23,11 +23,17 @@ def python(target_dir, module_name, display_name, **_):
             f"def test_{module_name}_returns_value():\n"
             f"    assert {module_name}(42) == 42\n"
         )
-    with open(os.path.join(target_dir, "examples", "basic_usage.py"), "w") as f:
+    with open(os.path.join(target_dir, "examples", "example_usage.py"), "w") as f:
         f.write(
+            f'"""\n'
+            f"Example usage of {display_name}.\n\n"
+            f"This file must run cleanly with no external dependencies or network calls.\n"
+            f"Use fake/hardcoded data to demonstrate the widget's logic.\n"
+            f'"""\n'
             f"import sys, os\n"
             f"sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))\n"
             f"from {module_name} import {module_name}\n\n"
+            f"# [TODO] Replace with a realistic call using fake data\n"
             f'result = {module_name}("hello")\n'
             f'print(f"Result: {{result}}")\n'
         )

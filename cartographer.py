@@ -588,6 +588,32 @@ class Cartographer:
                 self._print_checklist(checklist, errors, failed=True)
                 return {"status": "error", "message": f"{folder}/ is missing or empty"}
 
+        # 7b. example_usage.py exists, has no TODOs, and runs cleanly
+        example_path = os.path.join(path, "examples", "example_usage.py")
+        if not check("examples/example_usage.py exists", os.path.exists(example_path),
+                     "Missing examples/example_usage.py"):
+            self._print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": "Missing examples/example_usage.py"}
+
+        example_content = open(example_path).read()
+        example_todos = example_content.count("[TODO]")
+        if not check("No [TODO] in example_usage.py", example_todos == 0,
+                     f"Found {example_todos} [TODO] placeholder(s) in example_usage.py — write real example code"):
+            self._print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": "Replace [TODO] placeholders in examples/example_usage.py"}
+
+        import subprocess
+        example_result = subprocess.run(
+            [sys.executable, "examples/example_usage.py"],
+            cwd=path, capture_output=True, text=True, timeout=15
+        )
+        example_ok = example_result.returncode == 0
+        example_err = (example_result.stderr or example_result.stdout)[:500]
+        if not check("example_usage.py runs cleanly", example_ok, example_err):
+            self._print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": "example_usage.py failed to run.",
+                    "test_output": example_err}
+
         # 8. Test files follow naming convention
         test_files = glob.glob(os.path.join(path, "tests", "test_*.py"))
         if not check(f"Test files found ({len(test_files)})", len(test_files) > 0,
