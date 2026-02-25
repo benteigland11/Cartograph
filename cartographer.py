@@ -1985,8 +1985,12 @@ path = "examples/basic_usage.rs"
                 self._print_checklist(checklist, errors, failed=True)
                 return {"status": "error", "message": "No test files found in tests/"}
 
-        # 8.5. Language-specific project file validation & dependency installation
-        js_temp_package_path = None  # Track temp package.json for cleanup after tests
+        # 8.5 & 9. Language-specific dependency install + test execution
+        from languages import get_engine
+
+        tests_passed = True
+        test_error = None
+        failed_test = "System"
 
         if item_type == "widget":
             language = data.get("tech_stack", {}).get("language", "python").lower()
@@ -2005,212 +2009,26 @@ path = "examples/basic_usage.rs"
                 self._print_checklist(checklist, errors, failed=True)
                 return {"status": "error", "message": "Rust widgets require a Cargo.toml file. Add Cargo.toml to your widget."}
 
-            print(f"\n📦 Installing dependencies for {item_type}...")
-
-            try:
-                if language == "python":
-                    # Install Python dependencies + pytest for test runner
-                    all_deps = list(dependencies) + ["pytest"]
-                    print(f"   Installing {len(all_deps)} Python package(s) (including pytest)...")
-                    for dep in all_deps:
-                        dep_name = dep if isinstance(dep, str) else dep.get("name", "")
-                        if dep_name:
-                            print(f"   - Installing {dep_name}...")
-                            subprocess.run([sys.executable, "-m", "pip", "install", "-q", dep_name],
-                                         capture_output=True, timeout=60)
-
-                elif language in ["javascript", "typescript"]:
-                    # Install JavaScript/TypeScript dependencies + vitest for test runner
-                    print(f"   Installing {len(dependencies)} npm package(s) (+ vitest for testing)...")
-
-                    # Create temporary package.json if it doesn't exist
-                    package_json_path = os.path.join(path, "package.json")
-
-                    if not os.path.exists(package_json_path):
-                        js_temp_package_path = package_json_path  # Track for cleanup after tests
-                        package_data = {
-                            "name": data.get("meta", {}).get("id", "widget"),
-                            "version": "1.0.0",
-                            "type": "module",
-                            "dependencies": {},
-                            "devDependencies": {
-                                "vitest": "^1.0.0"
-                            }
-                        }
-                        for dep in dependencies:
-                            dep_name = dep if isinstance(dep, str) else dep.get("name", "")
-                            dep_version = "*" if isinstance(dep, str) else dep.get("version", "*")
-                            if dep_name:
-                                package_data["dependencies"][dep_name] = dep_version
-
-                        with open(package_json_path, 'w') as f:
-                            json.dump(package_data, f, indent=2)
-                    else:
-                        # package.json exists - ensure vitest is available
-                        with open(package_json_path, 'r') as f:
-                            existing_pkg = json.load(f)
-                        dev_deps = existing_pkg.get("devDependencies", {})
-                        deps = existing_pkg.get("dependencies", {})
-                        if "vitest" not in dev_deps and "vitest" not in deps:
-                            # Add vitest temporarily
-                            existing_pkg.setdefault("devDependencies", {})["vitest"] = "^1.0.0"
-                            with open(package_json_path, 'w') as f:
-                                json.dump(existing_pkg, f, indent=2)
-
-                    # Run npm install
-                    subprocess.run(["npm", "install", "--silent"], capture_output=True, timeout=120, cwd=path)
-                    # NOTE: Cleanup happens AFTER tests run, not here
-
-                elif language == "go":
-                    # Go dependencies - go.mod is validated above, just run go mod tidy
-                    if dependencies:
-                        print(f"   Running go mod tidy for {len(dependencies)} Go package(s)...")
-                    subprocess.run(["go", "mod", "tidy"], capture_output=True, timeout=60, cwd=path)
-
-                # Rust dependencies are handled by Cargo.toml automatically (validated above)
-
-                print("   ✅ Dependencies installed")
-
-            except Exception as e:
-                print(f"   ⚠️ Warning: Failed to install some dependencies: {e}")
-                # Continue anyway - tests will fail if deps are critical
-
-        # 9. Run tests
-        print(f"\n🧪 Running tests for {item_type}...")
-        tests_passed = True
-        failed_test = "System"
-        test_error = None
-
-        # --- STRATEGY 1: Project Build Systems ---
-        if os.path.exists(os.path.join(path, "Cargo.toml")):
-            print("🦀 Found Cargo.toml - Running 'cargo test'...")
-            try:
-                res = subprocess.run(["cargo", "test"], capture_output=True, text=True, timeout=60, cwd=path)
-                if res.returncode != 0:
-                    tests_passed, test_error = False, res.stderr or res.stdout
-            except FileNotFoundError:
-                tests_passed, test_error = False, "Cargo not found. Install Rust toolchain."
-        
-        elif os.path.exists(os.path.join(path, "CMakeLists.txt")):
-            print("🛠️ Found CMakeLists.txt - Running 'cmake' and 'ctest'...")
-            try:
-                build_dir = os.path.join(path, "build_temp")
-                os.makedirs(build_dir, exist_ok=True)
-                # Configure
-                conf = subprocess.run(["cmake", ".."], capture_output=True, text=True, timeout=30, cwd=build_dir)
-                if conf.returncode == 0:
-                    # Build and Test
-                    test_res = subprocess.run(["ctest", "--output-on-failure"], capture_output=True, text=True, timeout=60, cwd=build_dir)
-                    if test_res.returncode != 0:
-                        tests_passed, test_error = False, test_res.stdout or test_res.stderr
-                else:
-                    tests_passed, test_error = False, f"CMake configuration failed: {conf.stderr}"
-                # Cleanup
-                shutil.rmtree(build_dir, ignore_errors=True)
-            except FileNotFoundError:
-                tests_passed, test_error = False, "CMake/CTest not found."
-
-        elif os.path.exists(os.path.join(path, "Makefile")):
-            print("📜 Found Makefile - Running 'make test'...")
-            try:
-                res = subprocess.run(["make", "test"], capture_output=True, text=True, timeout=60, cwd=path)
-                if res.returncode != 0:
-                    tests_passed, test_error = False, res.stderr or res.stdout
-            except FileNotFoundError:
-                tests_passed, test_error = False, "Make not found."
-
-        elif os.path.exists(os.path.join(path, "pom.xml")):
-            print("☕ Found pom.xml - Running 'mvn test'...")
-            try:
-                res = subprocess.run(["mvn", "test"], capture_output=True, text=True, timeout=120, cwd=path)
-                if res.returncode != 0:
-                    tests_passed, test_error = False, res.stderr or res.stdout
-            except FileNotFoundError:
-                tests_passed, test_error = False, "Maven (mvn) not found."
-
-        elif os.path.exists(os.path.join(path, "build.gradle")):
-            print("🐘 Found build.gradle - Running 'gradle test'...")
-            try:
-                res = subprocess.run(["gradle", "test"], capture_output=True, text=True, timeout=120, cwd=path)
-                if res.returncode != 0:
-                    tests_passed, test_error = False, res.stderr or res.stdout
-            except FileNotFoundError:
-                tests_passed, test_error = False, "Gradle not found."
-
-        elif len(glob.glob(os.path.join(path, "*.csproj"))) > 0:
-            print("💾 Found .csproj - Running 'dotnet test'...")
-            try:
-                res = subprocess.run(["dotnet", "test"], capture_output=True, text=True, timeout=120, cwd=path)
-                if res.returncode != 0:
-                    tests_passed, test_error = False, res.stderr or res.stdout
-            except FileNotFoundError:
-                tests_passed, test_error = False, ".NET SDK (dotnet) not found."
-
-        # --- STRATEGY 2: Fallback to File Runners ---
-        else:
-            # Collect all test files (multiple patterns)
-            test_files = glob.glob(os.path.join(path, "tests", "test_*.*"))
-            test_files += glob.glob(os.path.join(path, "tests", "*_test.go"))  # Go pattern
-            test_files += glob.glob(os.path.join(path, "tests", "*.rs"))  # Rust integration tests
-            test_files = list(set(test_files))  # Remove duplicates
-            if not test_files:
-                tests_passed, test_error = False, "No project build file found and no test files in tests/."
+            engine = get_engine(language)
+            if engine is None:
+                print(f"   ⚠️ No engine for language '{language}' — skipping dep install and tests.")
             else:
-                for t_file in test_files:
-                    test_name = os.path.basename(t_file)
-                    # Make path relative to widget directory since we're running from there
-                    rel_test_file = os.path.relpath(t_file, path)
+                print(f"\n📦 Installing dependencies for {item_type}...")
+                try:
+                    engine.install_deps(path, dependencies)
+                    print("   ✅ Dependencies installed")
+                except Exception as e:
+                    print(f"   ⚠️ Warning: Failed to install some dependencies: {e}")
 
-                    if t_file.endswith(".py"):
-                        try:
-                            # Run pytest from widget directory so tests can import from src/
-                            # PYTHONDONTWRITEBYTECODE=1 prevents __pycache__ pollution
-                            test_env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-                            res = subprocess.run([sys.executable, "-m", "pytest", rel_test_file], capture_output=True, text=True, timeout=30, cwd=path, env=test_env)
-                            if res.returncode != 0:
-                                tests_passed, failed_test, test_error = False, test_name, res.stderr or res.stdout
-                                break
-                        except Exception:
-                            res = subprocess.run([sys.executable, rel_test_file], capture_output=True, text=True, timeout=15, cwd=path, env=test_env)
-                            if res.returncode != 0:
-                                tests_passed, failed_test, test_error = False, test_name, res.stderr or res.stdout
-                                break
-                    elif t_file.endswith((".js", ".ts")):
-                        # (Existing vitest logic)
-                        widget_dir = path
-                        vitest_config_path = os.path.join(widget_dir, "vitest.config.temp.js")
-                        vitest_config = "export default { test: { include: ['tests/test_*.*'] } }"
-                        try:
-                            with open(vitest_config_path, 'w') as f: f.write(vitest_config)
-                            res = subprocess.run(["npx", "vitest", "run", "--config", "vitest.config.temp.js"], capture_output=True, text=True, timeout=60, cwd=widget_dir)
-                            if os.path.exists(vitest_config_path): os.remove(vitest_config_path)
-                            if res.returncode != 0:
-                                tests_passed, failed_test, test_error = False, test_name, res.stderr or res.stdout
-                                break
-                        except Exception as e:
-                            if os.path.exists(vitest_config_path): os.remove(vitest_config_path)
-                            tests_passed, failed_test, test_error = False, test_name, str(e)
-                            break
-                    elif t_file.endswith(".go"):
-                        try:
-                            res = subprocess.run(["go", "test", "./tests/..."], capture_output=True, text=True, timeout=30, cwd=path)
-                            if res.returncode != 0:
-                                tests_passed, failed_test, test_error = False, test_name, res.stderr or res.stdout
-                                break
-                        except FileNotFoundError:
-                            tests_passed, failed_test, test_error = False, test_name, "Go not found."
-                            break
-                    else:
-                        tests_passed, failed_test, test_error = False, test_name, f"Unsupported test extension: {os.path.splitext(t_file)[1]}"
-                        break
+                print(f"\n🧪 Running tests for {item_type}...")
+                result = engine.run_tests(path)
+                if not result["passed"]:
+                    tests_passed = False
+                    test_error = result.get("error", "Unknown error")
 
-        # Clean up temporary JS/TS files after tests complete
-        if js_temp_package_path and os.path.exists(js_temp_package_path):
-            os.remove(js_temp_package_path)
-        node_modules_path = os.path.join(path, "node_modules")
-        if os.path.exists(node_modules_path):
-            import shutil
-            shutil.rmtree(node_modules_path, ignore_errors=True)
+                # Give JS engine a chance to clean up node_modules etc.
+                if hasattr(engine, "cleanup"):
+                    engine.cleanup(path)
 
         if not check("All tests pass", tests_passed, f"Test failure in {failed_test}: {test_error}"):
             self._print_checklist(checklist, errors, failed=True)
