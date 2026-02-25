@@ -10,60 +10,50 @@ To add a new language:
 """
 
 from .python import PythonEngine
-from .javascript import JavaScriptEngine, TypeScriptEngine
-from .go import GoEngine
-from .rust import RustEngine
-from .cpp import CppEngine, CEngine
-from .dotnet import DotNetEngine
-from .jvm import MavenEngine, GradleEngine
 from .base import LanguageEngine
 
-_engines: dict[str, LanguageEngine] = {}
+# v0.1: only Python validation is supported.
+# Other language engine files exist but are not wired in yet.
+_PYTHON_ENGINE = PythonEngine()
 
-def _register(*engine_classes):
-    for cls in engine_classes:
-        instance = cls()
-        _engines[instance.name] = instance
+_V01_UNSUPPORTED = frozenset([
+    "javascript", "typescript", "js", "ts",
+    "go",
+    "rust",
+    "cpp", "c", "c++", "hip",
+    "csharp", "c#", "dotnet",
+    "java", "kotlin", "maven", "gradle",
+])
 
-_register(
-    PythonEngine,
-    JavaScriptEngine,
-    TypeScriptEngine,
-    GoEngine,
-    RustEngine,
-    CppEngine,
-    CEngine,
-    DotNetEngine,
-    MavenEngine,
-    GradleEngine,
-)
 
-# Aliases for common alternate spellings in widget.json
-_aliases = {
-    "js": "javascript",
-    "ts": "typescript",
-    "c++": "cpp",
-    "java": "java",
-    "kotlin": "kotlin",
-    "c#": "csharp",
-    "hip": "cpp",   # AMD HIP uses C++ toolchain
-}
+class _UnsupportedEngine(LanguageEngine):
+    """Placeholder returned for languages not yet validated in v0.1."""
+    def __init__(self, language: str):
+        self.name = language
+
+    def install_deps(self, path: str, dependencies: list) -> None:
+        pass
+
+    def run_tests(self, path: str) -> dict:
+        return {"passed": False,
+                "error": f"'{self.name}' validation is not supported in v0.1 — only Python widgets are validated."}
 
 
 def get_engine(language: str) -> LanguageEngine | None:
-    """
-    Return the engine for a language string, or None if unsupported.
-    Case-insensitive. Returns None rather than raising so callers can
-    decide how to handle unknown languages gracefully.
+    """Return the engine for a language string, or None if unknown.
+
+    v0.1: only Python returns a real engine. All other known languages
+    return an UnsupportedEngine stub so callers get a clear error instead
+    of a silent None.
     """
     key = language.lower().strip()
-    if key in _engines:
-        return _engines[key]
-    if key in _aliases:
-        return _engines.get(_aliases[key])
+    if key == "python":
+        return _PYTHON_ENGINE
+    if key in _V01_UNSUPPORTED:
+        return _UnsupportedEngine(key)
     return None
 
 
 def supported_languages() -> list[str]:
-    """Return all registered language names."""
-    return sorted(_engines.keys())
+    """Return languages with full validation support in this release."""
+    return ["python"]

@@ -106,6 +106,10 @@ def install(carto, widget_id, target_dir, version=None, visited=None, blueprint=
 
     is_blueprint = widget.get("type") == "blueprint"
 
+    if is_blueprint:
+        return {"status": "error",
+                "message": f"Blueprint install is not supported in v0.1. '{widget_id}' is a blueprint."}
+
     # --- Blueprint-targeted install: widget goes into blueprint's widgets/ dir ---
     if blueprint and not is_blueprint:
         blueprint_path = os.path.join(target_abs, "blueprints", blueprint)

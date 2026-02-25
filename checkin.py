@@ -90,8 +90,9 @@ def checkin_item(carto, path, differentiation="", update=True, reason="", versio
                         "message": f"A blueprint with identical components already exists: {exact['id']}"}
 
         search_query = f"{item_name} {' '.join(tags)}"
-        similar = [w for w in carto.search(search_query, domain_filter=domain, top_k=5)
-                   if w["type"] == item_type]
+        search_result = carto.search(search_query, domain_filter=domain, top_k=5)
+        candidates = search_result.get("library", []) + search_result.get("installed", [])
+        similar = [w for w in candidates if w.get("type", "widget") == item_type]
         high_similarity = [w for w in similar if w["relevance_score"] > 2.0]
         needs_review = len(high_similarity) > 0
 

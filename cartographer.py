@@ -521,15 +521,6 @@ class Cartographer:
         from inspector import log_registration
         return log_registration(self, widget_id, widget_name, similar_widgets,
                                 differentiation, needs_review, widget_path)
-    def review_pending_widgets(self):
-        from reviewer import review_pending_widgets
-        return review_pending_widgets(self)
-    def _approve_widget(self, widget):
-        from reviewer import _approve
-        return _approve(self, widget)
-    def _reject_widget(self, widget):
-        from reviewer import _reject
-        return _reject(widget)
     def create(self, item_id, language=None, name=None, domain="backend", tags=None,
                 target_dir=None, item_type="widget", composed_of=None, gpu_targets=None, widget_type=None):
         from scaffolding import create_widget, create_blueprint
@@ -575,6 +566,11 @@ class Cartographer:
         if not os.path.exists(manifest_path):
             manifest_path = os.path.join(path, "blueprint.json")
             item_type = "blueprint"
+
+        if item_type == "blueprint":
+            self._print_checklist(checklist, errors, failed=True)
+            return {"status": "error",
+                    "message": "Blueprint validation is not supported in v0.1."}
 
         manifest_exists = os.path.exists(manifest_path)
         if not check(f"{item_type}.json exists", manifest_exists, "Missing widget.json or blueprint.json"):
