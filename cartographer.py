@@ -17,16 +17,6 @@ import re
 import hashlib
 import datetime
 import difflib
-from rank_bm25 import BM25Okapi
-
-# --- OPTIONAL: Meilisearch backend ---
-try:
-    import meilisearch
-    MEILISEARCH_AVAILABLE = True
-except ImportError:
-    MEILISEARCH_AVAILABLE = False
-
-# --- CONFIGURATION ---
 # Determine where this script is located on disk
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -56,102 +46,21 @@ INSTALL_STATS_PATH = os.path.join(CARTOGRAPHER_DIR, "stats.json")
 DEFAULT_INSTALL_DIR = "cartographer"
 
 class Cartographer:
-    def __init__(self, library_path, blueprint_path=None, search_backend='bm25'):
+    def __init__(self, library_path, blueprint_path=None, search_backend='hybrid'):
         self.library_path = library_path
         self.blueprint_path = blueprint_path
         self.widgets = []
-        self.corpus = []
-        self.search_backend = search_backend
         self.install_stats = self._load_install_stats()
         self.installed_index = self._load_installed_index()
         self._load_library()
         if self.blueprint_path:
             self._load_blueprints()
 
-        # Initialize Meilisearch if requested
-        self._meili_client = None
-        self._meili_index = None
-        if search_backend == 'meilisearch':
-            self._init_meilisearch()
+        from search import get_backend
+        backend_name = 'hybrid' if search_backend == 'meilisearch' else search_backend
+        self._search_backend = get_backend(backend_name)
+        self._search_backend.build(self.widgets)
 
-    def _tokenize(self, text):
-        tokens = re.findall(r'\w+', text.lower())
-        synonym_map = {
-            "ai": ["llm", "model"],
-            "llm": ["ai", "model"],
-            "codefile": ["code", "file", "codefiles"],
-            "codefiles": ["code", "files", "codefile"],
-            "codefileservice": ["code", "file", "service"],
-            "creating": ["create", "creation"],
-            "creation": ["create", "creating"],
-            "workflow": ["blueprint"],
-            "blueprint": ["workflow"]
-        }
-        expanded = []
-        for token in tokens:
-            expanded.append(token)
-            expanded.extend(synonym_map.get(token, []))
-        return expanded
-
-    def _init_meilisearch(self):
-        """Initialize Meilisearch connection and sync widgets."""
-        if not MEILISEARCH_AVAILABLE:
-            print("Warning: Meilisearch not installed. Falling back to BM25.")
-            self.search_backend = 'bm25'
-            return
-
-        try:
-            self._meili_client = meilisearch.Client("http://localhost:7700")
-            self._meili_client.health()  # Check connection
-            self._meili_index = self._meili_client.index("cartographer_widgets")
-
-            # Sync widgets to Meilisearch
-            self._sync_to_meilisearch()
-        except Exception as e:
-            print(f"Warning: Meilisearch unavailable ({e}). Falling back to BM25.")
-            self.search_backend = 'bm25'
-
-    def _sync_to_meilisearch(self):
-        """Sync all widgets to Meilisearch index."""
-        if not self._meili_index or not self.widgets:
-            return
-
-        # Prepare documents for Meilisearch
-        docs = []
-        for i, widget in enumerate(self.widgets):
-            doc = {
-                "id": widget["id"],
-                "idx": i,  # Original index for result lookup
-                "name": widget.get("name", ""),
-                "description": widget.get("description", ""),
-                "tags": " ".join(widget.get("tags", [])),
-                "domain": widget.get("domain", ""),
-                "language": widget.get("language", "") if isinstance(widget.get("language"), str) else " ".join(widget.get("language", [])),
-                "type": widget.get("type", "widget"),
-            }
-            docs.append(doc)
-
-        # Index documents
-        task = self._meili_index.add_documents(docs)
-        self._wait_for_task(task.task_uid)
-
-        # Configure searchable fields
-        self._meili_index.update_searchable_attributes([
-            "name", "description", "tags", "id"
-        ])
-        self._meili_index.update_filterable_attributes([
-            "domain", "language", "type"
-        ])
-
-    def _wait_for_task(self, task_uid, timeout=30):
-        """Wait for Meilisearch task to complete."""
-        import time
-        start = time.time()
-        while time.time() - start < timeout:
-            task = self._meili_client.get_task(task_uid)
-            if task.status in ('succeeded', 'failed'):
-                return
-            time.sleep(0.1)
 
     def _normalize_code(self, code):
         """Strip comments and empty lines to focus on logic."""
@@ -508,7 +417,6 @@ class Cartographer:
                         "regression": regression,
                         "lines_of_code": total_lines
                     })
-                    self.corpus.append(self._tokenize(full_text))
             except Exception:
                 continue
 
@@ -599,226 +507,8 @@ class Cartographer:
                         "regression": regression,
                         "lines_of_code": total_lines
                     })
-                    self.corpus.append(self._tokenize(full_text))
             except Exception:
                 continue
-
-    def search(self, query, domain_filter=None, language_filter=None, type_filter=None, top_k=15):
-        if not self.widgets:
-            return {"installed": [], "library": []}
-
-        # Use Meilisearch if available and configured
-        if self.search_backend == 'meilisearch' and self._meili_index:
-            return self._search_meilisearch(query, domain_filter, language_filter, type_filter, top_k)
-
-        bm25 = BM25Okapi(self.corpus)
-        tokenized_query = self._tokenize(query)
-        scores = bm25.get_scores(tokenized_query)
-
-        results = []
-        for idx, score in enumerate(scores):
-            widget = self.widgets[idx]
-
-            # --- METADATA GATE ---
-            # Require query to match widget metadata (name/tags/description/id).
-            meta_text = f"{widget.get('id','')} {widget.get('name','')} {' '.join(widget.get('tags', []))} {widget.get('description','')}"
-            meta_tokens = self._tokenize(meta_text)
-            meta_match_tokens = set(tokenized_query) & set(meta_tokens)
-            meta_score = float(len(meta_match_tokens))
-            if query.lower() in widget.get('name', '').lower() or query.lower() in widget.get('id', '').lower():
-                meta_score += 2.0
-            if meta_score <= 0:
-                continue
-
-            # --- DOMAIN FILTER ---
-            if domain_filter and domain_filter != 'all':
-                # 'universal' widgets appear in both searches
-                if widget['domain'] != domain_filter and widget['domain'] != 'universal':
-                    continue
-
-            # --- LANGUAGE FILTER ---
-            if language_filter:
-                w_lang = widget.get('language', '')
-                filter_val = language_filter.lower()
-
-                # Normalize widget language to a set of strings
-                if isinstance(w_lang, list):
-                    w_langs = set(l.lower() for l in w_lang)
-                else:
-                    # Handle "Python" or "Python, Rust" or "Python/Rust"
-                    w_langs = set(l.strip().lower() for l in str(w_lang).replace(',', ' ').replace('/', ' ').split())
-
-                if filter_val not in w_langs:
-                    continue
-
-            # --- TYPE FILTER (widget vs blueprint) ---
-            if type_filter and type_filter != 'all':
-                if widget.get('type', 'widget') != type_filter:
-                    continue
-
-            final_score = score
-            
-            # --- HOTFIX: BOOST BEFORE DISCARDING ---
-            # Even if BM25 score is 0, if the query is a substring of the name, we want it!
-            if query.lower() in widget['name'].lower():
-                final_score += 2.0  # <--- This saves "Auth" matching "Authenticated"
-            
-            # Fallback for short queries/documents where BM25 might return 0
-            matching_tokens = set(tokenized_query) & set(self.corpus[idx])
-            if final_score <= 0 and matching_tokens:
-                final_score = float(len(matching_tokens))
-            
-            if final_score <= 0: continue
-            
-            # Tag matches
-            tag_matches = set(tokenized_query) & set(w.lower() for w in widget['tags'])
-            if tag_matches:
-                final_score += 1.5 * len(tag_matches)
-            
-            # Store raw widget + score for sorting
-            results.append({**widget, "relevance_score": round(final_score, 2)})
-
-        # Sort all results by relevance
-        sorted_results = sorted(results, key=lambda x: x['relevance_score'], reverse=True)[:top_k]
-
-        # Split into Context-Aware buckets
-        installed_matches = []
-        library_matches = []
-
-        for res in sorted_results:
-            if res.get('is_installed'):
-                # concise summary for installed
-                installed_info = res.get('installed_at', [])
-                # Handle list vs dict format for installed_info
-                if isinstance(installed_info, list) and installed_info:
-                    inst_path = installed_info[0].get('path') if isinstance(installed_info[0], dict) else installed_info[0]
-                else:
-                    inst_path = str(installed_info)
-
-                installed_matches.append({
-                    "id": res['id'],
-                    "name": res['name'],
-                    "version": res['version'],
-                    "path": inst_path,
-                    "relevance_score": res['relevance_score']
-                })
-            else:
-                # Lean detail for library discovery
-                # Exclude heavy fields: reviews, integration, path, implementation_hash, installed_at, is_installed, install_count
-                
-                # Check for regression to format name
-                display_name = res['name']
-                if res.get('regression'):
-                     display_name = f"⚠️ {res['name']} (REGRESSION IN {res['version']})"
-
-                library_matches.append({
-                    "id": res['id'],
-                    "name": display_name,
-                    "version": res['version'],
-                    "description": res['description'],
-                    "language": res.get('language', 'unknown'),
-                    "dependencies": res.get('dependencies', []),
-                    "domain": res['domain'],
-                    "maturity": res.get('maturity', 'unknown'),
-                    "rating": res.get('rating', 0),
-                    "install_count": res.get('install_count', 0),
-                    "tags": res.get('tags', []),
-                    "relevance_score": res['relevance_score'],
-                    "test_count": res.get('test_count', 0),
-                    "lines_of_code": res.get('lines_of_code', 0),
-                    "widget_type": res.get('widget_type', 'library'),
-                    "gpu_targets": res.get('gpu_targets', [])
-                })
-
-        return {
-            "installed": installed_matches,
-            "library": library_matches
-        }
-
-    def _search_meilisearch(self, query, domain_filter=None, language_filter=None, type_filter=None, top_k=15):
-        """Search using Meilisearch backend."""
-        # Build filter string
-        filters = []
-        if domain_filter and domain_filter != 'all':
-            filters.append(f'(domain = "{domain_filter}" OR domain = "universal")')
-        if language_filter:
-            filters.append(f'language = "{language_filter.lower()}"')
-        if type_filter and type_filter != 'all':
-            filters.append(f'type = "{type_filter}"')
-
-        search_params = {
-            'limit': top_k * 2,  # Get extra to account for post-filtering
-            'showRankingScore': True,
-        }
-        if filters:
-            search_params['filter'] = ' AND '.join(filters)
-
-        try:
-            results = self._meili_index.search(query, search_params)
-        except Exception:
-            # Filter might fail if attributes not indexed yet, try without
-            results = self._meili_index.search(query, {'limit': top_k * 2, 'showRankingScore': True})
-
-        # Convert hits to widget results
-        widget_results = []
-        for hit in results.get('hits', []):
-            idx = hit.get('idx')
-            if idx is None or idx >= len(self.widgets):
-                continue
-            widget = self.widgets[idx]
-            score = hit.get('_rankingScore', 0.5) * 10  # Scale to match BM25 range
-            widget_results.append({**widget, "relevance_score": round(score, 2)})
-
-        # Sort and limit
-        sorted_results = sorted(widget_results, key=lambda x: x['relevance_score'], reverse=True)[:top_k]
-
-        # Split into installed vs library (same logic as BM25 path)
-        installed_matches = []
-        library_matches = []
-
-        for res in sorted_results:
-            if res.get('is_installed'):
-                installed_info = res.get('installed_at', [])
-                if isinstance(installed_info, list) and installed_info:
-                    inst_path = installed_info[0].get('path') if isinstance(installed_info[0], dict) else installed_info[0]
-                else:
-                    inst_path = str(installed_info)
-
-                installed_matches.append({
-                    "id": res['id'],
-                    "name": res['name'],
-                    "version": res['version'],
-                    "path": inst_path,
-                    "relevance_score": res['relevance_score']
-                })
-            else:
-                display_name = res['name']
-                if res.get('regression'):
-                    display_name = f"⚠️ {res['name']} (REGRESSION IN {res['version']})"
-
-                library_matches.append({
-                    "id": res['id'],
-                    "name": display_name,
-                    "version": res['version'],
-                    "description": res['description'],
-                    "language": res.get('language', 'unknown'),
-                    "dependencies": res.get('dependencies', []),
-                    "domain": res['domain'],
-                    "maturity": res.get('maturity', 'unknown'),
-                    "rating": res.get('rating', 0),
-                    "install_count": res.get('install_count', 0),
-                    "tags": res.get('tags', []),
-                    "relevance_score": res['relevance_score'],
-                    "test_count": res.get('test_count', 0),
-                    "lines_of_code": res.get('lines_of_code', 0),
-                    "widget_type": res.get('widget_type', 'library'),
-                    "gpu_targets": res.get('gpu_targets', [])
-                })
-
-        return {
-            "installed": installed_matches,
-            "library": library_matches
-        }
 
     def list_popular(self, limit=10):
         from inspector import list_popular
@@ -849,6 +539,16 @@ class Cartographer:
         return create_widget(self, item_id, language=language, name=name, domain=domain,
                              tags=tags, target_dir=target_dir, gpu_targets=gpu_targets,
                              widget_type=widget_type)
+
+    def search(self, query, domain_filter=None, language_filter=None, type_filter=None, top_k=15):
+        """Search the widget library using hybrid BM25 + n-gram fuzzy matching."""
+        return self._search_backend.query(
+            query,
+            domain_filter=domain_filter,
+            language_filter=language_filter,
+            type_filter=type_filter,
+            top_k=top_k,
+        )
 
     def validate_item(self, path):
         """Perform a 'Gold Standard' check on an item (widget or blueprint) directory."""

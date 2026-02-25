@@ -20,7 +20,6 @@ def carto():
     return Cartographer(
         library_path=WIDGET_LIBRARY,
         blueprint_path=BLUEPRINTS,
-        search_backend="bm25",
     )
 
 

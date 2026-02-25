@@ -30,7 +30,7 @@ def test_search_finds_widget_by_description(carto):
 
 
 def test_search_no_results_for_garbage(carto):
-    result = carto.search("xyzzy_nonexistent_widget_abc123")
+    result = carto.search("xyzzy_qqqq_zzzzzzzzz_abc")
     assert result["library"] == []
     assert result["installed"] == []
 
