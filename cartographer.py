@@ -319,8 +319,8 @@ class Cartographer:
     def _load_library(self):
         """Scans the library, handles legacy schemas, and infers domains."""
         if not os.path.exists(self.library_path):
-            print(json.dumps({"error": f"Library path not found: {self.library_path}"}))
-            sys.exit(1)
+            print(f"Warning: Library path not found: {self.library_path}", file=sys.stderr)
+            return
 
         search_pattern = os.path.join(self.library_path, "**", "widget.json")
         found = [p for p in glob.glob(search_pattern, recursive=True) if "history" not in p]

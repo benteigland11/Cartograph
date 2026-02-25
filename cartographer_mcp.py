@@ -344,10 +344,6 @@ After checkin, the widget is available in the library for search and install."""
                     "type": "string",
                     "description": "Reason for the change - used in changelog (e.g., 'New widget: rate limiter with token bucket algorithm')"
                 },
-                "differentiation": {
-                    "type": "string",
-                    "description": "How this differs from similar items (helps with duplicate detection). Required if similar widgets exist."
-                },
                 "version_bump": {
                     "type": "string",
                     "enum": ["minor", "major", "patch"],
