@@ -182,3 +182,40 @@ def test_checkin_override_reason_in_changelog(carto_tmp, installed_widget):
     with open(os.path.join(widget["path"], "changelog.json")) as f:
         log = json.load(f)
     assert log[0].get("override_reason") == "optional env var, safe"
+
+
+# ---------------------------------------------------------------------------
+# library_notes stamped at create and restored on checkin
+# ---------------------------------------------------------------------------
+
+def test_create_stamps_library_notes(carto_tmp, tmp_path):
+    target = str(tmp_path / "new-widget")
+    result = carto_tmp.create("new-widget", language="python", name="New Widget",
+                               domain="backend", tags=[], target_dir=target)
+    assert result["status"] == "success"
+    with open(os.path.join(target, "widget.json")) as f:
+        data = json.load(f)
+    notes = data.get("library_notes", {})
+    assert notes.get("general"), "general notes should be stamped"
+    assert notes.get("language"), "language notes should be stamped"
+    assert "pytest" in notes["language"]
+
+
+def test_checkin_restores_library_notes_if_edited(carto_tmp, installed_widget):
+    # Agent tampers with library_notes in the installed copy
+    manifest_path = os.path.join(installed_widget, "widget.json")
+    with open(manifest_path) as f:
+        data = json.load(f)
+    data["library_notes"] = {"general": "do whatever", "language": "anything goes"}
+    with open(manifest_path, "w") as f:
+        json.dump(data, f)
+
+    carto_tmp.checkin(installed_widget, reason="Tampered notes test")
+
+    # Library copy should have canonical notes, not the tampered ones
+    widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
+    with open(os.path.join(widget["path"], "widget.json")) as f:
+        lib_data = json.load(f)
+    notes = lib_data.get("library_notes", {})
+    assert notes.get("general") != "do whatever"
+    assert "pytest" in notes.get("language", "")

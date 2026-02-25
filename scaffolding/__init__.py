@@ -14,6 +14,21 @@ from .templates import TEMPLATES
 
 DEFAULT_INSTALL_DIR = "cartographer"
 
+_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "library_config.json")
+
+def _library_notes(language: str) -> dict:
+    """Load general + language-specific notes from library_config.json."""
+    try:
+        with open(_CONFIG_PATH) as f:
+            cfg = json.load(f)
+    except Exception:
+        return {}
+    lang_notes = cfg.get("language_notes", {}).get(language.lower(), "")
+    return {
+        "general": cfg.get("general_notes", ""),
+        "language": lang_notes,
+    }
+
 _LANG_VERSIONS = {
     "python": ">=3.8",
     "javascript": ">=ES2020",
@@ -94,6 +109,7 @@ def create_widget(carto, item_id, language, name=None, domain="backend", tags=No
         "integration_guide": {"usage": f"Import and use the {name} module from src/",
                                "constraints": "None"},
         "depends_on": [],
+        "library_notes": _library_notes(normalized_lang),
     }
     with open(os.path.join(target_dir, "widget.json"), "w") as f:
         json.dump(manifest, f, indent=2)

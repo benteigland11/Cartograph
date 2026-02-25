@@ -30,6 +30,42 @@ import re
 import shutil
 import sys
 
+_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "library_config.json")
+
+
+def _canonical_library_notes(language: str) -> dict:
+    """Return the authoritative library_notes for a given language."""
+    try:
+        with open(_CONFIG_PATH) as f:
+            cfg = json.load(f)
+    except Exception:
+        return {}
+    return {
+        "general": cfg.get("general_notes", ""),
+        "language": cfg.get("language_notes", {}).get(language.lower(), ""),
+    }
+
+
+def _restore_library_notes(manifest_path: str) -> None:
+    """Overwrite library_notes in widget.json with the canonical version.
+
+    Called just before copying to the library so agents cannot drift or
+    remove the library-wide standards even if they edited widget.json.
+    """
+    try:
+        with open(manifest_path) as f:
+            data = json.load(f)
+        language = data.get("tech_stack", {}).get("language", "")
+        if isinstance(language, list):
+            language = language[0] if language else ""
+        canonical = _canonical_library_notes(language)
+        if canonical:
+            data["library_notes"] = canonical
+            with open(manifest_path, "w") as f:
+                json.dump(data, f, indent=2)
+    except Exception:
+        pass  # non-fatal — checkin proceeds
+
 
 # ---------------------------------------------------------------------------
 # Contamination scanner
@@ -244,6 +280,9 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
                 shutil.copytree(src, dst, ignore=ignore)
             else:
                 shutil.copy2(src, dst)
+
+    # --- Restore library_notes before copying (agent edits ignored) ---
+    _restore_library_notes(manifest_path)
 
     # --- Copy working copy → library (never move — leave source intact) ---
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache")

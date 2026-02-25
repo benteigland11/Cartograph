@@ -1,0 +1,13 @@
+{
+  "general_notes": "Single responsibility — one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. All dependencies must be declared in widget.json tech_stack.dependencies. Do not modify library_notes — it is managed by Cartographer and will be restored on checkin.",
+
+  "language_notes": {
+    "python": "Use pytest for all tests — no unittest. Type hints required on all public functions. No __init__.py in tests/. No if __name__ == '__main__' blocks in src/ files. Imports ordered: stdlib, third-party, local.",
+    "javascript": "Use vitest for all tests. ES modules only — no CommonJS require(). JSDoc type annotations on all exported functions. No global side effects at module load time.",
+    "typescript": "Use vitest for all tests. Strict mode enabled. No any types without explicit justification in a comment. Export types alongside implementations.",
+    "go": "Use the standard testing package. All exported functions must have godoc comments. No init() functions with side effects.",
+    "rust": "Use cargo test. Document all public items with ///. No unwrap() in library code — propagate errors with ?.",
+    "cpp": "Use CMake + Google Test. No raw owning pointers — use smart pointers. Header guards or #pragma once required.",
+    "c": "Use CMake + Unity test framework. No dynamic allocation without corresponding free. All functions documented with Doxygen comments."
+  }
+}
