@@ -1,5 +1,5 @@
 """
-Shared fixtures for Cartographer tests.
+Shared fixtures for Cartograph tests.
 
 All test data is generated in a session-scoped temp directory — no on-disk
 fixtures directory required.
@@ -10,12 +10,12 @@ import sys
 
 import pytest
 
-# Ensure the repo root is on the path
+# Ensure the repo root is on the path so 'cartograph' package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 # ---------------------------------------------------------------------------
-# Fixture widget/blueprint content
+# Fixture widget content
 # ---------------------------------------------------------------------------
 
 _HTTP_CLIENT_SRC = """\
@@ -226,7 +226,6 @@ def fixture_dir(tmp_path_factory):
     """Generate a complete test fixture tree and return its root path."""
     root = str(tmp_path_factory.mktemp("fixtures"))
     lib = os.path.join(root, "Widget_Library")
-    bp = os.path.join(root, "Blueprints")
 
     # --- Widgets ---
     _make_widget(
@@ -254,31 +253,6 @@ def fixture_dir(tmp_path_factory):
         _AUTH_MIDDLEWARE_TEST, _AUTH_MIDDLEWARE_EXAMPLE,
     )
 
-    # --- Blueprint ---
-    bp_dir = os.path.join(bp, "web-api-stack")
-    os.makedirs(os.path.join(bp_dir, "src"), exist_ok=True)
-    os.makedirs(os.path.join(bp_dir, "examples"), exist_ok=True)
-    blueprint_manifest = {
-        "meta": {
-            "id": "web-api-stack",
-            "name": "Web API Stack",
-            "version": "1.0.0",
-            "tags": ["api", "web", "stack"],
-            "domain": "backend",
-        },
-        "description": "A full web API stack combining HTTP client and auth.",
-        "composed_of": [
-            {"id": "http-client", "version": "1.2.0"},
-            {"id": "auth-middleware", "version": "1.0.0"},
-        ],
-    }
-    _write(os.path.join(bp_dir, "blueprint.json"),
-           json.dumps(blueprint_manifest, indent=2))
-    _write(os.path.join(bp_dir, "src", "WebApiStackAgent.py"),
-           "# Web API Stack orchestration agent\n")
-    _write(os.path.join(bp_dir, "examples", "basic_usage.md"),
-           "# Usage\nInstall and compose http-client + auth-middleware.\n")
-
     return root
 
 
@@ -288,18 +262,10 @@ def fixture_library(fixture_dir):
 
 
 @pytest.fixture(scope="session")
-def fixture_blueprints(fixture_dir):
-    return os.path.join(fixture_dir, "Blueprints")
-
-
-@pytest.fixture(scope="session")
-def carto(fixture_library, fixture_blueprints):
-    """A Cartographer instance loaded against the generated test fixtures."""
-    from cartographer import Cartographer
-    return Cartographer(
-        library_path=fixture_library,
-        blueprint_path=fixture_blueprints,
-    )
+def carto(fixture_library):
+    """A Cartograph instance loaded against the generated test fixtures."""
+    from cartograph import Cartograph
+    return Cartograph(library_path=fixture_library)
 
 
 @pytest.fixture(scope="session")

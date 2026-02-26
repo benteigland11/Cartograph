@@ -1,5 +1,5 @@
 """
-Search package for Cartographer.
+Search package for Cartograph.
 
 Default backend: hybrid (BM25 + n-gram).
 All backends are pure Python, zero external service dependencies.

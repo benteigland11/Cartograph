@@ -9,7 +9,7 @@ Final score = α * norm(bm25) + β * norm(ngram)
 
 Both score vectors are normalised to [0, 1] before combining so neither
 dominates by accident of scale. We weight n-gram slightly higher because
-Cartographer queries tend to be short and ID-like.
+Cartograph queries tend to be short and ID-like.
 
 Additionally, exact substring matches in name/id get a hard boost so that
 "auth" always surfaces "Auth Middleware" near the top regardless of corpus
@@ -52,10 +52,9 @@ class HybridBackend(SearchBackend):
         self._ngram.build(widgets)
 
     def query(self, query: str, domain_filter: str | None = None,
-              language_filter: str | None = None, type_filter: str | None = None,
-              top_k: int = 15) -> dict:
+              language_filter: str | None = None, top_k: int = 15) -> dict:
         if not self._widgets:
-            return {"installed": [], "library": []}
+            return {"results": []}
 
         bm25_raw  = self._bm25.score(query)
         ngram_raw = self._ngram.score(query)
@@ -76,7 +75,7 @@ class HybridBackend(SearchBackend):
             if combined <= 0:
                 continue
 
-            if not apply_filters(widget, domain_filter, language_filter, type_filter):
+            if not apply_filters(widget, domain_filter, language_filter):
                 continue
 
             scored.append({**widget, "relevance_score": round(combined, 4)})

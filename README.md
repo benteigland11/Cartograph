@@ -8,7 +8,7 @@ A widget library engine for AI agents. Search, install, create, validate, and ch
 pip install -r requirements.txt
 ```
 
-The engine expects a `Widget_Library/` and optional `Blueprints/` directory alongside it (or set `WIDGET_LIBRARY_PATH` / `BLUEPRINT_PATH` env vars).
+The engine expects a `Widget_Library/` directory alongside it (or set `WIDGET_LIBRARY_PATH` env var).
 
 ## Usage
 
@@ -53,7 +53,7 @@ validator.py           Widget validation against Gold Standards
 checkin.py             Push edits back to library (contamination scan, versioning)
 installer.py           Install/uninstall widgets into projects
 inspector.py           Inspect widgets, list popular
-scaffolding/           Widget/blueprint scaffolding (create)
+scaffolding/           Widget scaffolding (create)
 languages/             Per-language engines (test runners, validators)
 search/                Hybrid BM25 + n-gram search
 library_config.json    Domain definitions, language rules

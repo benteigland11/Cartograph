@@ -1,5 +1,5 @@
 """
-Tests for widget and blueprint scaffolding via create().
+Tests for widget scaffolding via create().
 create() returns {"status": "success", "path": ..., "item_id": ...}
 or {"status": "error", "message": ...}
 """
@@ -69,22 +69,6 @@ def test_create_widget_manifest_valid(carto_with_tempdir):
     # create() appends the language to the id (e.g. "manifest-widget-python")
     assert "manifest-widget" in meta.get("id", "")
     assert "tags" in meta
-
-
-def test_create_blueprint(carto_with_tempdir):
-    carto, tmp_path = carto_with_tempdir
-    target = str(tmp_path / "my-blueprint")
-    result = carto.create(
-        "my-blueprint",
-        name="My Blueprint",
-        domain="backend",
-        tags=["blueprint"],
-        target_dir=target,
-        item_type="blueprint",
-        composed_of=["http-client", "auth-middleware"],
-    )
-    assert result.get("status") == "success"
-    assert os.path.exists(os.path.join(target, "blueprint.json"))
 
 
 def test_create_duplicate_widget_errors(carto_with_tempdir):

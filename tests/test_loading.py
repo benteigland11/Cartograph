@@ -1,17 +1,11 @@
 """
-Tests for library and blueprint loading.
+Tests for library loading.
 """
 
 
 def test_widgets_loaded(carto):
     """Fixture library should load all three widgets."""
     assert len(carto.widgets) >= 3
-
-
-def test_blueprint_loaded(carto):
-    """Blueprint directory should load the web-api-stack blueprint."""
-    blueprints = [w for w in carto.widgets if w["type"] == "blueprint"]
-    assert any(b["id"] == "web-api-stack" for b in blueprints)
 
 
 def test_widget_fields_present(carto):

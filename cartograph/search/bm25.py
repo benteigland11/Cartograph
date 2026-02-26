@@ -76,8 +76,7 @@ class BM25Backend(SearchBackend):
             return [0.0] * len(self._widgets)
         return list(self._bm25.get_scores(_tokenize(query)))
 
-    def query(self, query, domain_filter=None, language_filter=None,
-              type_filter=None, top_k=15):
+    def query(self, query, domain_filter=None, language_filter=None, top_k=15):
         # This backend is used via score() in the hybrid; direct query() kept for standalone use
         from .filters import apply_filters, format_results
         scores = self.score(query)
@@ -87,7 +86,7 @@ class BM25Backend(SearchBackend):
             if score <= 0:
                 break
             w = self._widgets[idx]
-            if not apply_filters(w, domain_filter, language_filter, type_filter):
+            if not apply_filters(w, domain_filter, language_filter):
                 continue
             results.append({**w, "relevance_score": round(score, 4)})
             if len(results) >= top_k:

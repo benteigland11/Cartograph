@@ -7,9 +7,12 @@ language-specific rules, and implementation uniqueness before checkin.
 
 import glob
 import json
+import logging
 import os
 import subprocess
 import sys
+
+log = logging.getLogger("cartograph")
 
 
 VALID_DOMAINS = frozenset([
@@ -36,8 +39,6 @@ def validate_item(carto, path):
     # 2. widget.json exists
     manifest_path = os.path.join(path, "widget.json")
     if not os.path.exists(manifest_path):
-        if os.path.exists(os.path.join(path, "blueprint.json")):
-            return {"status": "error", "message": "Blueprint validation is not supported in v0.1."}
         _print_checklist(checklist, errors, failed=True)
         return {"status": "error", "message": "Missing widget.json"}
 
@@ -131,7 +132,7 @@ def validate_item(carto, path):
         return {"status": "error", "message": "No test_*.py files found in tests/"}
 
     # 9. Install deps and run tests
-    from languages import get_engine
+    from .languages import get_engine
     language = tech_stack.get("language", "python").lower()
     dependencies = tech_stack.get("dependencies", [])
     engine = get_engine(language)
@@ -141,7 +142,7 @@ def validate_item(carto, path):
         _print_checklist(checklist, errors, failed=True)
         return {"status": "error", "message": f"Unknown language '{language}'"}
 
-    print(f"\n🔍 Running language checks...")
+    log.debug("Running language checks...")
     lang_check = engine.validate_widget(path, dependencies)
     if not check("Language checks pass", lang_check["passed"],
                  lang_check.get("error", "")):
@@ -150,7 +151,7 @@ def validate_item(carto, path):
         return {"status": "error", "message": lang_check.get("error", "Language checks failed"),
                 "test_output": lang_check.get("error", "")}
 
-    print(f"\n📦 Installing dependencies...")
+    log.debug("Installing dependencies...")
     try:
         engine.install_deps(path, dependencies)
         check("Dependencies installed", True)
@@ -159,7 +160,7 @@ def validate_item(carto, path):
         _print_checklist(checklist, errors, failed=True)
         return {"status": "error", "message": f"Dependency install failed: {e}"}
 
-    print(f"\n🧪 Running tests...")
+    log.debug("Running tests...")
     result = engine.run_tests(path)
     test_error = result.get("error", "")
     if not check("All tests pass", result["passed"], test_error):
@@ -181,29 +182,12 @@ def validate_item(carto, path):
 
 
 def _print_checklist(checklist, errors, failed, test_output=None):
-    """Print validation checklist with clear pass/fail status."""
-    print("\n" + "=" * 60)
-    if failed:
-        print("❌ VALIDATION FAILED")
-    else:
-        print("✅ VALIDATION PASSED")
-    print("=" * 60)
-
+    """Log validation results."""
+    status = "FAILED" if failed else "PASSED"
+    log.info("Validation %s (%d checks)", status, len(checklist))
     for item in checklist:
-        print(f"  {item}")
-
-    if errors:
-        print("\n" + "-" * 60)
-        print("ERRORS:")
-        for i, error in enumerate(errors, 1):
-            print(f"  {i}. {error}")
-
+        log.debug("  %s", item)
+    for error in errors:
+        log.debug("  Error: %s", error)
     if test_output:
-        print("\n" + "-" * 60)
-        print("TEST OUTPUT:")
-        if len(test_output) > 500:
-            print(test_output[:500] + "\n... (output truncated)")
-        else:
-            print(test_output)
-
-    print("=" * 60 + "\n")
+        log.debug("  Test output: %s", test_output[:500])

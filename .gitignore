@@ -78,12 +78,11 @@ test_config.json
 test_llm.json
 model_profiles.json
 
-# Installed cartographer widgets (local only)
-cartographer/
+# Installed cartograph widgets (local only)
+# (not the cartograph/ package dir — that's tracked)
 
 # Library content — tracked separately, not part of the engine
 Widget_Library/
-Blueprints/
 
 # Failed / temp
 failed_widgets/
@@ -95,7 +94,7 @@ checkouts/
 
 # Hidden app dirs
 .agent/
-.cartographer/
+.cartograph/
 
 # IDE
 .idea/

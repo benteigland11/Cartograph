@@ -25,10 +25,13 @@ On override the reason is recorded in the changelog entry as an audit trail.
 import datetime
 import glob
 import json
+import logging
 import os
 import re
 import shutil
 import sys
+
+log = logging.getLogger("cartograph")
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "library_config.json")
 
@@ -196,7 +199,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     # --- Read manifest ---
     manifest_path = os.path.join(path, "widget.json")
     if not os.path.exists(manifest_path):
-        return {"status": "error", "message": "No widget.json found. Blueprint checkin not supported in v0.1."}
+        return {"status": "error", "message": "No widget.json found."}
 
     try:
         with open(manifest_path) as f:
@@ -214,8 +217,19 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     if val["status"] != "success":
         return val
 
-    # --- Contamination scan ---
+    # --- Check for outdated base version ---
     widget_record = next((w for w in carto.widgets if w["id"] == item_id), None)
+    if widget_record:
+        local_version = meta.get("version", "0.0.0")
+        library_version = widget_record.get("version", "0.0.0")
+        if local_version != library_version:
+            return {
+                "status": "error",
+                "message": f"Version conflict: local is v{local_version} but library is v{library_version}. "
+                           f"Install the latest version first, apply your changes, then checkin."
+            }
+
+    # --- Contamination scan ---
     scan = _scan_contamination(path, data.get("tech_stack", {}))
 
     if scan["blocks"]:
@@ -327,7 +341,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     diff = carto._diff_against_library(path, item_id) if is_update else None
 
     action = "updated" if is_update else "registered"
-    print(f"\n✅ Successfully {action} {item_id} → v{new_version}", file=sys.stderr)
+    log.info("Successfully %s %s → v%s", action, item_id, new_version)
 
     result = {
         "status": "success",
@@ -349,7 +363,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
 
 
 # ---------------------------------------------------------------------------
-# restore, add_review, compare_versions, compare_all_installed
+# restore, add_review, widget_status
 # ---------------------------------------------------------------------------
 
 def restore(carto, item_id, version, reason):
@@ -389,44 +403,30 @@ def restore(carto, item_id, version, reason):
     return result
 
 
-def add_review(carto, installed_path, rating, comment, author="AI"):
-    """
-    Add a review to a widget. Requires the local installed path as proof of use.
-    rating must be 1–5.
-    """
+def add_review(carto, widget_id, target_dir, score, comment=None):
+    """Add a review to a widget. Must be installed at target_dir/widget_id/."""
+    installed_path = os.path.join(target_dir, widget_id)
     if not os.path.exists(installed_path):
-        return {"status": "error", "message": "Rating requires a local installed path (proof of use)."}
+        return {"error": f"'{widget_id}' not found at {installed_path}. Install it first."}
 
-    manifest_path = os.path.join(installed_path, "widget.json")
-    if not os.path.exists(manifest_path):
-        return {"status": "error", "message": f"No widget.json at {installed_path}"}
-
-    try:
-        with open(manifest_path) as f:
-            local_data = json.load(f)
-        item_id = local_data["meta"]["id"]
-        version = local_data["meta"].get("version")
-    except Exception as e:
-        return {"status": "error", "message": f"Failed to read manifest: {e}"}
-
-    widget = next((w for w in carto.widgets if w["id"] == item_id), None)
+    widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
     if not widget:
-        return {"status": "error", "message": f"Widget '{item_id}' not found in library"}
+        return {"error": f"Widget '{widget_id}' not found in library."}
 
     try:
-        rating = float(rating)
-        if not (1 <= rating <= 5):
+        score = float(score)
+        if not (1 <= score <= 5):
             raise ValueError
     except (ValueError, TypeError):
-        return {"status": "error", "message": "Rating must be a number between 1 and 5"}
+        return {"error": "Score must be a number between 1 and 5."}
 
     review_entry = {
-        "author": author,
-        "rating": rating,
-        "comment": comment,
-        "version": version or widget.get("version", "unknown"),
+        "rating": score,
+        "version": widget.get("version", "unknown"),
         "timestamp": datetime.datetime.now().isoformat(),
     }
+    if comment:
+        review_entry["comment"] = comment
 
     review_path = os.path.join(widget["path"], "reviews.json")
     reviews_data = {"reviews": []}
@@ -441,89 +441,36 @@ def add_review(carto, installed_path, rating, comment, author="AI"):
     with open(review_path, "w") as f:
         json.dump(reviews_data, f, indent=2)
 
-    return {"status": "success", "message": f"Added {rating}★ review to {item_id}"}
+    return {"status": "success", "widget_id": widget_id, "score": score}
 
 
-def compare_versions(carto, item_id):
-    """Compare an installed widget's version and integrity to the library."""
-    widget = next((w for w in carto.widgets if w["id"] == item_id), None)
+def widget_status(carto, widget_id, target_dir):
+    """Check the status of an installed widget against the library."""
+    widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
     if not widget:
-        return {"status": "error", "message": f"'{item_id}' not found in library"}
+        return {"error": f"'{widget_id}' not found in library."}
 
-    installed_paths = carto._get_installed_info(item_id)
-    if not installed_paths:
-        return {"status": "not_installed", "library_version": widget.get("version", "current")}
-
-    if isinstance(installed_paths, list) and installed_paths:
-        installed_path = (installed_paths[0].get("path")
-                          if isinstance(installed_paths[0], dict) else installed_paths[0])
-    else:
-        installed_path = installed_paths
+    installed_path = os.path.join(target_dir, widget_id)
+    if not os.path.exists(installed_path):
+        return {"error": f"'{widget_id}' not found at {installed_path}."}
 
     try:
         with open(os.path.join(installed_path, "widget.json")) as f:
             installed_version = json.load(f).get("meta", {}).get("version", "unknown")
     except Exception as e:
-        return {"status": "error", "message": f"Failed to read installed manifest: {e}"}
+        return {"error": f"Failed to read installed manifest: {e}"}
 
-    library_version = widget.get("version", "current")
+    library_version = widget.get("version", "0.0.0")
     installed_hash = carto._calculate_implementation_hash(installed_path)
     library_hash = widget.get("implementation_hash")
 
-    if installed_version != library_version:
-        status = "outdated"
-    elif installed_hash != library_hash:
-        status = "modified"
-    else:
-        status = "clean"
+    outdated = installed_version != library_version
+    modified = installed_hash != library_hash
 
     return {
-        "status": status,
-        "item_id": item_id,
-        "name": widget.get("name"),
+        "widget_id": widget_id,
         "installed_version": installed_version,
         "library_version": library_version,
-    }
-
-
-def compare_all_installed(carto):
-    """Compare all installed widgets to their library versions."""
-    from cartographer import DEFAULT_INSTALL_DIR
-
-    if not os.path.exists(DEFAULT_INSTALL_DIR):
-        return {"status": "empty", "total_installed": 0}
-
-    clean, modified, outdated = [], [], []
-
-    widgets_dir = os.path.join(DEFAULT_INSTALL_DIR, "widgets")
-    if not os.path.exists(widgets_dir):
-        return {"status": "empty", "total_installed": 0}
-
-    for folder in os.listdir(widgets_dir):
-        mp = os.path.join(widgets_dir, folder, "widget.json")
-        if not os.path.exists(mp):
-            continue
-        try:
-            with open(mp) as f:
-                item_id = json.load(f).get("meta", {}).get("id")
-            if not item_id:
-                continue
-            res = compare_versions(carto, item_id)
-            bucket = {"id": item_id, "name": res.get("name"), "version": res.get("installed_version")}
-            if res["status"] == "clean":
-                clean.append(bucket)
-            elif res["status"] == "modified":
-                modified.append(bucket)
-            elif res["status"] == "outdated":
-                outdated.append({**bucket, "library_version": res["library_version"]})
-        except Exception:
-            pass
-
-    total = len(clean) + len(modified) + len(outdated)
-    return {
-        "status": "success",
-        "total_installed": total,
-        "clean": clean,
-        "modified": modified,
         "outdated": outdated,
+        "modified": modified,
     }

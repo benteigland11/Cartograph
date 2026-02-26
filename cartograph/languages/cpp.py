@@ -3,7 +3,7 @@
 import os
 import shutil
 
-from .base import LanguageEngine
+from .base import LanguageEngine, log
 
 
 class CppEngine(LanguageEngine):
@@ -21,7 +21,7 @@ class CppEngine(LanguageEngine):
         return self._fail("No CMakeLists.txt or Makefile found.")
 
     def _run_cmake(self, path: str) -> dict:
-        print("🛠️  Found CMakeLists.txt — running cmake + ctest...")
+        log.debug("Found CMakeLists.txt — running cmake + ctest...")
         build_dir = os.path.join(path, "build_temp")
         os.makedirs(build_dir, exist_ok=True)
         try:
@@ -40,7 +40,7 @@ class CppEngine(LanguageEngine):
             shutil.rmtree(build_dir, ignore_errors=True)
 
     def _run_make(self, path: str) -> dict:
-        print("📜 Found Makefile — running make test...")
+        log.debug("Found Makefile — running make test...")
         try:
             res = self._run(["make", "test"], cwd=path, timeout=60)
         except FileNotFoundError:

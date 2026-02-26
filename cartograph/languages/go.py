@@ -1,6 +1,6 @@
 """Go language engine — uses go mod tidy + go test."""
 
-from .base import LanguageEngine
+from .base import LanguageEngine, log
 
 
 class GoEngine(LanguageEngine):
@@ -8,7 +8,7 @@ class GoEngine(LanguageEngine):
 
     def install_deps(self, path: str, dependencies: list) -> None:
         if dependencies:
-            print(f"   Running go mod tidy for {len(dependencies)} Go package(s)...")
+            log.debug("Running go mod tidy for %d Go package(s)...", len(dependencies))
         self._run(["go", "mod", "tidy"], cwd=path, timeout=60)
 
     def run_tests(self, path: str) -> dict:

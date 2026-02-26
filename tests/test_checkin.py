@@ -20,9 +20,9 @@ def tmp_library(fixture_library, tmp_path):
 
 @pytest.fixture
 def carto_tmp(tmp_library):
-    """A Cartographer instance pointed at the writable library copy."""
-    from cartographer import Cartographer
-    return Cartographer(library_path=tmp_library)
+    """A Cartograph instance pointed at the writable library copy."""
+    from cartograph import Cartograph
+    return Cartograph(library_path=tmp_library)
 
 
 @pytest.fixture

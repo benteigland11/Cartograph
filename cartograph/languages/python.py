@@ -4,7 +4,7 @@ import glob
 import os
 import sys
 
-from .base import LanguageEngine
+from .base import LanguageEngine, log
 
 _COVERAGE_THRESHOLD = 80
 
@@ -41,7 +41,7 @@ class PythonEngine(LanguageEngine):
 
     def install_deps(self, path: str, dependencies: list) -> None:
         all_deps = list(dependencies) + ["pytest", "pytest-cov"]
-        print(f"   Installing {len(all_deps)} Python package(s)...")
+        log.debug("Installing %d Python package(s)...", len(all_deps))
         for dep in all_deps:
             dep_name = dep if isinstance(dep, str) else dep.get("name", "")
             if dep_name:

@@ -17,9 +17,12 @@ To add a new language engine:
   3. Register in languages/registry.py
 """
 
+import logging
 import os
 import re
 import subprocess
+
+log = logging.getLogger("cartograph")
 
 
 class LanguageEngine:

@@ -3,14 +3,14 @@
 import json
 import os
 
-from .base import LanguageEngine
+from .base import LanguageEngine, log
 
 
 class JavaScriptEngine(LanguageEngine):
     name = "javascript"
 
     def install_deps(self, path: str, dependencies: list) -> None:
-        print(f"   Installing {len(dependencies)} npm package(s) (+ vitest for testing)...")
+        log.debug("Installing %d npm package(s) (+ vitest for testing)...", len(dependencies))
         package_json_path = os.path.join(path, "package.json")
 
         if not os.path.exists(package_json_path):

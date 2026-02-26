@@ -2,7 +2,7 @@
 Language-specific file templates for widget scaffolding.
 
 Each function writes starter src/, tests/, and examples/ files for a given language.
-None of these need the Cartographer instance — they just write files to disk.
+None of these need the Cartograph instance — they just write files to disk.
 """
 
 import json

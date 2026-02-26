@@ -1,39 +1,77 @@
 """
 Tests for inspect and list_popular.
-list_popular returns {"top_assets": [...]}
 """
 import pytest
 
 
 def test_inspect_known_widget(carto):
     result = carto.inspect("http-client")
-    assert result is not None
-    assert result.get("id") == "http-client"
-    assert result.get("name") == "HTTP Client"
+    assert result["id"] == "http-client"
+    assert result["name"] == "HTTP Client"
 
 
 def test_inspect_unknown_widget(carto):
     result = carto.inspect("does-not-exist")
-    assert result is not None
     assert "error" in result
 
 
-def test_inspect_returns_version(carto):
+def test_inspect_returns_metadata(carto):
     result = carto.inspect("http-client")
     assert "version" in result
-    assert result["version"] == "1.2.0"
+    assert "description" in result
+    assert "language" in result
+    assert "domain" in result
+    assert "dependencies" in result
 
 
-def test_inspect_returns_tags(carto):
+def test_inspect_always_includes_examples(carto):
     result = carto.inspect("http-client")
-    assert "tags" in result
-    assert "http" in result["tags"]
+    assert "examples" in result
+    assert isinstance(result["examples"], dict)
 
 
-def test_inspect_blueprint(carto):
-    result = carto.inspect("web-api-stack")
-    assert result is not None
-    assert result.get("type") == "blueprint"
+def test_inspect_always_includes_rating(carto):
+    result = carto.inspect("http-client")
+    assert "rating" in result
+    assert "review_count" in result
+    assert isinstance(result["rating"], (int, float))
+    assert isinstance(result["review_count"], int)
+
+
+def test_inspect_always_includes_versions(carto):
+    result = carto.inspect("http-client")
+    assert "versions" in result
+    assert isinstance(result["versions"], list)
+    assert len(result["versions"]) <= 5
+
+
+def test_inspect_source_off_by_default(carto):
+    result = carto.inspect("http-client")
+    assert "source" not in result
+
+
+def test_inspect_source_when_requested(carto):
+    result = carto.inspect("http-client", show_source=True)
+    assert "source" in result
+    assert isinstance(result["source"], dict)
+
+
+def test_inspect_reviews_off_by_default(carto):
+    result = carto.inspect("http-client")
+    assert "reviews" not in result
+
+
+def test_inspect_reviews_when_requested(carto):
+    result = carto.inspect("http-client", show_reviews=True)
+    assert "reviews" in result
+    assert isinstance(result["reviews"], list)
+
+
+def test_inspect_no_internal_fields(carto):
+    result = carto.inspect("http-client")
+    assert "path" not in result
+    assert "stats" not in result
+    assert "hint" not in result
 
 
 def test_list_popular_returns_list(carto):
@@ -53,3 +91,5 @@ def test_list_popular_fields(carto):
     for item in result["top_assets"]:
         assert "id" in item
         assert "name" in item
+        assert "version" in item
+        assert "install_count" in item

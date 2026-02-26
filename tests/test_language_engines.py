@@ -2,8 +2,8 @@
 Tests for the language engine registry and individual engines.
 """
 import pytest
-from languages import get_engine, supported_languages
-from languages.base import LanguageEngine
+from cartograph.languages import get_engine, supported_languages
+from cartograph.languages.base import LanguageEngine
 
 
 def test_registry_returns_engine_for_python():
@@ -43,7 +43,7 @@ def test_unsupported_engine_returns_clear_error():
 
 
 def test_python_engine_run_tests_pass(tmp_path):
-    from languages.python import PythonEngine
+    from cartograph.languages.python import PythonEngine
     # Create a minimal passing widget
     src = tmp_path / "src"
     src.mkdir()
@@ -63,7 +63,7 @@ def test_python_engine_run_tests_pass(tmp_path):
 
 
 def test_python_engine_run_tests_fail(tmp_path):
-    from languages.python import PythonEngine
+    from cartograph.languages.python import PythonEngine
     tests = tmp_path / "tests"
     tests.mkdir()
     (tests / "test_broken.py").write_text(
@@ -77,7 +77,7 @@ def test_python_engine_run_tests_fail(tmp_path):
 
 
 def test_python_engine_no_tests(tmp_path):
-    from languages.python import PythonEngine
+    from cartograph.languages.python import PythonEngine
     (tmp_path / "tests").mkdir()
     engine = PythonEngine()
     result = engine.run_tests(str(tmp_path))

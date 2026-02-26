@@ -11,8 +11,7 @@ class SearchBackend:
         raise NotImplementedError
 
     def query(self, query: str, domain_filter: str | None = None,
-              language_filter: str | None = None, type_filter: str | None = None,
-              top_k: int = 15) -> list[dict]:
+              language_filter: str | None = None, top_k: int = 15) -> list[dict]:
         """
         Return a ranked list of widget dicts, each augmented with
         a 'relevance_score' key. Filtering is applied inside the backend
