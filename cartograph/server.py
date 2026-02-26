@@ -158,7 +158,7 @@ TOOLS = [
                     "type": "integer", "minimum": 1, "maximum": 5,
                     "description": "How easy was this to plug in? 1 = broken/unusable, 2 = needed heavy modification, 3 = needed some fixes, 4 = minor adjustments only, 5 = drop-in, worked as-is"
                 },
-                "comment": {"type": "string", "description": "Brief note on what you had to change or what didn't work (optional)"}
+                "comment": {"type": "string", "description": "One specific thing: what made integration easy, what you had to change, or what surprised you (optional)"}
             },
             "required": ["widget_id", "target", "score"]
         }
