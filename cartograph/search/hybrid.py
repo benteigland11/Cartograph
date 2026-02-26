@@ -32,10 +32,15 @@ _EXACT_BOOST = 0.30
 
 
 def _normalise(scores: list[float]) -> list[float]:
-    """Min-max normalise to [0, 1]. Returns zeros if all scores are equal."""
+    """Min-max normalise to [0, 1].
+
+    When all scores are equal (including the single-widget case), return
+    1.0 for any non-zero score so that the signal isn't silently discarded.
+    """
     lo, hi = min(scores), max(scores)
     if hi == lo:
-        return [0.0] * len(scores)
+        # Preserve the signal: non-zero scores → 1.0, true zeros stay 0.0
+        return [1.0 if s > 0 else 0.0 for s in scores]
     span = hi - lo
     return [(s - lo) / span for s in scores]
 
@@ -67,10 +72,13 @@ class HybridBackend(SearchBackend):
         for idx, widget in enumerate(self._widgets):
             combined = _ALPHA * bm25_norm[idx] + _BETA * ngram_norm[idx]
 
-            # Hard boost for exact substring in name or id
-            if (query_lower in widget.get("name", "").lower() or
-                    query_lower in widget.get("id", "").lower()):
-                combined += _EXACT_BOOST
+            # Hard boost for exact substring in name or id (per query term)
+            name_lower = widget.get("name", "").lower()
+            id_lower = widget.get("id", "").lower()
+            for term in query_lower.split():
+                if term in name_lower or term in id_lower:
+                    combined += _EXACT_BOOST
+                    break
 
             if combined <= 0:
                 continue
