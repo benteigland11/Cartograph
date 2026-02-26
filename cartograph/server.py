@@ -154,8 +154,11 @@ TOOLS = [
             "properties": {
                 "widget_id": {"type": "string"},
                 "target": {"type": "string", "description": "Absolute path to the project's cartograph directory"},
-                "score": {"type": "integer", "minimum": 1, "maximum": 5, "description": "1-5 rating"},
-                "comment": {"type": "string", "description": "What worked, what didn't (optional)"}
+                "score": {
+                    "type": "integer", "minimum": 1, "maximum": 5,
+                    "description": "How easy was this to plug in? 1 = broken/unusable, 2 = needed heavy modification, 3 = needed some fixes, 4 = minor adjustments only, 5 = drop-in, worked as-is"
+                },
+                "comment": {"type": "string", "description": "Brief note on what you had to change or what didn't work (optional)"}
             },
             "required": ["widget_id", "target", "score"]
         }
