@@ -174,7 +174,7 @@ TOOLS = [
                 "widget_id": {"type": "string", "description": "Widget ID (e.g., 'logic-retry-backoff'). Language suffix auto-appended."},
                 "language": {
                     "type": "string",
-                    "enum": ["python", "javascript", "typescript", "go", "rust", "hip", "cpp", "c"]
+                    "enum": ["python"]
                 },
                 "target": {"type": "string", "description": "Absolute path to the project's cartograph directory"}
             },
