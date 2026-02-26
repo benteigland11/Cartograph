@@ -181,11 +181,11 @@ def test_checkin_override_reason_in_changelog(carto_tmp, installed_widget):
 # ---------------------------------------------------------------------------
 
 def test_create_stamps_library_notes(carto_tmp, tmp_path):
-    target = str(tmp_path / "new-widget")
+    target = str(tmp_path)
     result = carto_tmp.create("new-widget", language="python", name="New Widget",
                                domain="backend", tags=[], target_dir=target)
     assert result["status"] == "success"
-    with open(os.path.join(target, "widget.json")) as f:
+    with open(os.path.join(result["path"], "widget.json")) as f:
         data = json.load(f)
     notes = data.get("library_notes", {})
     assert notes.get("general"), "general notes should be stamped"

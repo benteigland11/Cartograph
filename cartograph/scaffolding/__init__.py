@@ -69,14 +69,17 @@ def create_widget(carto, item_id, language, name=None, domain="backend", tags=No
             name_base = name_base[: -len(normalized_lang) - 1]
         name = name_base.replace("-", " ").title()
 
+    if not item_id.endswith(f"-{normalized_lang}"):
+        item_id = f"{item_id}-{normalized_lang}"
+
     if not target_dir:
-        target_dir = os.path.join(os.getcwd(), DEFAULT_INSTALL_DIR, item_id)
+        target_dir = os.path.join(os.getcwd(), DEFAULT_INSTALL_DIR)
+
+    # target_dir is the parent directory — append widget ID, same as install
+    target_dir = os.path.join(target_dir, item_id)
 
     if os.path.exists(target_dir):
         return {"status": "error", "message": f"Directory already exists: {target_dir}"}
-
-    if not item_id.endswith(f"-{normalized_lang}"):
-        item_id = f"{item_id}-{normalized_lang}"
 
     log.info("Creating widget '%s' (%s) in %s", item_id, language, target_dir)
 

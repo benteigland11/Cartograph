@@ -21,7 +21,7 @@ def _assert_scaffold(widget_dir, expected_paths):
 
 def test_create_python_widget(carto_with_tempdir):
     carto, tmp_path = carto_with_tempdir
-    target = str(tmp_path / "my-widget")
+    target = str(tmp_path)
     result = carto.create(
         "my-widget",
         language="python",
@@ -31,12 +31,13 @@ def test_create_python_widget(carto_with_tempdir):
         target_dir=target,
     )
     assert result.get("status") == "success"
-    _assert_scaffold(target, ["widget.json", "src", "tests", "examples"])
+    widget_dir = result["path"]
+    _assert_scaffold(widget_dir, ["widget.json", "src", "tests", "examples"])
 
 
 def test_create_javascript_widget(carto_with_tempdir):
     carto, tmp_path = carto_with_tempdir
-    target = str(tmp_path / "my-js-widget")
+    target = str(tmp_path)
     result = carto.create(
         "my-js-widget",
         language="javascript",
@@ -46,12 +47,13 @@ def test_create_javascript_widget(carto_with_tempdir):
         target_dir=target,
     )
     assert result.get("status") == "success"
-    _assert_scaffold(target, ["widget.json", "src", "tests"])
+    widget_dir = result["path"]
+    _assert_scaffold(widget_dir, ["widget.json", "src", "tests"])
 
 
 def test_create_widget_manifest_valid(carto_with_tempdir):
     carto, tmp_path = carto_with_tempdir
-    target = str(tmp_path / "manifest-widget")
+    target = str(tmp_path)
     result = carto.create(
         "manifest-widget",
         language="python",
@@ -61,7 +63,8 @@ def test_create_widget_manifest_valid(carto_with_tempdir):
         target_dir=target,
     )
     assert result.get("status") == "success"
-    manifest_path = os.path.join(target, "widget.json")
+    widget_dir = result["path"]
+    manifest_path = os.path.join(widget_dir, "widget.json")
     assert os.path.exists(manifest_path)
     with open(manifest_path) as f:
         data = json.load(f)
@@ -73,7 +76,7 @@ def test_create_widget_manifest_valid(carto_with_tempdir):
 
 def test_create_duplicate_widget_errors(carto_with_tempdir):
     carto, tmp_path = carto_with_tempdir
-    target = str(tmp_path / "dupe-widget")
+    target = str(tmp_path)
     carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=target)
     result = carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=target)
     assert result.get("status") == "error"

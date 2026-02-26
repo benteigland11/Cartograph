@@ -173,7 +173,7 @@ TOOLS = [
                     "type": "string",
                     "enum": ["python", "javascript", "typescript", "go", "rust", "hip", "cpp", "c"]
                 },
-                "target": {"type": "string", "description": "Absolute path for the widget directory"}
+                "target": {"type": "string", "description": "Absolute path to the project's cartograph directory"}
             },
             "required": ["widget_id", "language", "target"]
         }
