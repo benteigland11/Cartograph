@@ -336,6 +336,10 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     # --- Diff for AI review ---
     diff = carto._diff_against_library(path, item_id) if is_update else None
 
+    # --- Reload library so the in-memory index reflects the new widget ---
+    carto._load_library()
+    carto._search_backend.build(carto.widgets)
+
     action = "updated" if is_update else "registered"
     log.info("Successfully %s %s → v%s", action, item_id, new_version)
 
