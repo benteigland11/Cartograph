@@ -33,21 +33,10 @@ def _library_notes(language: str) -> dict:
     }
 
 _LANG_VERSIONS = {
-    "python": ">=3.8",
-    "javascript": ">=ES2020",
-    "typescript": ">=5.0",
-    "go": ">=1.21",
-    "rust": ">=1.70",
-    "hip": "ROCm 6.x+",
-    "cpp": "C++17",
-    "c": "C11",
+    "python": ">=3.10",
 }
 
-_COMPILER_DEFAULTS = {
-    "hip": "hipcc",
-    "cpp": "g++",
-    "c": "gcc",
-}
+_COMPILER_DEFAULTS = {}
 
 
 def create_widget(carto, item_id, language, name=None, domain="backend", tags=None,
