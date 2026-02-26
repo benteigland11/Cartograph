@@ -1,24 +1,8 @@
 # Cartograph
 
-A widget library engine for AI agents. Search, install, create, validate, and check in reusable code widgets across languages.
+A widget library MCP server for AI agents. Search, install, create, validate, and check in reusable code widgets across languages.
 
-## Install
-
-```bash
-pipx install /path/to/Cartograph
-```
-
-This installs the `cartograph` CLI into an isolated environment and makes it available globally.
-
-For development (editable install):
-
-```bash
-pip install -e /path/to/Cartograph
-```
-
-The engine expects a `Widget_Library/` directory alongside the repo (or set `WIDGET_LIBRARY_PATH` env var).
-
-## MCP Server
+## Quick Start
 
 ### Claude Code
 
@@ -27,7 +11,7 @@ Clone the repo and open it in Claude Code. The included `.mcp.json` registers th
 Or register manually:
 
 ```bash
-claude mcp add --transport stdio cartograph -- cartograph
+claude mcp add --transport stdio cartograph -- uvx --from /path/to/Cartograph cartograph
 ```
 
 ### Other MCP clients (Cursor, VS Code Copilot, Claude Desktop, etc.)
@@ -39,7 +23,8 @@ Add to the client's MCP config (location varies by client):
   "mcpServers": {
     "cartograph": {
       "type": "stdio",
-      "command": "cartograph"
+      "command": "uvx",
+      "args": ["--from", "/path/to/Cartograph", "cartograph"]
     }
   }
 }
@@ -47,24 +32,30 @@ Add to the client's MCP config (location varies by client):
 
 ### HTTP mode (remote / shared access)
 
-For running as a standalone server that multiple clients can connect to:
-
 ```bash
-pip install -e "/path/to/Cartograph[http]"
-cartograph --mode http --port 8742
+uvx --from "/path/to/Cartograph[http]" cartograph --mode http --port 8742
 ```
 
 Then point any MCP client at `http://localhost:8742/mcp/`.
 
 ## CLI
 
+Also usable as a standalone CLI:
+
 ```bash
-cartograph search "rate limiter"
-cartograph install auth-middleware-python --target ./cartograph
-cartograph create my-widget --language python --target ./widgets
-cartograph validate ./widgets/my-widget/
-cartograph checkin ./widgets/my-widget/ --reason "Initial release"
+uvx --from /path/to/Cartograph cartograph search "rate limiter"
+uvx --from /path/to/Cartograph cartograph install auth-middleware-python --target ./cartograph
+uvx --from /path/to/Cartograph cartograph create my-widget --language python --target ./widgets
 ```
+
+## Development
+
+```bash
+uv pip install -e /path/to/Cartograph
+pytest
+```
+
+The engine expects a `Widget_Library/` directory alongside the repo (or set `WIDGET_LIBRARY_PATH` env var).
 
 ## Architecture
 
@@ -82,14 +73,8 @@ cartograph/
 tests/               pytest suite
 ```
 
-## v0.1 scope
+## Status
 
 - Python widgets fully supported (create, validate, test, checkin)
 - Other languages scaffold but validation/testing is stubbed
 - Search is local (BM25 + n-gram fuzzy matching)
-
-## Tests
-
-```bash
-pytest
-```
