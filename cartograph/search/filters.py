@@ -41,6 +41,7 @@ def format_results(scored_widgets: list[dict]) -> dict:
             "domain": res["domain"],
             "dependencies": res.get("dependencies", []),
             "rating": res.get("rating", 0),
+            "trend": res.get("trend"),
             "install_count": res.get("install_count", 0),
             "relevance_score": res["relevance_score"],
         })

@@ -202,14 +202,14 @@ class Cartograph:
         """Load reviews from reviews.json and calculate average rating."""
         review_path = os.path.join(item_path, "reviews.json")
         if not os.path.exists(review_path):
-            return {"rating": 0, "count": 0, "reviews": [], "version_averages": {}}
+            return {"rating": 0, "count": 0, "trend": None, "reviews": [], "version_averages": {}}
         
         try:
             with open(review_path, 'r') as f:
                 data = json.load(f)
                 reviews = data.get("reviews", [])
                 if not reviews:
-                    return {"rating": 0, "count": 0, "reviews": [], "version_averages": {}}
+                    return {"rating": 0, "count": 0, "trend": None, "reviews": [], "version_averages": {}}
                 
                 total_score = sum(r.get("rating", 0) for r in reviews)
                 avg_rating = round(total_score / len(reviews), 1)
@@ -222,15 +222,31 @@ class Cartograph:
                     version_ratings[v].append(r.get("rating", 0))
                 
                 v_averages = {v: sum(rs)/len(rs) for v, rs in version_ratings.items()}
-                
+
+                # Trend: compare latest version's average to lifetime
+                # Need at least 2 versions with reviews to show a trend
+                if len(v_averages) >= 2:
+                    # Find the latest version by semver-ish sort
+                    latest_v = sorted(v_averages.keys())[-1]
+                    latest_avg = v_averages[latest_v]
+                    if latest_avg > avg_rating + 0.3:
+                        trend = "up"
+                    elif latest_avg < avg_rating - 0.3:
+                        trend = "down"
+                    else:
+                        trend = "stable"
+                else:
+                    trend = None  # not enough data
+
                 return {
                     "rating": avg_rating,
                     "count": len(reviews),
+                    "trend": trend,
                     "reviews": reviews,
                     "version_averages": v_averages
                 }
         except (OSError, json.JSONDecodeError, KeyError):
-            return {"rating": 0, "count": 0, "reviews": [], "version_averages": {}}
+            return {"rating": 0, "count": 0, "trend": None, "reviews": [], "version_averages": {}}
 
     def _load_install_stats(self):
         """Load install counts from stats.json."""
@@ -352,6 +368,7 @@ class Cartograph:
                     review_data = {
                         "rating": cached["rating"],
                         "count": cached["review_count"],
+                        "trend": cached.get("trend"),
                         "reviews": cached.get("reviews", []),
                         "version_averages": cached.get("version_averages", {}),
                     }
@@ -379,6 +396,7 @@ class Cartograph:
                         "lines_of_code": total_lines,
                         "rating": review_data["rating"],
                         "review_count": review_data["count"],
+                        "trend": review_data.get("trend"),
                         "reviews": review_data["reviews"],
                         "version_averages": review_data.get("version_averages", {}),
                     }
@@ -399,6 +417,7 @@ class Cartograph:
                     "install_count": self._get_install_count(item_id),
                     "rating": review_data["rating"],
                     "review_count": review_data["count"],
+                    "trend": review_data.get("trend"),
                     "reviews": review_data["reviews"],
                     "test_count": test_count,
                     "lines_of_code": total_lines,
