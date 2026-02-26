@@ -201,6 +201,14 @@ TOOLS = [
                     "type": "string",
                     "enum": ["minor", "major", "patch"],
                     "description": "How to bump version on update (default: minor). Ignored on first checkin."
+                },
+                "override_warnings": {
+                    "type": "boolean",
+                    "description": "Set to true to proceed despite warnings (e.g., possible credentials in tests). Requires override_reason."
+                },
+                "override_reason": {
+                    "type": "string",
+                    "description": "Explanation for why warnings are being overridden (e.g., 'credentials are fake test fixtures')."
                 }
             },
             "required": ["path", "reason"]
@@ -260,7 +268,9 @@ async def call_tool(name: str, arguments: dict):
             result = get_carto().checkin(
                 path=arguments["path"],
                 reason=arguments["reason"],
-                version_bump=arguments.get("version_bump", "minor")
+                version_bump=arguments.get("version_bump", "minor"),
+                override_warnings=arguments.get("override_warnings", False),
+                override_reason=arguments.get("override_reason"),
             )
 
         elif name == "cartograph_status":
