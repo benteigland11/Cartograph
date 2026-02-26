@@ -134,11 +134,13 @@ def _scan_contamination(path: str, widget: dict) -> dict:
         for line_no, line in enumerate(code.splitlines(), 1):
             loc = f"{rel}:{line_no}"
 
-            if _ABS_PATH_RE.search(line):
-                blocks.append(f"Absolute path in {loc}: {line.strip()}")
+            # Hard blocks only apply to src/ — tests need fake paths and credentials
+            if fpath in src_files:
+                if _ABS_PATH_RE.search(line):
+                    blocks.append(f"Absolute path in {loc}: {line.strip()}")
 
-            if _CREDENTIAL_RE.search(line):
-                blocks.append(f"Possible credential in {loc}: {line.strip()}")
+                if _CREDENTIAL_RE.search(line):
+                    blocks.append(f"Possible credential in {loc}: {line.strip()}")
 
         for m in _ENVVAR_RE.finditer(code):
             line_no = code[:m.start()].count("\n") + 1
