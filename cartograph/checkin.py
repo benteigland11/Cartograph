@@ -93,16 +93,7 @@ _IP_RE = re.compile(r'["\'](?:\d{1,3}\.){3}\d{1,3}(?::\d+)?["\']')
 
 _IMPORT_RE = re.compile(r'^\s*(?:import|from)\s+([\w.]+)', re.MULTILINE)
 
-_STDLIB = frozenset([
-    "__future__", "abc", "ast", "asyncio", "base64", "collections", "contextlib", "copy",
-    "csv", "datetime", "enum", "functools", "glob", "hashlib", "html",
-    "http", "importlib", "inspect", "io", "itertools", "json", "logging",
-    "math", "operator", "os", "pathlib", "pickle", "platform", "pprint",
-    "queue", "random", "re", "shutil", "signal", "socket", "sqlite3",
-    "string", "struct", "subprocess", "sys", "tempfile", "threading",
-    "time", "traceback", "typing", "unittest", "urllib", "uuid", "warnings",
-    "weakref", "xml", "zipfile",
-])
+_STDLIB = sys.stdlib_module_names  # complete, maintained by Python itself (3.10+)
 
 
 def _scan_contamination(path: str, widget: dict) -> dict:
