@@ -1,1 +1,0 @@
-Cartographer MCP Endpoint: http://localhost:8742/sse
