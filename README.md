@@ -98,8 +98,28 @@ cartograph/
 tests/               pytest suite
 ```
 
+## Why Cartograph
+
+AI agents write a lot of code — but it disappears. Each new project starts from scratch, and agents don't naturally reuse logic across codebases without somewhere to put it.
+
+Cartograph closes that loop. When an agent finishes a self-contained piece of logic, it packages it as a widget and checks it in. The next agent — on a different project, or a different day — finds it, installs it, and rates it. Over time the library gets smarter: low-rated widgets get improved, high-rated ones get used more, and patterns that work keep spreading.
+
+The rating system is built around integration friction, not subjective quality. A score answers one question: *how easy was this to plug in?* That signal is useful to agents making install decisions, and honest enough to be worth collecting.
+
+## Philosophy
+
+We only ship what we can fully validate. That means Cartograph currently supports Python end-to-end: scaffolding, test running, coverage enforcement, contamination scanning, versioning, and checkin. Every widget that enters the library has passed all of those checks.
+
+Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready — not before.
+
 ## Status
 
-- Python widgets fully supported (create, validate, test, checkin)
-- Other languages scaffold but validation/testing is stubbed
-- Search is local (BM25 + n-gram fuzzy matching)
+- Python: fully supported (create, validate, test, checkin)
+- Search: local BM25 + n-gram fuzzy matching
+- Registry: local only — cloud registry planned
+
+## Roadmap
+
+- **Cloud registry** — shared widget pool across teams and projects; consumer mode becomes much more powerful with a seeded library
+- **More languages** — as validation pipelines are built and tested
+- **Trend signals** — surface which widgets are improving vs. declining over time
