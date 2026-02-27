@@ -21,7 +21,7 @@ Supporting a language means owning its full validation pipeline, not just genera
 Install once:
 
 ```bash
-pip install cartograph
+pip install cartograph-mcp
 ```
 
 Then register with your AI CLI:

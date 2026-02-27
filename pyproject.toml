@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cartograph"
+name = "cartograph-mcp"
 version = "0.1.0"
 description = "Widget library manager for AI agents — MCP server + CLI"
 readme = "README.md"
