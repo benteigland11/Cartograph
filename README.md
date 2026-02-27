@@ -21,7 +21,17 @@ claude mcp add --scope user cartograph -- cartograph
 Or just open this repo in Claude Code — the included `.mcp.json` registers it automatically.
 
 Then ask your agent: **"Set up Cartograph instructions for this project."**
-It will fetch the right instructions from the MCP and add them to your project's instruction file.
+It will call `cartograph_setup` and add the right instructions to your project's instruction file.
+
+Choose a mode based on how you want your agent to behave:
+
+| Mode | Who it's for | What it does |
+|---|---|---|
+| `consumer` | Teams pulling from a shared library | Search before writing. Install and rate. No widget authoring. |
+| `developer` | Default for local projects | Search first + package reusable logic when you're done. |
+| `maintainer` | Dedicated library agent | Audit existing widgets, improve low-rated ones, create new ones. |
+
+Example prompt: **"Set up Cartograph in developer mode."**
 
 ### Codex
 
@@ -48,6 +58,7 @@ Add to the client's MCP config:
     }
   }
 }
+```
 
 ## CLI
 

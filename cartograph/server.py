@@ -221,6 +221,36 @@ TOOLS = [
             "required": ["path", "reason"]
         }
     ),
+
+    # -- Setup --
+    Tool(
+        name="cartograph_setup",
+        description=(
+            "Get Cartograph setup instructions for your project. "
+            "Call this once per project to get the text to add to your instruction file "
+            "(CLAUDE.md, AGENTS.md, GEMINI.md, etc.).\n\n"
+            "Modes:\n"
+            "  consumer   — search and install only; no widget authoring\n"
+            "  developer  — search before writing + package reusable logic (default)\n"
+            "  maintainer — library steward: audit, improve, and create widgets"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "environment": {
+                    "type": "string",
+                    "enum": ["claude", "codex", "gemini", "other"],
+                    "description": "Your AI environment. Use 'other' if not listed."
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["consumer", "developer", "maintainer"],
+                    "description": "How this agent should interact with Cartograph. Defaults to 'developer'."
+                }
+            },
+            "required": ["environment"]
+        }
+    ),
 ]
 
 
@@ -313,15 +343,31 @@ PROMPTS = [
 ]
 
 # ============================================================================
-# RESOURCE DEFINITIONS  — instruction snippets for each AI environment
+# INSTRUCTION CONTENT — mode × environment
 # ============================================================================
 
-_INSTRUCTIONS_BASE = """\
+# Per-mode base instructions
+_MODE_CONSUMER = """\
 ## Cartograph
 
-**First time in a new project:** fetch the Cartograph instructions resource
-that matches your environment from the MCP and append it to this project's
-instruction file. Do this once per project before proceeding.
+Cartograph is a shared widget library. Widgets are reusable, self-contained
+code modules. They live in your project under cartograph/<widget_id>/.
+
+### One rule: search before writing utility code
+
+Before implementing anything self-contained (a parser, a retry helper, a rate
+limiter, a formatter), run cartograph_search. If something useful exists,
+install and use it instead of writing from scratch.
+
+### Core tools
+- cartograph_search — search the library
+- cartograph_inspect — read source and reviews before installing
+- cartograph_install — install a widget (target = project root)
+- cartograph_rate — rate after using (honest score + one comment)
+"""
+
+_MODE_DEVELOPER = """\
+## Cartograph
 
 Cartograph is a shared widget library. Widgets are reusable, self-contained
 code modules. They live in your project under cartograph/<widget_id>/.
@@ -336,7 +382,6 @@ install and use it instead of writing from scratch.
 **2. When you finish a self-contained piece of logic, ask: is this reusable?**
 If it could work in another project without modification, package it as a widget.
 Do this at the end of the task while the context is fresh — not later.
-Use the checkin-widget workflow prompt for step-by-step guidance.
 
 ### Core tools
 - cartograph_search — search the library
@@ -348,33 +393,71 @@ Use the checkin-widget workflow prompt for step-by-step guidance.
 ### Widget IDs
 Format: <domain>-<name>  e.g. logic-retry-backoff, data-csv-parser
 Domains: backend, data, ml, security, infra, frontend, universal
-
-### Detailed workflows (load on demand)
 """
 
-_INSTRUCTIONS_CLAUDE = _INSTRUCTIONS_BASE + """\
-Type in chat to load step-by-step guidance:
+_MODE_MAINTAINER = """\
+## Cartograph — Maintainer Mode
+
+Your role is library steward. Your primary goal is the health and growth of
+the widget library, not project feature work.
+
+### What to do each session
+
+**1. Audit existing widgets.**
+cartograph_search to browse, cartograph_inspect show_reviews: true to read feedback.
+- Low rating or negative reviews → fix the issue and checkin an improvement
+- Broken examples → fix them
+- Low test coverage → add tests
+
+**2. Improve low-rated widgets.**
+Read the reviews. Find the friction. Fix it, bump the version, write a clear
+changelog entry in cartograph_checkin.
+
+**3. Create new widgets for recurring patterns.**
+If a pattern keeps appearing across projects but isn't in the library, build it.
+cartograph_create → develop → validate → checkin.
+
+### Core tools (full access)
+- cartograph_search / cartograph_inspect
+- cartograph_create / cartograph_validate / cartograph_checkin
+- cartograph_status / cartograph_update / cartograph_rate
+
+### Widget IDs
+Format: <domain>-<name>  e.g. logic-retry-backoff, data-csv-parser
+Domains: backend, data, ml, security, infra, frontend, universal
+"""
+
+# Per-environment suffix appended to any mode's instructions
+_ENV_PROMPT_SUFFIX = {
+    "claude": """\
+
+### Detailed workflows (load on demand)
+Type in chat:
 - /mcp__cartograph__install-widget
 - /mcp__cartograph__checkin-widget
 - /mcp__cartograph__maintain-widgets
-"""
+""",
+    "codex": "",
+    "gemini": "",
+    "other": "",
+}
 
-_INSTRUCTIONS_CODEX = _INSTRUCTIONS_BASE + """\
-Fetch these prompts for step-by-step guidance:
-- mcp prompt cartograph install-widget
-- mcp prompt cartograph checkin-widget
-- mcp prompt cartograph maintain-widgets
-"""
+_MODE_INSTRUCTIONS = {
+    "consumer":   _MODE_CONSUMER,
+    "developer":  _MODE_DEVELOPER,
+    "maintainer": _MODE_MAINTAINER,
+}
 
-_INSTRUCTIONS_GEMINI = _INSTRUCTIONS_BASE + """\
-Fetch these prompts for step-by-step guidance:
-- install-widget
-- checkin-widget
-- maintain-widgets
-"""
 
-_INSTRUCTIONS_CODEX   = _INSTRUCTIONS_BASE
-_INSTRUCTIONS_GEMINI  = _INSTRUCTIONS_BASE
+def _build_instructions(mode: str, environment: str) -> str:
+    base = _MODE_INSTRUCTIONS.get(mode, _MODE_DEVELOPER)
+    suffix = _ENV_PROMPT_SUFFIX.get(environment, "")
+    return base + suffix
+
+
+# ============================================================================
+# RESOURCE DEFINITIONS  — kept for MCP resource protocol compatibility
+# ============================================================================
 
 RESOURCES = [
     Resource(
@@ -398,9 +481,9 @@ RESOURCES = [
 ]
 
 _RESOURCE_CONTENT = {
-    "cartograph://instructions/claude": _INSTRUCTIONS_CLAUDE,
-    "cartograph://instructions/codex":  _INSTRUCTIONS_CODEX,
-    "cartograph://instructions/gemini": _INSTRUCTIONS_GEMINI,
+    "cartograph://instructions/claude": _build_instructions("developer", "claude"),
+    "cartograph://instructions/codex":  _build_instructions("developer", "codex"),
+    "cartograph://instructions/gemini": _build_instructions("developer", "gemini"),
 }
 
 
@@ -486,6 +569,16 @@ async def call_tool(name: str, arguments: dict):
                 score=arguments["score"],
                 comment=arguments.get("comment"),
             )
+
+        elif name == "cartograph_setup":
+            env  = arguments["environment"]
+            mode = arguments.get("mode", "developer")
+            instructions = _build_instructions(mode, env)
+            file_hint = {"claude": "CLAUDE.md", "codex": "AGENTS.md", "gemini": "GEMINI.md"}.get(env, "your instruction file")
+            result = {
+                "instructions": instructions,
+                "note": f"Append the above text to {file_hint} in your project root.",
+            }
 
         else:
             result = {"error": f"Unknown tool: {name}"}

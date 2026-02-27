@@ -104,3 +104,4 @@ checkouts/
 .vscode/
 *.swp
 *.swo
+.cartographer/

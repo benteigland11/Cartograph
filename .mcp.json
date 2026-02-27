@@ -2,7 +2,9 @@
   "mcpServers": {
     "cartograph": {
       "type": "stdio",
-      "command": "cartograph"
+      "command": "cartograph",
+      "args": [],
+      "env": {}
     }
   }
 }
