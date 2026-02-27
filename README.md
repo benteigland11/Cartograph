@@ -77,7 +77,7 @@ Choose a mode based on how you want the agent to behave.
 | `developer` | Most local projects (recommended) | Search first + package reusable logic when you're done. |
 | `maintainer` | Dedicated library agent | Audit existing widgets, improve low-rated ones, create new ones. |
 
-Maintainer mode is worth running regularly — think of it as weekly housekeeping for your library. The agent audits widgets, fixes issues surfaced by reviews, and improves anything that has drifted in quality. The value compounds over time: a well-maintained library means every future install starts from a higher baseline, bugs get squashed once and stay squashed, and the whole thing gets more useful the more you use it.
+Maintainer mode is worth running regularly. Think of it as weekly housekeeping for your library. The agent audits widgets, fixes issues surfaced by reviews, and improves anything that has drifted in quality. The value compounds over time: a well-maintained library means every future install starts from a higher baseline, bugs get squashed once and stay squashed, and the whole thing gets more useful the more you use it.
 
 ## CLI
 
