@@ -35,8 +35,13 @@ def _copy_widget(source_path, dest_path):
         shutil.copy2(csproj, dest_path)
 
 
+def _widget_dir(target_dir, widget_id):
+    """Return the install path: <project_root>/cartograph/<widget_id>."""
+    return os.path.join(target_dir, "cartograph", widget_id)
+
+
 def install(carto, widget_id, target_dir, version=None):
-    """Install a widget into target_dir."""
+    """Install a widget into target_dir/cartograph/widget_id."""
     from .engine import REPO_DIR
 
     if not os.path.isabs(target_dir):
@@ -59,7 +64,7 @@ def install(carto, widget_id, target_dir, version=None):
         source_path = history_path
         installed_version = version
 
-    dest_path = os.path.join(target_dir, widget_id)
+    dest_path = _widget_dir(target_dir, widget_id)
 
     if os.path.exists(dest_path):
         return {"error": f"'{widget_id}' already installed at {dest_path}. Uninstall first to reinstall."}
@@ -79,7 +84,7 @@ def install(carto, widget_id, target_dir, version=None):
 
 def update(carto, widget_id, target_dir, version=None):
     """Update an installed widget to the latest (or specific) version."""
-    dest_path = os.path.join(target_dir, widget_id)
+    dest_path = _widget_dir(target_dir, widget_id)
     if not os.path.exists(dest_path):
         return {"error": f"'{widget_id}' not found at {dest_path}. Install it first."}
 
@@ -106,11 +111,11 @@ def update(carto, widget_id, target_dir, version=None):
 
 
 def uninstall(carto, widget_id, target_dir):
-    """Remove an installed widget from target_dir."""
+    """Remove an installed widget from target_dir/cartograph/widget_id."""
     if not os.path.isabs(target_dir):
         return {"error": f"Target must be an absolute path, got: '{target_dir}'"}
 
-    widget_path = os.path.join(target_dir, widget_id)
+    widget_path = _widget_dir(target_dir, widget_id)
 
     if not os.path.exists(widget_path):
         return {"error": f"'{widget_id}' not found at {widget_path}."}

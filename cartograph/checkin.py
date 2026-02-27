@@ -408,7 +408,7 @@ def restore(carto, item_id, version, reason):
 
 def add_review(carto, widget_id, target_dir, score, comment=None):
     """Add a review to a widget. Must be installed at target_dir/widget_id/."""
-    installed_path = os.path.join(target_dir, widget_id)
+    installed_path = os.path.join(target_dir, "cartograph", widget_id)
     if not os.path.exists(installed_path):
         return {"error": f"'{widget_id}' not found at {installed_path}. Install it first."}
 
@@ -453,7 +453,7 @@ def widget_status(carto, widget_id, target_dir):
     if not widget:
         return {"error": f"'{widget_id}' not found in library."}
 
-    installed_path = os.path.join(target_dir, widget_id)
+    installed_path = os.path.join(target_dir, "cartograph", widget_id)
     if not os.path.exists(installed_path):
         return {"error": f"'{widget_id}' not found at {installed_path}."}
 

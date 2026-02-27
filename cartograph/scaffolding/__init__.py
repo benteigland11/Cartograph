@@ -62,10 +62,10 @@ def create_widget(carto, item_id, language, name=None, domain="backend", tags=No
         item_id = f"{item_id}-{normalized_lang}"
 
     if not target_dir:
-        target_dir = os.path.join(os.getcwd(), DEFAULT_INSTALL_DIR)
+        target_dir = os.getcwd()
 
-    # target_dir is the parent directory — append widget ID, same as install
-    target_dir = os.path.join(target_dir, item_id)
+    # Always place under <project_root>/cartograph/<widget_id>
+    target_dir = os.path.join(target_dir, DEFAULT_INSTALL_DIR, item_id)
 
     if os.path.exists(target_dir):
         return {"status": "error", "message": f"Directory already exists: {target_dir}"}

@@ -16,6 +16,11 @@ def fresh_carto(fixture_library, tmp_path):
     return c, str(tmp_path)
 
 
+def _widget_path(target, widget_id):
+    """Widgets now live at <project_root>/cartograph/<widget_id>."""
+    return os.path.join(target, "cartograph", widget_id)
+
+
 def test_install_widget(fresh_carto):
     carto, target = fresh_carto
     result = carto.install("http-client", target)
@@ -34,7 +39,7 @@ def test_install_unknown_widget(fresh_carto):
 def test_install_creates_files(fresh_carto):
     carto, target = fresh_carto
     carto.install("json-parser", target)
-    widget_dir = os.path.join(target, "json-parser")
+    widget_dir = _widget_path(target, "json-parser")
     assert os.path.exists(os.path.join(widget_dir, "widget.json"))
     assert os.path.isdir(os.path.join(widget_dir, "src"))
 
@@ -58,7 +63,7 @@ def test_uninstall_widget(fresh_carto):
     carto.install("http-client", target)
     result = carto.uninstall("http-client", target)
     assert result.get("status") == "success"
-    assert not os.path.exists(os.path.join(target, "http-client"))
+    assert not os.path.exists(_widget_path(target, "http-client"))
 
 
 def test_uninstall_not_installed(fresh_carto):

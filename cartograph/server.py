@@ -98,12 +98,12 @@ TOOLS = [
     # -- Project --
     Tool(
         name="cartograph_install",
-        description="Install a widget into your project. Copies src/, tests/, examples/, and metadata to {target}/{widget_id}/.",
+        description="Install a widget into your project. Copies src/, tests/, examples/, and metadata to {target}/cartograph/{widget_id}/.",
         inputSchema={
             "type": "object",
             "properties": {
                 "widget_id": {"type": "string"},
-                "target": {"type": "string", "description": "Absolute path to the project's cartograph directory"},
+                "target": {"type": "string", "description": "Absolute path to the project root"},
                 "version": {"type": "string", "description": "Specific version to install (defaults to latest)"}
             },
             "required": ["widget_id", "target"]
@@ -116,7 +116,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "widget_id": {"type": "string"},
-                "target": {"type": "string", "description": "Absolute path to the project's cartograph directory"},
+                "target": {"type": "string", "description": "Absolute path to the project root"},
                 "version": {"type": "string", "description": "Specific version to update to (defaults to latest)"}
             },
             "required": ["widget_id", "target"]
@@ -124,12 +124,12 @@ TOOLS = [
     ),
     Tool(
         name="cartograph_uninstall",
-        description="Remove an installed widget. Deletes {target}/{widget_id}/ and all its files.",
+        description="Remove an installed widget. Deletes {target}/cartograph/{widget_id}/ and all its files.",
         inputSchema={
             "type": "object",
             "properties": {
                 "widget_id": {"type": "string"},
-                "target": {"type": "string", "description": "Absolute path to the project's cartograph directory"}
+                "target": {"type": "string", "description": "Absolute path to the project root"}
             },
             "required": ["widget_id", "target"]
         }
@@ -141,19 +141,19 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "widget_id": {"type": "string"},
-                "target": {"type": "string", "description": "Absolute path to the project's cartograph directory"}
+                "target": {"type": "string", "description": "Absolute path to the project root"}
             },
             "required": ["widget_id", "target"]
         }
     ),
     Tool(
         name="cartograph_rate",
-        description="Rate an installed widget. Must be installed at {target}/{widget_id}/.",
+        description="Rate an installed widget. Must be installed at {target}/cartograph/{widget_id}/.",
         inputSchema={
             "type": "object",
             "properties": {
                 "widget_id": {"type": "string"},
-                "target": {"type": "string", "description": "Absolute path to the project's cartograph directory"},
+                "target": {"type": "string", "description": "Absolute path to the project root"},
                 "score": {
                     "type": "integer", "minimum": 1, "maximum": 5,
                     "description": "How easy was this to plug in? 1 = broken/unusable, 2 = needed heavy modification, 3 = needed some fixes, 4 = minor adjustments only, 5 = drop-in, worked as-is"
@@ -176,7 +176,7 @@ TOOLS = [
                     "type": "string",
                     "enum": ["python"]
                 },
-                "target": {"type": "string", "description": "Absolute path to the project's cartograph directory"}
+                "target": {"type": "string", "description": "Absolute path to the project root"}
             },
             "required": ["widget_id", "language", "target"]
         }
