@@ -389,10 +389,6 @@ Do this at the end of the task while the context is fresh — not later.
 - cartograph_rate — rate after using (required: honest score + one comment)
 - cartograph_checkin — publish finished code to the library
 - cartograph_validate — validate before checkin (must pass)
-
-### Widget IDs
-Format: <domain>-<name>  e.g. logic-retry-backoff, data-csv-parser
-Domains: backend, data, ml, security, infra, frontend, universal
 """
 
 _MODE_MAINTAINER = """\
@@ -421,10 +417,6 @@ cartograph_create → develop → validate → checkin.
 - cartograph_search / cartograph_inspect
 - cartograph_create / cartograph_validate / cartograph_checkin
 - cartograph_status / cartograph_update / cartograph_rate
-
-### Widget IDs
-Format: <domain>-<name>  e.g. logic-retry-backoff, data-csv-parser
-Domains: backend, data, ml, security, infra, frontend, universal
 """
 
 # Per-environment suffix appended to any mode's instructions
