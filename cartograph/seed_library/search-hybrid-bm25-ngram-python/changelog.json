@@ -1,0 +1,7 @@
+[
+  {
+    "version": "1.1.0",
+    "reason": "Initial release: zero-dependency hybrid BM25 + n-gram fuzzy search engine",
+    "timestamp": "2026-02-26T10:33:48.201992"
+  }
+]

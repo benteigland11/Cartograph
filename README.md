@@ -94,7 +94,7 @@ pip install -e .
 pytest
 ```
 
-Set `WIDGET_LIBRARY_PATH` to point to your global widget library directory. When running from source, the engine also looks for a `Widget_Library/` directory alongside this repo as a fallback.
+The widget library lives in your platform's user data directory and is seeded automatically on first run. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
 ## Architecture
 

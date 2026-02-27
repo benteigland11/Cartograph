@@ -1,0 +1,7 @@
+[
+  {
+    "version": "1.1.0",
+    "reason": "Initial release \u2014 exponential backoff with jitter, configurable exceptions, on_retry hook",
+    "timestamp": "2026-02-26T17:59:07.175596"
+  }
+]

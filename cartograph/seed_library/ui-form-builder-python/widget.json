@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "id": "ui-form-builder-python",
+    "name": "Form Builder",
+    "version": "1.0.0",
+    "domain": "frontend",
+    "tags": [
+      "ui",
+      "terminal",
+      "form",
+      "interactive",
+      "cli",
+      "validation"
+    ]
+  },
+  "description": "Declarative terminal form builder with validation. Supports text, password, number, confirm, select, and multiselect fields with built-in validators, color themes, and keyboard navigation. Zero dependencies.",
+  "tech_stack": {
+    "language": "python",
+    "dependencies": []
+  },
+  "library_notes": {
+    "general": "Single responsibility \u2014 one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. All dependencies must be declared in widget.json tech_stack.dependencies. Do not modify library_notes \u2014 it is managed by Cartograph and will be restored on checkin.",
+    "language": "Use pytest for all tests \u2014 no unittest. Type hints required on all public functions. No __init__.py in tests/. No if __name__ == '__main__' blocks in src/ files. Imports ordered: stdlib, third-party, local."
+  }
+}

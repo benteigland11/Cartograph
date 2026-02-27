@@ -10,22 +10,60 @@ import difflib
 import logging
 
 log = logging.getLogger("cartograph")
+
 # Package directory (cartograph/) — one level up is the repo root in dev
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(PACKAGE_DIR)
 
-# Widget Library: env var > sibling of repo > sibling of package dir
-# In dev: REPO_DIR/Widget_Library.  When pip-installed: must set WIDGET_LIBRARY_PATH.
-_REPO_LIB = os.path.join(REPO_DIR, "Widget_Library")
-_PARENT_LIB = os.path.join(REPO_DIR, "..", "Widget_Library")
-_DEFAULT_LIB = _REPO_LIB if os.path.exists(_REPO_LIB) else _PARENT_LIB
-LIBRARY_PATH = os.getenv("WIDGET_LIBRARY_PATH", _DEFAULT_LIB)
+# Seed library bundled with the package
+_SEED_LIBRARY = os.path.join(PACKAGE_DIR, "seed_library")
 
-# Pending widgets (needs review)
-_REPO_PENDING = os.path.join(REPO_DIR, "Pending_Widgets")
-_PARENT_PENDING = os.path.join(REPO_DIR, "..", "Pending_Widgets")
-_DEFAULT_PENDING = _REPO_PENDING if os.path.exists(_REPO_PENDING) else _PARENT_PENDING
-PENDING_WIDGETS_PATH = os.getenv("PENDING_WIDGETS_PATH", _DEFAULT_PENDING)
+
+def _user_data_dir() -> str:
+    """Return the platform-appropriate user data directory for Cartograph."""
+    try:
+        from platformdirs import user_data_dir
+        return user_data_dir("cartograph", appauthor=False)
+    except ImportError:
+        return os.path.join(os.path.expanduser("~"), ".cartograph")
+
+
+def _ensure_library(path: str) -> None:
+    """Create the library directory and seed it from bundled widgets if empty."""
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+    if os.path.isdir(_SEED_LIBRARY) and not any(
+        e.name != ".DS_Store" for e in os.scandir(path)
+    ):
+        log.info("Seeding widget library from bundled defaults at %s", path)
+        for item in os.listdir(_SEED_LIBRARY):
+            src = os.path.join(_SEED_LIBRARY, item)
+            dst = os.path.join(path, item)
+            if os.path.isdir(src) and not os.path.exists(dst):
+                shutil.copytree(src, dst)
+
+
+def _resolve_library_path() -> str:
+    """Resolve widget library path: env var > user data dir > dev repo sibling."""
+    if "WIDGET_LIBRARY_PATH" in os.environ:
+        return os.environ["WIDGET_LIBRARY_PATH"]
+    # Dev: repo sibling takes priority over user data dir so local edits work
+    _repo_lib = os.path.join(REPO_DIR, "Widget_Library")
+    if os.path.exists(_repo_lib):
+        return _repo_lib
+    # Normal install: use platform user data dir, seeding if needed
+    user_lib = os.path.join(_user_data_dir(), "Widget_Library")
+    _ensure_library(user_lib)
+    return user_lib
+
+
+LIBRARY_PATH = _resolve_library_path()
+
+# Pending widgets directory lives alongside the library
+PENDING_WIDGETS_PATH = os.getenv(
+    "PENDING_WIDGETS_PATH",
+    os.path.join(os.path.dirname(LIBRARY_PATH), "Pending_Widgets"),
+)
 
 # Extraction audit log
 CARTOGRAPH_DIR = os.path.join(REPO_DIR, ".cartograph")

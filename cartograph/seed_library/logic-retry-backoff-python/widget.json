@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "id": "logic-retry-backoff-python",
+    "name": "Retry with Backoff",
+    "version": "1.1.0",
+    "domain": "backend",
+    "tags": [
+      "retry",
+      "backoff",
+      "resilience",
+      "fault-tolerance"
+    ]
+  },
+  "description": "Zero-dependency retry with exponential backoff and jitter. Configurable max attempts, delay bounds, retryable exception types, and an on_retry callback hook. Wraps any callable.",
+  "tech_stack": {
+    "language": "python",
+    "dependencies": []
+  },
+  "library_notes": {
+    "general": "Single responsibility \u2014 one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. All dependencies must be declared in widget.json tech_stack.dependencies. Do not modify library_notes \u2014 it is managed by Cartograph and will be restored on checkin.",
+    "language": "Use pytest for all tests \u2014 no unittest. Type hints required on all public functions. No __init__.py in tests/. No if __name__ == '__main__' blocks in src/ files. Imports ordered: stdlib, third-party, local."
+  }
+}
