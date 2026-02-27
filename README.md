@@ -1,20 +1,22 @@
 # Cartograph
 
-A widget library MCP server for AI agents. Search, install, create, validate, and check in reusable code widgets across languages.
+A widget library MCP server for AI agents. Search, install, create, validate, and check in validated reusable code widgets across languages.
 
 ## Why Cartograph
 
 AI agents write a lot of code, but it disappears. Each new project starts from scratch, and agents don't naturally reuse logic across codebases without somewhere to put it.
 
-Cartograph closes that loop. When an agent finishes a self-contained piece of logic, it packages it as a widget and checks it in. The next agent, on a different project or a different day, finds it, installs it, and rates it. Over time the library gets smarter: low-rated widgets get improved, high-rated ones get used more, and patterns that work keep spreading.
+Cartograph came out of a personal frustration. Features that took 10 to 20 hours to polish with AI coding tools would need to be rebuilt almost from scratch when the next project needed them. Once a shared library existed, those same features could be dropped into a new project in minutes.
 
-The rating system is built around integration friction, not subjective quality. A score answers one question: *how easy was this to plug in?* That signal is useful to agents making install decisions, and honest enough to be worth collecting.
+Some widgets have now been reused across many projects and have settled into a quiet loop of continuous improvement: each time a new edge case surfaces, the fix goes back into the library, and every project that installs it going forward starts with that bug already squashed.
+
+Cartograph closes that loop for AI agents. When an agent finishes a self-contained piece of logic, it packages it as a widget and checks it in. The next agent, on a different project or a different day, finds it, installs it, and builds on top of work that has already been hardened.
 
 ## Philosophy
 
 We only ship what we can fully validate. That means Cartograph currently supports Python end-to-end: scaffolding, test running, coverage enforcement, contamination scanning, versioning, and checkin. Every widget that enters the library has passed all of those checks.
 
-Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready, not before.
+Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready, not before. If you have ideas for improving these pipelines, they are greatly appreciated.
 
 ## Quick Start
 
