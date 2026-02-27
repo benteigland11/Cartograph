@@ -30,7 +30,11 @@ log = logging.getLogger("cartograph")
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import Tool, TextContent
+    from mcp.types import (
+        Tool, TextContent,
+        Prompt, PromptMessage, GetPromptResult,
+        Resource, TextResourceContents,
+    )
 except ImportError:
     print("MCP SDK not installed. Run: pip install cartograph", file=sys.stderr)
     sys.exit(1)
@@ -221,6 +225,174 @@ TOOLS = [
 
 
 # ============================================================================
+# PROMPT DEFINITIONS
+# ============================================================================
+
+_WORKFLOW_CREATE = """\
+You are authoring a new Cartograph widget. Follow this workflow exactly:
+
+1. SEARCH FIRST — cartograph_search to check if something similar exists.
+   If it does, consider extending it via checkin instead of creating new.
+
+2. CREATE — cartograph_create with:
+   - widget_id: <domain>-<name> (e.g. logic-retry-backoff, data-csv-parser)
+   - language: python
+   - target: absolute path to the project root
+   Widget lands at <target>/cartograph/<widget_id>-python/
+
+3. IMPLEMENT — write the real logic in src/. Rules:
+   - Zero external dependencies unless declared in widget.json tech_stack.dependencies
+   - Type hints on all public functions
+   - No global state, no hardcoded paths, no project-specific code
+
+4. TEST — write thorough tests in tests/. Rules:
+   - pytest only, no unittest
+   - No __init__.py in tests/
+   - Target 80%+ coverage — the validator enforces this
+   - Mock stdin/network/filesystem where needed
+
+5. EXAMPLE — write examples/example_usage.py. Rules:
+   - Must run and exit cleanly with no user input
+   - Use hardcoded/fake data only
+   - Demonstrate the primary API
+
+6. VALIDATE — cartograph_validate <widget_path>
+   Fix every issue before proceeding. Common failures:
+   - Coverage too low → add tests
+   - Example fails → check for interactive input or missing imports
+   - Contamination → remove absolute paths or credentials from src/
+
+7. CHECKIN — cartograph_checkin with a clear reason describing what it does.
+   On success, rate yourself: cartograph_rate (score 1-5, honest comment).
+"""
+
+_WORKFLOW_INSTALL = """\
+You are installing a Cartograph widget into a project. Follow this workflow:
+
+1. SEARCH — cartograph_search with a natural language query describing what you need.
+   Try multiple queries if first results are poor (synonyms, shorter queries).
+
+2. INSPECT — cartograph_inspect on promising results to see:
+   - Source code (show_source: true)
+   - Reviews and ratings
+   - Examples of usage
+
+3. INSTALL — cartograph_install with:
+   - widget_id: the widget ID from search results
+   - target: absolute path to the project root
+   Widget lands at <target>/cartograph/<widget_id>/
+
+4. USE — import from cartograph/<widget_id>/src/
+   Check the examples/ directory for usage patterns.
+
+5. RATE — cartograph_rate after using it.
+   Be honest: score reflects how easy it was to plug in, not whether you like it.
+   Leave a comment about what worked, what you changed, or what surprised you.
+
+6. UPDATE (if needed) — cartograph_status to check if outdated.
+   cartograph_update to pull the latest version.
+"""
+
+_WORKFLOW_MAINTAIN = """\
+You are maintaining Cartograph widgets in a project. Follow this workflow:
+
+1. CHECK STATUS — cartograph_status for each installed widget.
+   Look for: outdated (new version available), modified (local changes differ from library).
+
+2. REVIEW CHANGES — cartograph_inspect <widget_id> show_all_versions: true
+   Read the changelog to understand what changed before updating.
+
+3. UPDATE — cartograph_update if the new version looks safe.
+   Your local modifications will be overwritten — back them up first if needed.
+
+4. CONTRIBUTE BACK — if you fixed a bug or improved a widget locally,
+   check it back in: cartograph_checkin with a clear reason.
+   Your fix helps everyone using that widget.
+"""
+
+PROMPTS = [
+    Prompt(name="create-widget",    description="Step-by-step workflow for authoring and publishing a new widget"),
+    Prompt(name="install-widget",   description="Step-by-step workflow for finding, installing, and rating a widget"),
+    Prompt(name="maintain-widgets", description="Step-by-step workflow for checking status, updating, and contributing fixes"),
+]
+
+# ============================================================================
+# RESOURCE DEFINITIONS  — instruction snippets for each AI environment
+# ============================================================================
+
+_INSTRUCTIONS_BASE = """\
+## Cartograph
+
+Cartograph is a widget library MCP server. Widgets are reusable, self-contained
+code modules that live in your project under cartograph/<widget_id>/.
+
+### As a consumer
+Before writing new utility code, search the library first:
+- cartograph_search — find existing widgets
+- cartograph_install — install to project root (widgets land in cartograph/)
+- cartograph_rate — rate after using (honest score + one specific comment)
+- cartograph_status / cartograph_update — keep widgets current
+
+### As an author
+When you write code that could be reused across projects, package it:
+- cartograph_create — scaffold a new widget in this project
+- Build the logic, write tests (80%+ coverage), write a non-interactive example
+- cartograph_validate — must pass before checkin
+- cartograph_checkin — publish to the library
+
+### Widget IDs
+Format: <domain>-<name>-<language>  e.g. logic-retry-backoff-python
+Domains: backend, data, ml, security, infra, frontend, universal
+
+### Workflows
+Use MCP prompts for detailed step-by-step guidance:
+- /mcp__cartograph__create-widget
+- /mcp__cartograph__install-widget
+- /mcp__cartograph__maintain-widgets
+"""
+
+_INSTRUCTIONS_CLAUDE = _INSTRUCTIONS_BASE.replace(
+    "- /mcp__cartograph__create-widget\n"
+    "- /mcp__cartograph__install-widget\n"
+    "- /mcp__cartograph__maintain-widgets",
+    "Type these in chat to load the full workflow:\n"
+    "- /mcp__cartograph__create-widget\n"
+    "- /mcp__cartograph__install-widget\n"
+    "- /mcp__cartograph__maintain-widgets"
+)
+
+_INSTRUCTIONS_CODEX   = _INSTRUCTIONS_BASE
+_INSTRUCTIONS_GEMINI  = _INSTRUCTIONS_BASE
+
+RESOURCES = [
+    Resource(
+        uri="cartograph://instructions/claude",
+        name="Cartograph instructions for Claude Code (CLAUDE.md)",
+        description="Paste into your project's CLAUDE.md to guide Claude on every turn",
+        mimeType="text/plain",
+    ),
+    Resource(
+        uri="cartograph://instructions/codex",
+        name="Cartograph instructions for Codex (AGENTS.md)",
+        description="Paste into your project's AGENTS.md to guide Codex on every turn",
+        mimeType="text/plain",
+    ),
+    Resource(
+        uri="cartograph://instructions/gemini",
+        name="Cartograph instructions for Gemini CLI (GEMINI.md)",
+        description="Paste into your project's GEMINI.md to guide Gemini on every turn",
+        mimeType="text/plain",
+    ),
+]
+
+_RESOURCE_CONTENT = {
+    "cartograph://instructions/claude": _INSTRUCTIONS_CLAUDE,
+    "cartograph://instructions/codex":  _INSTRUCTIONS_CODEX,
+    "cartograph://instructions/gemini": _INSTRUCTIONS_GEMINI,
+}
+
+
+# ============================================================================
 # TOOL HANDLERS
 # ============================================================================
 
@@ -311,6 +483,48 @@ async def call_tool(name: str, arguments: dict):
     except Exception as e:
         error_result = {"error": str(e)}
         return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
+
+
+# ============================================================================
+# PROMPT HANDLERS
+# ============================================================================
+
+@server.list_prompts()
+async def list_prompts():
+    return PROMPTS
+
+
+@server.get_prompt()
+async def get_prompt(name: str, arguments: dict | None = None):
+    workflows = {
+        "create-widget":    _WORKFLOW_CREATE,
+        "install-widget":   _WORKFLOW_INSTALL,
+        "maintain-widgets": _WORKFLOW_MAINTAIN,
+    }
+    text = workflows.get(name)
+    if not text:
+        raise ValueError(f"Unknown prompt: {name}")
+    return GetPromptResult(
+        description=next(p.description for p in PROMPTS if p.name == name),
+        messages=[PromptMessage(role="user", content=TextContent(type="text", text=text))],
+    )
+
+
+# ============================================================================
+# RESOURCE HANDLERS
+# ============================================================================
+
+@server.list_resources()
+async def list_resources():
+    return RESOURCES
+
+
+@server.read_resource()
+async def read_resource(uri: str):
+    content = _RESOURCE_CONTENT.get(str(uri))
+    if not content:
+        raise ValueError(f"Unknown resource: {uri}")
+    return TextResourceContents(uri=str(uri), mimeType="text/plain", text=content)
 
 
 # ============================================================================
