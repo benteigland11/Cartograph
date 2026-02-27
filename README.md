@@ -116,10 +116,9 @@ Supporting a language means owning its full validation pipeline, not just genera
 
 - Python: fully supported (create, validate, test, checkin)
 - Search: local BM25 + n-gram fuzzy matching
-- Registry: local only — cloud registry planned
+- Registry: local
 
 ## Roadmap
 
-- **Cloud registry** — shared widget pool across teams and projects; consumer mode becomes much more powerful with a seeded library
 - **More languages** — as validation pipelines are built and tested
 - **Trend signals** — surface which widgets are improving vs. declining over time
