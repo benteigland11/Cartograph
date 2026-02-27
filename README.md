@@ -4,54 +4,62 @@ A widget library MCP server for AI agents. Search, install, create, validate, an
 
 ## Quick Start
 
-### Claude Code
-
-Clone the repo and open it in Claude Code. The included `.mcp.json` registers the server automatically.
-
-Or register manually:
+Install once:
 
 ```bash
-claude mcp add --transport stdio cartograph -- uvx --from /path/to/Cartograph cartograph
+pip install cartograph
+```
+
+Then register with your AI CLI:
+
+### Claude Code
+
+```bash
+claude mcp add --scope user cartograph -- cartograph
+```
+
+Or just open this repo in Claude Code — the included `.mcp.json` registers it automatically.
+
+### Codex
+
+```bash
+codex mcp add cartograph -- cartograph
+```
+
+### Gemini CLI
+
+```bash
+gemini mcp add --scope user cartograph cartograph
 ```
 
 ### Other MCP clients (Cursor, VS Code Copilot, Claude Desktop, etc.)
 
-Add to the client's MCP config (location varies by client):
+Add to the client's MCP config:
 
 ```json
 {
   "mcpServers": {
     "cartograph": {
       "type": "stdio",
-      "command": "uvx",
-      "args": ["--from", "/path/to/Cartograph", "cartograph"]
+      "command": "cartograph"
     }
   }
 }
-```
-
-### HTTP mode (remote / shared access)
-
-```bash
-uvx --from "/path/to/Cartograph[http]" cartograph --mode http --port 8742
-```
-
-Then point any MCP client at `http://localhost:8742/mcp/`.
 
 ## CLI
 
 Also usable as a standalone CLI:
 
 ```bash
-uvx --from /path/to/Cartograph cartograph search "rate limiter"
-uvx --from /path/to/Cartograph cartograph install auth-middleware-python --target ./cartograph
-uvx --from /path/to/Cartograph cartograph create my-widget --language python --target ./widgets
+cartograph search "rate limiter"
+cartograph install auth-middleware-python --target /path/to/project
+cartograph create my-widget --language python --target /path/to/project
 ```
 
 ## Development
 
 ```bash
-uv pip install -e /path/to/Cartograph
+pip install -e .
 pytest
 ```
 
