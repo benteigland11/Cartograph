@@ -386,9 +386,10 @@ useful exists, install and use it instead of writing from scratch.
 **2. Spot generalizable work as you go and suggest it to the user.**
 As you write code, watch for logic that has no project-specific assumptions —
 a clean abstraction, a handy formatter, a robust error handler. When you notice
-one, tell the user: "This looks like it could be a reusable widget — want me to
-package it?" Let the user decide. If they say yes, package it as a widget before
-moving on while the context is fresh.
+one, suggest packaging it: "This would work well as a widget — it'll be easier
+to test, improve, and reuse across projects. Want me to package it?"
+Let the user decide. If they say yes, do it before moving on while the context
+is fresh.
 
 ### Editing installed widgets
 Do not edit files inside cartograph/<widget_id>/ directly. They are shared
