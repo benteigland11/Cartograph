@@ -297,7 +297,7 @@ If yes, package it as a widget now while the context is fresh.
 """
 
 _WORKFLOW_INSTALL = """\
-You need a piece of utility logic. Search before writing it yourself.
+You need a piece of reusable code. Search before writing it yourself.
 
 1. SEARCH — cartograph_search with a natural language query.
    Try short queries, synonyms, or domain terms if first results are poor.
@@ -353,11 +353,11 @@ _MODE_CONSUMER = """\
 Cartograph is a shared widget library. Widgets are reusable, self-contained
 code modules. They live in your project under cartograph/<widget_id>/.
 
-### One rule: search before writing utility code
+### One rule: search before writing reusable code
 
-Before implementing anything self-contained (a parser, a retry helper, a rate
-limiter, a formatter), run cartograph_search. If something useful exists,
-install and use it instead of writing from scratch.
+Before implementing anything self-contained (a UI component, a parser, a retry
+helper, a data pipeline, a formatter), run cartograph_search. If something
+useful exists, install and use it instead of writing from scratch.
 
 ### Core tools
 - cartograph_search — search the library
@@ -374,10 +374,10 @@ code modules. They live in your project under cartograph/<widget_id>/.
 
 ### Two rules to follow on every task
 
-**1. Search before writing utility code.**
-Before implementing anything self-contained (a parser, a retry helper, a rate
-limiter, a formatter), run cartograph_search. If something useful exists,
-install and use it instead of writing from scratch.
+**1. Search before writing reusable code.**
+Before implementing anything self-contained (a UI component, a parser, a retry
+helper, a data pipeline, a formatter), run cartograph_search. If something
+useful exists, install and use it instead of writing from scratch.
 
 **2. When you finish a self-contained piece of logic, ask: is this reusable?**
 If it could work in another project without modification, package it as a widget.
