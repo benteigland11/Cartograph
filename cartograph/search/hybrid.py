@@ -30,6 +30,9 @@ _BETA  = 0.60   # N-gram contribution
 # Score boost for exact substring match in name or id (added after normalisation)
 _EXACT_BOOST = 0.30
 
+# Minimum combined score to appear in results — filters out weak/tangential matches
+_MIN_SCORE = 0.10
+
 
 def _normalise(scores: list[float]) -> list[float]:
     """Min-max normalise to [0, 1].
@@ -57,7 +60,7 @@ class HybridBackend(SearchBackend):
         self._ngram.build(widgets)
 
     def query(self, query: str, domain_filter: str | None = None,
-              language_filter: str | None = None, top_k: int = 15) -> dict:
+              language_filter: str | None = None, top_k: int = 10) -> dict:
         if not self._widgets:
             return {"results": []}
 
@@ -80,7 +83,7 @@ class HybridBackend(SearchBackend):
                     combined += _EXACT_BOOST
                     break
 
-            if combined <= 0:
+            if combined < _MIN_SCORE:
                 continue
 
             if not apply_filters(widget, domain_filter, language_filter):

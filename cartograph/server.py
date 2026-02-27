@@ -80,6 +80,10 @@ TOOLS = [
                     "type": "string",
                     "enum": ["backend", "data", "ml", "security", "infra", "frontend", "universal"],
                     "description": "Filter by domain"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default: 10). Low-relevance results are always filtered out regardless of limit."
                 }
             },
             "required": ["query"]
@@ -514,6 +518,7 @@ async def call_tool(name: str, arguments: dict):
                 query=arguments["query"],
                 domain_filter=arguments.get("domain"),
                 language_filter=arguments.get("language"),
+                top_k=arguments.get("limit", 10),
             )
 
         elif name == "cartograph_inspect":

@@ -486,7 +486,7 @@ class Cartograph:
                              tags=tags, target_dir=target_dir, gpu_targets=gpu_targets,
                              widget_type=widget_type)
 
-    def search(self, query, domain_filter=None, language_filter=None, top_k=15):
+    def search(self, query, domain_filter=None, language_filter=None, top_k=10):
         """Search the widget library using hybrid BM25 + n-gram fuzzy matching."""
         if language_filter:
             normalized = normalize_language(language_filter)
