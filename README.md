@@ -4,19 +4,17 @@ A widget library MCP server for AI agents. Search, install, create, validate, an
 
 ## Why Cartograph
 
-AI agents write a lot of code, but it disappears. Each new project starts from scratch, and agents don't naturally reuse logic across codebases without somewhere to put it.
+AI agents write a lot of code, but it disappears. Each new project starts from scratch, and agents can't naturally reuse logic across codebases without somewhere to put it.
 
 Cartograph came out of a personal frustration. Features that took 10 to 20 hours to polish with AI coding tools would need to be rebuilt almost from scratch when the next project needed them. Once a shared library existed, those same features could be dropped into a new project in minutes.
 
-Some widgets have now been reused across many projects and have settled into a quiet loop of continuous improvement: each time a new edge case surfaces, the fix goes back into the library, and every project that installs it going forward starts with that bug already squashed.
-
-Cartograph closes that loop for AI agents. When an agent finishes a self-contained piece of logic, it packages it as a widget and checks it in. The next agent, on a different project or a different day, finds it, installs it, and builds on top of work that has already been hardened.
+Those same widgets have now been reused across many projects and have settled into a quiet loop of continuous improvement. Each time a new edge case surfaces, the fix goes back into the library, and every project that installs it going forward starts with that bug already squashed.
 
 ## Philosophy
 
-We only ship what we can fully validate. That means Cartograph currently supports Python end-to-end: scaffolding, test running, coverage enforcement, contamination scanning, versioning, and checkin. Every widget that enters the library has passed all of those checks.
+AI coding operates with little oversight beyond what the user can catch. Our validation pipeline for widgets are built to ensure usable code gets saved into the library. We only ship what we can validate. That means Cartograph currently supports Python end-to-end: scaffolding, test running, coverage enforcement, contamination scanning, versioning, and checkin. Every widget that enters the library has passed all of those checks.
 
-Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready, not before. If you have ideas for improving these pipelines, they are greatly appreciated.
+Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready, not before. All languages will use the same validation philophies as presented in the Python loop. If you have ideas for improving these pipelines, they are greatly appreciated.
 
 ## Quick Start
 
@@ -48,7 +46,7 @@ codex mcp add cartograph -- cartograph
 gemini mcp add --scope user cartograph cartograph
 ```
 
-### Other MCP clients (Cursor, VS Code Copilot, Claude Desktop, etc.)
+### Other MCP clients (Cursor, Copilot, etc.)
 
 Add to the client's MCP config:
 
@@ -65,17 +63,17 @@ Add to the client's MCP config:
 
 ### Project setup
 
-Once the MCP is registered, ask your agent to set up instructions for the current project:
+Once the MCP is registered, ask your agent to set up instructions for the current project based on the mode you would like to use (see table below):
 
 > "Set up Cartograph instructions in **developer** mode."
 
 The agent calls `cartograph_setup`, which returns the right instruction text to append to your project's instruction file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). This lets you configure Cartograph per-project, so a consumer-facing app, an internal tool, and a library maintenance session can all behave differently without touching global settings.
 
-Choose a mode based on how you want the agent to behave (see table below).
+Choose a mode based on how you want the agent to behave.
 
 | Mode | Who it's for | What it does |
 |---|---|---|
-| `consumer` | Teams pulling from a shared library | Search before writing. Install and rate. No widget authoring. |
+| `consumer` | Teams pulling from a shared library | Search before writing. Install and rate. No explicit widget authoring in design flow. |
 | `developer` | Most local projects (recommended) | Search first + package reusable logic when you're done. |
 | `maintainer` | Dedicated library agent | Audit existing widgets, improve low-rated ones, create new ones. |
 
@@ -96,7 +94,7 @@ pip install -e .
 pytest
 ```
 
-The engine expects a `Widget_Library/` directory alongside the repo (or set `WIDGET_LIBRARY_PATH` env var).
+Set `WIDGET_LIBRARY_PATH` to point to your global widget library directory. When running from source, the engine also looks for a `Widget_Library/` directory alongside this repo as a fallback.
 
 ## Architecture
 
