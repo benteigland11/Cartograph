@@ -249,18 +249,21 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     # --- Determine update vs new ---
     is_update = widget_record is not None
 
-    # --- Version bump ---
+    # --- Version bump (only on updates, not first checkin) ---
     version = meta.get("version", "1.0.0")
-    parts = version.split(".")
-    if len(parts) == 3:
-        major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
-        if version_bump == "major":
-            major, minor, patch = major + 1, 0, 0
-        elif version_bump == "minor":
-            minor, patch = minor + 1, 0
-        elif version_bump == "patch":
-            patch += 1
-        new_version = f"{major}.{minor}.{patch}"
+    if is_update:
+        parts = version.split(".")
+        if len(parts) == 3:
+            major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+            if version_bump == "major":
+                major, minor, patch = major + 1, 0, 0
+            elif version_bump == "minor":
+                minor, patch = minor + 1, 0
+            elif version_bump == "patch":
+                patch += 1
+            new_version = f"{major}.{minor}.{patch}"
+        else:
+            new_version = version
     else:
         new_version = version
 
