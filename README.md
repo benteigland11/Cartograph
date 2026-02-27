@@ -2,6 +2,20 @@
 
 A widget library MCP server for AI agents. Search, install, create, validate, and check in reusable code widgets across languages.
 
+## Why Cartograph
+
+AI agents write a lot of code, but it disappears. Each new project starts from scratch, and agents don't naturally reuse logic across codebases without somewhere to put it.
+
+Cartograph closes that loop. When an agent finishes a self-contained piece of logic, it packages it as a widget and checks it in. The next agent, on a different project or a different day, finds it, installs it, and rates it. Over time the library gets smarter: low-rated widgets get improved, high-rated ones get used more, and patterns that work keep spreading.
+
+The rating system is built around integration friction, not subjective quality. A score answers one question: *how easy was this to plug in?* That signal is useful to agents making install decisions, and honest enough to be worth collecting.
+
+## Philosophy
+
+We only ship what we can fully validate. That means Cartograph currently supports Python end-to-end: scaffolding, test running, coverage enforcement, contamination scanning, versioning, and checkin. Every widget that enters the library has passed all of those checks.
+
+Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready, not before.
+
 ## Quick Start
 
 Install once:
@@ -53,7 +67,7 @@ Once the MCP is registered, ask your agent to set up instructions for the curren
 
 > "Set up Cartograph instructions in **developer** mode."
 
-The agent calls `cartograph_setup`, which returns the right instruction text to append to your project's instruction file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). This lets you configure Cartograph per-project — a consumer-facing app, an internal tool, and a library maintenance session can all behave differently without touching global settings.
+The agent calls `cartograph_setup`, which returns the right instruction text to append to your project's instruction file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). This lets you configure Cartograph per-project, so a consumer-facing app, an internal tool, and a library maintenance session can all behave differently without touching global settings.
 
 Choose a mode based on how you want the agent to behave (see table below).
 
@@ -98,20 +112,6 @@ cartograph/
 tests/               pytest suite
 ```
 
-## Why Cartograph
-
-AI agents write a lot of code — but it disappears. Each new project starts from scratch, and agents don't naturally reuse logic across codebases without somewhere to put it.
-
-Cartograph closes that loop. When an agent finishes a self-contained piece of logic, it packages it as a widget and checks it in. The next agent — on a different project, or a different day — finds it, installs it, and rates it. Over time the library gets smarter: low-rated widgets get improved, high-rated ones get used more, and patterns that work keep spreading.
-
-The rating system is built around integration friction, not subjective quality. A score answers one question: *how easy was this to plug in?* That signal is useful to agents making install decisions, and honest enough to be worth collecting.
-
-## Philosophy
-
-We only ship what we can fully validate. That means Cartograph currently supports Python end-to-end: scaffolding, test running, coverage enforcement, contamination scanning, versioning, and checkin. Every widget that enters the library has passed all of those checks.
-
-Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready — not before.
-
 ## Status
 
 - Python: fully supported (create, validate, test, checkin)
@@ -120,4 +120,4 @@ Supporting a language means owning its full validation pipeline, not just genera
 
 ## Roadmap
 
-- **More languages** — as validation pipelines are built and tested
+- **More languages** as validation pipelines are built and tested
