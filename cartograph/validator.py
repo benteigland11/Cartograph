@@ -99,7 +99,22 @@ def validate_item(carto, path):
             _print_checklist(checklist, errors, failed=True)
             return {"status": "error", "message": f"{folder}/ is missing or empty"}
 
-    # 7b. example_usage.py exists, has no TODOs, and runs cleanly
+    # 7b. src/__init__.py imports cleanly
+    init_path = os.path.join(path, "src", "__init__.py")
+    if os.path.exists(init_path):
+        init_result = subprocess.run(
+            [sys.executable, "-c", "import src"],
+            cwd=path, capture_output=True, text=True, timeout=10
+        )
+        init_ok = init_result.returncode == 0
+        init_err = (init_result.stderr or "").strip()
+        if not check("src/__init__.py imports cleanly", init_ok, init_err):
+            _print_checklist(checklist, errors, failed=True)
+            return {"status": "error",
+                    "message": "src/__init__.py has import errors.",
+                    "test_output": init_err}
+
+    # 7c. example_usage.py exists, has no TODOs, and runs cleanly
     example_path = os.path.join(path, "examples", "example_usage.py")
     if not check("examples/example_usage.py exists", os.path.exists(example_path),
                  "Missing examples/example_usage.py"):
