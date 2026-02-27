@@ -20,19 +20,6 @@ claude mcp add --scope user cartograph -- cartograph
 
 Or just open this repo in Claude Code — the included `.mcp.json` registers it automatically.
 
-Then ask your agent: **"Set up Cartograph instructions for this project."**
-It will call `cartograph_setup` and add the right instructions to your project's instruction file.
-
-Choose a mode based on how you want your agent to behave:
-
-| Mode | Who it's for | What it does |
-|---|---|---|
-| `consumer` | Teams pulling from a shared library | Search before writing. Install and rate. No widget authoring. |
-| `developer` | Default for local projects | Search first + package reusable logic when you're done. |
-| `maintainer` | Dedicated library agent | Audit existing widgets, improve low-rated ones, create new ones. |
-
-Example prompt: **"Set up Cartograph in developer mode."**
-
 ### Codex
 
 ```bash
@@ -59,6 +46,22 @@ Add to the client's MCP config:
   }
 }
 ```
+
+### Project setup
+
+Once the MCP is registered, ask your agent to set up instructions for the current project:
+
+> "Set up Cartograph instructions in **developer** mode."
+
+The agent calls `cartograph_setup`, which returns the right instruction text to append to your project's instruction file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). This lets you configure Cartograph per-project — a consumer-facing app, an internal tool, and a library maintenance session can all behave differently without touching global settings.
+
+Choose a mode based on how you want the agent to behave (see table below). The default is `developer`.
+
+| Mode | Who it's for | What it does |
+|---|---|---|
+| `consumer` | Teams pulling from a shared library | Search before writing. Install and rate. No widget authoring. |
+| `developer` | Most local projects | Search first + package reusable logic when you're done. |
+| `maintainer` | Dedicated library agent | Audit existing widgets, improve low-rated ones, create new ones. |
 
 ## CLI
 
