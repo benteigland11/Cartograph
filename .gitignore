@@ -85,7 +85,6 @@ cartograph/*/tests/
 cartograph/*/examples/
 
 # Library content — tracked separately, not part of the engine
-Widget_Library/
 
 # Failed / temp
 failed_widgets/
@@ -105,4 +104,5 @@ checkouts/
 *.swp
 *.swo
 .cartographer/
+Widget_Library/
 cartograph/seed_library/**/.coverage
