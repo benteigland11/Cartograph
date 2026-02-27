@@ -20,6 +20,9 @@ claude mcp add --scope user cartograph -- cartograph
 
 Or just open this repo in Claude Code — the included `.mcp.json` registers it automatically.
 
+Then ask your agent: **"Set up Cartograph instructions for this project."**
+It will fetch the right instructions from the MCP and add them to your project's instruction file.
+
 ### Codex
 
 ```bash

@@ -319,6 +319,10 @@ PROMPTS = [
 _INSTRUCTIONS_BASE = """\
 ## Cartograph
 
+**First time in a new project:** fetch the Cartograph instructions resource
+that matches your environment from the MCP and append it to this project's
+instruction file. Do this once per project before proceeding.
+
 Cartograph is a shared widget library. Widgets are reusable, self-contained
 code modules. They live in your project under cartograph/<widget_id>/.
 
