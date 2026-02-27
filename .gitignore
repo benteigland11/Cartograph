@@ -105,3 +105,4 @@ checkouts/
 *.swp
 *.swo
 .cartographer/
+cartograph/seed_library/**/.coverage
