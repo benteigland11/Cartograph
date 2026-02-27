@@ -55,12 +55,12 @@ Once the MCP is registered, ask your agent to set up instructions for the curren
 
 The agent calls `cartograph_setup`, which returns the right instruction text to append to your project's instruction file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). This lets you configure Cartograph per-project — a consumer-facing app, an internal tool, and a library maintenance session can all behave differently without touching global settings.
 
-Choose a mode based on how you want the agent to behave (see table below). The default is `developer`.
+Choose a mode based on how you want the agent to behave (see table below).
 
 | Mode | Who it's for | What it does |
 |---|---|---|
 | `consumer` | Teams pulling from a shared library | Search before writing. Install and rate. No widget authoring. |
-| `developer` | Most local projects | Search first + package reusable logic when you're done. |
+| `developer` | Most local projects (recommended) | Search first + package reusable logic when you're done. |
 | `maintainer` | Dedicated library agent | Audit existing widgets, improve low-rated ones, create new ones. |
 
 ## CLI
