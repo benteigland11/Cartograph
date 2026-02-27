@@ -228,92 +228,88 @@ TOOLS = [
 # PROMPT DEFINITIONS
 # ============================================================================
 
-_WORKFLOW_CREATE = """\
-You are authoring a new Cartograph widget. Follow this workflow exactly:
+_WORKFLOW_CHECKIN = """\
+You have finished writing a piece of logic. Before moving on, ask:
+"Could this work in another project without modification?"
 
-1. SEARCH FIRST — cartograph_search to check if something similar exists.
-   If it does, consider extending it via checkin instead of creating new.
+If yes, package it as a widget now while the context is fresh.
 
-2. CREATE — cartograph_create with:
+1. CREATE scaffold — cartograph_create with:
    - widget_id: <domain>-<name> (e.g. logic-retry-backoff, data-csv-parser)
    - language: python
    - target: absolute path to the project root
    Widget lands at <target>/cartograph/<widget_id>-python/
 
-3. IMPLEMENT — write the real logic in src/. Rules:
-   - Zero external dependencies unless declared in widget.json tech_stack.dependencies
-   - Type hints on all public functions
-   - No global state, no hardcoded paths, no project-specific code
+2. COPY your code into src/. Clean it up:
+   - Remove anything project-specific (imports, paths, config, assumptions)
+   - Add type hints to all public functions
+   - No global state, no hardcoded values
+   - Declare any third-party dependencies in widget.json tech_stack.dependencies
 
-4. TEST — write thorough tests in tests/. Rules:
-   - pytest only, no unittest
-   - No __init__.py in tests/
-   - Target 80%+ coverage — the validator enforces this
+3. WRITE TESTS in tests/:
+   - pytest only, no unittest, no __init__.py in tests/
+   - 80%+ coverage — the validator enforces this
    - Mock stdin/network/filesystem where needed
 
-5. EXAMPLE — write examples/example_usage.py. Rules:
+4. WRITE EXAMPLE in examples/example_usage.py:
    - Must run and exit cleanly with no user input
-   - Use hardcoded/fake data only
-   - Demonstrate the primary API
+   - Use hardcoded/fake data, demonstrate the primary API
 
-6. VALIDATE — cartograph_validate <widget_path>
-   Fix every issue before proceeding. Common failures:
+5. VALIDATE — cartograph_validate <widget_path>
+   Fix every issue. Common failures:
    - Coverage too low → add tests
-   - Example fails → check for interactive input or missing imports
+   - Example fails → remove interactive input or missing imports
    - Contamination → remove absolute paths or credentials from src/
 
-7. CHECKIN — cartograph_checkin with a clear reason describing what it does.
-   On success, rate yourself: cartograph_rate (score 1-5, honest comment).
+6. CHECKIN — cartograph_checkin with a one-line reason.
+
+7. RATE — cartograph_rate (honest score, one specific comment).
 """
 
 _WORKFLOW_INSTALL = """\
-You are installing a Cartograph widget into a project. Follow this workflow:
+You need a piece of utility logic. Search before writing it yourself.
 
-1. SEARCH — cartograph_search with a natural language query describing what you need.
-   Try multiple queries if first results are poor (synonyms, shorter queries).
+1. SEARCH — cartograph_search with a natural language query.
+   Try short queries, synonyms, or domain terms if first results are poor.
 
-2. INSPECT — cartograph_inspect on promising results to see:
-   - Source code (show_source: true)
-   - Reviews and ratings
-   - Examples of usage
+2. INSPECT — cartograph_inspect on anything promising:
+   - show_source: true to read the actual code
+   - show_reviews: true to see what others ran into
 
-3. INSTALL — cartograph_install with:
-   - widget_id: the widget ID from search results
+3. INSTALL — cartograph_install:
+   - widget_id: from search results
    - target: absolute path to the project root
    Widget lands at <target>/cartograph/<widget_id>/
 
 4. USE — import from cartograph/<widget_id>/src/
-   Check the examples/ directory for usage patterns.
+   Check examples/ for usage patterns.
 
 5. RATE — cartograph_rate after using it.
-   Be honest: score reflects how easy it was to plug in, not whether you like it.
-   Leave a comment about what worked, what you changed, or what surprised you.
-
-6. UPDATE (if needed) — cartograph_status to check if outdated.
-   cartograph_update to pull the latest version.
+   Score = how easy was it to plug in (1-5).
+   Comment = one specific thing: what worked, what you changed, or what surprised you.
 """
 
 _WORKFLOW_MAINTAIN = """\
-You are maintaining Cartograph widgets in a project. Follow this workflow:
+You are updating or contributing back to installed widgets.
 
 1. CHECK STATUS — cartograph_status for each installed widget.
-   Look for: outdated (new version available), modified (local changes differ from library).
+   Outdated = new version in library. Modified = your local copy differs.
 
-2. REVIEW CHANGES — cartograph_inspect <widget_id> show_all_versions: true
-   Read the changelog to understand what changed before updating.
+2. BEFORE UPDATING — cartograph_inspect show_all_versions: true
+   Read the changelog. Understand what changed.
 
-3. UPDATE — cartograph_update if the new version looks safe.
-   Your local modifications will be overwritten — back them up first if needed.
+3. UPDATE — cartograph_update pulls the latest version.
+   Warning: overwrites local changes. Back up modifications first if needed.
 
-4. CONTRIBUTE BACK — if you fixed a bug or improved a widget locally,
-   check it back in: cartograph_checkin with a clear reason.
-   Your fix helps everyone using that widget.
+4. CONTRIBUTE BACK — fixed a bug or improved a widget?
+   cartograph_checkin with a clear reason. Your fix goes into the library
+   and helps everyone using that widget.
 """
 
 PROMPTS = [
-    Prompt(name="create-widget",    description="Step-by-step workflow for authoring and publishing a new widget"),
-    Prompt(name="install-widget",   description="Step-by-step workflow for finding, installing, and rating a widget"),
-    Prompt(name="maintain-widgets", description="Step-by-step workflow for checking status, updating, and contributing fixes"),
+    Prompt(name="checkin-widget",   description="Workflow for packaging finished code as a reusable widget and checking it in"),
+    Prompt(name="install-widget",   description="Workflow for finding, installing, and rating a widget"),
+    Prompt(name="maintain-widgets", description="Workflow for updating installed widgets and contributing fixes back"),
 ]
 
 # ============================================================================
@@ -323,43 +319,55 @@ PROMPTS = [
 _INSTRUCTIONS_BASE = """\
 ## Cartograph
 
-Cartograph is a widget library MCP server. Widgets are reusable, self-contained
-code modules that live in your project under cartograph/<widget_id>/.
+Cartograph is a shared widget library. Widgets are reusable, self-contained
+code modules. They live in your project under cartograph/<widget_id>/.
 
-### As a consumer
-Before writing new utility code, search the library first:
-- cartograph_search — find existing widgets
-- cartograph_install — install to project root (widgets land in cartograph/)
-- cartograph_rate — rate after using (honest score + one specific comment)
-- cartograph_status / cartograph_update — keep widgets current
+### Two rules to follow on every task
 
-### As an author
-When you write code that could be reused across projects, package it:
-- cartograph_create — scaffold a new widget in this project
-- Build the logic, write tests (80%+ coverage), write a non-interactive example
-- cartograph_validate — must pass before checkin
-- cartograph_checkin — publish to the library
+**1. Search before writing utility code.**
+Before implementing anything self-contained (a parser, a retry helper, a rate
+limiter, a formatter), run cartograph_search. If something useful exists,
+install and use it instead of writing from scratch.
+
+**2. When you finish a self-contained piece of logic, ask: is this reusable?**
+If it could work in another project without modification, package it as a widget.
+Do this at the end of the task while the context is fresh — not later.
+Use the checkin-widget workflow prompt for step-by-step guidance.
+
+### Core tools
+- cartograph_search — search the library
+- cartograph_install — install a widget (target = project root)
+- cartograph_rate — rate after using (required: honest score + one comment)
+- cartograph_checkin — publish finished code to the library
+- cartograph_validate — validate before checkin (must pass)
 
 ### Widget IDs
-Format: <domain>-<name>-<language>  e.g. logic-retry-backoff-python
+Format: <domain>-<name>  e.g. logic-retry-backoff, data-csv-parser
 Domains: backend, data, ml, security, infra, frontend, universal
 
-### Workflows
-Use MCP prompts for detailed step-by-step guidance:
-- /mcp__cartograph__create-widget
+### Detailed workflows (load on demand)
+"""
+
+_INSTRUCTIONS_CLAUDE = _INSTRUCTIONS_BASE + """\
+Type in chat to load step-by-step guidance:
 - /mcp__cartograph__install-widget
+- /mcp__cartograph__checkin-widget
 - /mcp__cartograph__maintain-widgets
 """
 
-_INSTRUCTIONS_CLAUDE = _INSTRUCTIONS_BASE.replace(
-    "- /mcp__cartograph__create-widget\n"
-    "- /mcp__cartograph__install-widget\n"
-    "- /mcp__cartograph__maintain-widgets",
-    "Type these in chat to load the full workflow:\n"
-    "- /mcp__cartograph__create-widget\n"
-    "- /mcp__cartograph__install-widget\n"
-    "- /mcp__cartograph__maintain-widgets"
-)
+_INSTRUCTIONS_CODEX = _INSTRUCTIONS_BASE + """\
+Fetch these prompts for step-by-step guidance:
+- mcp prompt cartograph install-widget
+- mcp prompt cartograph checkin-widget
+- mcp prompt cartograph maintain-widgets
+"""
+
+_INSTRUCTIONS_GEMINI = _INSTRUCTIONS_BASE + """\
+Fetch these prompts for step-by-step guidance:
+- install-widget
+- checkin-widget
+- maintain-widgets
+"""
 
 _INSTRUCTIONS_CODEX   = _INSTRUCTIONS_BASE
 _INSTRUCTIONS_GEMINI  = _INSTRUCTIONS_BASE
@@ -497,7 +505,7 @@ async def list_prompts():
 @server.get_prompt()
 async def get_prompt(name: str, arguments: dict | None = None):
     workflows = {
-        "create-widget":    _WORKFLOW_CREATE,
+        "checkin-widget":   _WORKFLOW_CHECKIN,
         "install-widget":   _WORKFLOW_INSTALL,
         "maintain-widgets": _WORKFLOW_MAINTAIN,
     }
