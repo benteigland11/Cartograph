@@ -26,8 +26,8 @@ def python(target_dir, module_name, display_name, **_):
         f.write(
             f'"""\n'
             f"Example usage of {display_name}.\n\n"
-            f"This file must run cleanly with no external dependencies or network calls.\n"
-            f"Use fake/hardcoded data to demonstrate the widget's logic.\n"
+            f"This file must run and exit cleanly with no user input, no network calls,\n"
+            f"and no external dependencies. Use fake/hardcoded data to demonstrate the API.\n"
             f'"""\n'
             f"import sys, os\n"
             f"sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))\n"
