@@ -121,4 +121,3 @@ Supporting a language means owning its full validation pipeline, not just genera
 ## Roadmap
 
 - **More languages** — as validation pipelines are built and tested
-- **Trend signals** — surface which widgets are improving vs. declining over time
