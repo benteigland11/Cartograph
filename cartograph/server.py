@@ -383,11 +383,23 @@ useful exists, install and use it instead of writing from scratch.
 If it could work in another project without modification, package it as a widget.
 Do this at the end of the task while the context is fresh — not later.
 
+### Editing installed widgets
+Do not edit files inside cartograph/<widget_id>/ directly. They are shared
+code and local edits will be overwritten if the widget is updated.
+
+- If the widget's behavior doesn't fit your needs, wrap or extend it in your
+  own project code rather than modifying the widget source.
+- If you find a bug or a genuine improvement, fix it and use cartograph_checkin
+  to contribute it back. The fix goes into the library and benefits every
+  project using that widget.
+- cartograph_status will tell you if your local copy has drifted from the
+  library version.
+
 ### Core tools
 - cartograph_search — search the library
 - cartograph_install — install a widget (target = project root)
 - cartograph_rate — rate after using (required: honest score + one comment)
-- cartograph_checkin — publish finished code to the library
+- cartograph_checkin — contribute a fix back to the library
 - cartograph_validate — validate before checkin (must pass)
 """
 
@@ -412,6 +424,9 @@ changelog entry in cartograph_checkin.
 **3. Create new widgets for recurring patterns.**
 If a pattern keeps appearing across projects but isn't in the library, build it.
 cartograph_create → develop → validate → checkin.
+
+Every change must go through cartograph_validate and cartograph_checkin before
+it counts. Edits that stay local help nobody.
 
 ### Core tools (full access)
 - cartograph_search / cartograph_inspect
