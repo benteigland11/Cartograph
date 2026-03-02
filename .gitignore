@@ -79,10 +79,7 @@ test_llm.json
 model_profiles.json
 
 # Installed/authored widgets (local only, not the cartograph/ package source)
-cartograph/*/widget.json
-cartograph/*/src/
-cartograph/*/tests/
-cartograph/*/examples/
+cartograph/*/
 
 # Library content — tracked separately, not part of the engine
 
