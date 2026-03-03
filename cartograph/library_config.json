@@ -9,9 +9,10 @@
     "universal": "Pure utilities with no domain dependency (string ops, retry, math, date handling). If a widget could reasonably belong to two domains, it belongs here."
   },
 
-  "general_notes": "Single responsibility — one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. All dependencies must be declared in widget.json tech_stack.dependencies. Examples must run and exit cleanly with no user input, no network calls, and no external dependencies. Do not modify library_notes — it is managed by Cartograph and will be restored on checkin.",
+  "general_notes": "Single responsibility — one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. Expose variation points as constructor parameters or function arguments — no hardcoded thresholds, colors, sizes, or behavior flags. All dependencies must be declared in widget.json tech_stack.dependencies. Examples must run and exit cleanly with no user input, no network calls, and no external dependencies. Do not modify library_notes — it is managed by Cartograph and will be restored on checkin.",
 
   "language_notes": {
-    "python": "Use pytest for all tests — no unittest. Type hints required on all public functions. No __init__.py in tests/. No if __name__ == '__main__' blocks in src/ files. Imports ordered: stdlib, third-party, local."
+    "python": "Use pytest for all tests — no unittest. Type hints required on all public functions. No __init__.py in tests/. No if __name__ == '__main__' blocks in src/ files. Imports ordered: stdlib, third-party, local.",
+    "frontend": "All appearance values (colors, spacing, typography, shadows) must be exposed as CSS custom properties — hardcoded values lock consumers into your choices. Provide sensible defaults via :root or the component root but every value must be overridable. No inline styles for anything that could vary by theme."
   }
 }
