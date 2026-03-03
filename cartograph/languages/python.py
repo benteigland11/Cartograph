@@ -1,5 +1,6 @@
 """Python language engine — uses pip + pytest + pytest-cov."""
 
+import ast
 import glob
 import os
 import sys
@@ -20,17 +21,12 @@ class PythonEngine(LanguageEngine):
         if not os.path.exists(init):
             errors.append("src/__init__.py is missing — add an empty one so the package is importable")
 
-        # 2. No print() calls in src/
+        # 2. No print() calls in src/ (AST-based: ignores docstrings and comments)
         src_files = glob.glob(os.path.join(path, "src", "**", "*.py"), recursive=True)
         for fpath in src_files:
-            try:
-                for i, line in enumerate(open(fpath), 1):
-                    stripped = line.lstrip()
-                    if stripped.startswith("print(") or stripped.startswith("print ("):
-                        rel = os.path.relpath(fpath, path)
-                        errors.append(f"print() in {rel}:{i} — remove debug output from src/")
-            except Exception:
-                pass
+            for lineno in self._find_print_calls(fpath):
+                rel = os.path.relpath(fpath, path)
+                errors.append(f"print() in {rel}:{lineno} — remove debug output from src/")
 
         # 3. Dependencies must have a version floor
         errors.extend(self._check_dep_pinning(dependencies))
@@ -38,6 +34,24 @@ class PythonEngine(LanguageEngine):
         if errors:
             return self._fail("\n".join(errors))
         return self._ok()
+
+    def _find_print_calls(self, fpath: str) -> list:
+        """Return line numbers of print() calls in actual code, skipping docstrings."""
+        try:
+            with open(fpath) as f:
+                source = f.read()
+            tree = ast.parse(source)
+        except Exception:
+            return []
+        lines = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "print"
+            ):
+                lines.append(node.lineno)
+        return lines
 
     def install_deps(self, path: str, dependencies: list) -> None:
         all_deps = list(dependencies) + ["pytest", "pytest-cov"]

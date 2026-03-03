@@ -38,8 +38,10 @@ _LANG_VERSIONS = {
 
 _COMPILER_DEFAULTS = {}
 
+_VALID_DOMAINS = {"backend", "data", "ml", "security", "infra", "frontend", "universal"}
 
-def create_widget(carto, item_id, language, name=None, domain="backend", tags=None,
+
+def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
                   target_dir=None, gpu_targets=None, widget_type=None):
     """Scaffold a new widget directory. Returns a status dict."""
     if tags is None:
@@ -52,11 +54,20 @@ def create_widget(carto, item_id, language, name=None, domain="backend", tags=No
 
     normalized_lang = carto._normalize_language(language)
 
+    # Strip language suffix to get the base id for name/domain inference
+    name_base = item_id
+    if name_base.endswith(f"-{normalized_lang}"):
+        name_base = name_base[: -len(normalized_lang) - 1]
+
+    # Infer domain from widget_id prefix if not explicitly provided
+    base_parts = name_base.split("-")
+    if domain is None:
+        domain = base_parts[0] if base_parts[0] in _VALID_DOMAINS else "backend"
+
+    # Derive display name, stripping the domain prefix so it doesn't appear in the title
     if not name:
-        name_base = item_id
-        if name_base.endswith(f"-{normalized_lang}"):
-            name_base = name_base[: -len(normalized_lang) - 1]
-        name = name_base.replace("-", " ").title()
+        display_parts = base_parts[1:] if base_parts[0] in _VALID_DOMAINS else base_parts
+        name = " ".join(display_parts).title() if display_parts else name_base.replace("-", " ").title()
 
     if not item_id.endswith(f"-{normalized_lang}"):
         item_id = f"{item_id}-{normalized_lang}"

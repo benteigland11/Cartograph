@@ -80,6 +80,10 @@ model_profiles.json
 
 # Installed/authored widgets (local only, not the cartograph/ package source)
 cartograph/*/
+!cartograph/languages/
+!cartograph/scaffolding/
+!cartograph/search/
+!cartograph/seed_library/
 
 # Library content — tracked separately, not part of the engine
 

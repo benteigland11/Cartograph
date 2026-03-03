@@ -184,7 +184,12 @@ TOOLS = [
                     "type": "string",
                     "enum": ["python"]
                 },
-                "target": {"type": "string", "description": "Absolute path to the project root"}
+                "target": {"type": "string", "description": "Absolute path to the project root"},
+                "domain": {
+                    "type": "string",
+                    "enum": ["backend", "data", "ml", "security", "infra", "frontend", "universal"],
+                    "description": "Widget domain. Inferred from widget_id prefix if omitted (e.g. 'frontend-json-viewer' → frontend)."
+                }
             },
             "required": ["widget_id", "language", "target"]
         }
@@ -548,6 +553,7 @@ async def call_tool(name: str, arguments: dict):
                 item_id=arguments["widget_id"],
                 language=arguments["language"],
                 target_dir=arguments["target"],
+                domain=arguments.get("domain"),
             )
 
         elif name == "cartograph_checkin":
