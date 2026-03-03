@@ -5,8 +5,8 @@ Runs cleanly with no user input, no network calls, no external dependencies.
 Shows static table rendering. Run interactively to use the keyboard browser.
 """
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from data_table import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.data_table import (
     render_table, interactive_table,
     Column, TableTheme,
     DEFAULT_BOX, ROUNDED_BOX, HEAVY_BOX,

@@ -2,8 +2,8 @@ import sys, os
 from unittest.mock import patch
 from io import StringIO
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from data_table import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.data_table import (
     render_table, interactive_table,
     Column, TableTheme, BoxChars,
     DEFAULT_THEME, DEFAULT_BOX, ROUNDED_BOX, HEAVY_BOX,

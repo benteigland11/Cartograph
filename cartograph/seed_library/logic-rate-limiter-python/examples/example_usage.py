@@ -7,8 +7,8 @@ Uses fake/hardcoded data to demonstrate the widget's logic.
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from rate_limiter import RateLimiter, RateLimitExceeded
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.rate_limiter import RateLimiter, RateLimitExceeded
 
 # Basic usage: 5 requests per second, burst of 3
 limiter = RateLimiter(rate=5, capacity=3)

@@ -5,8 +5,8 @@ This file must run cleanly with no external dependencies or network calls.
 Uses fake/hardcoded data to demonstrate the widget's logic.
 """
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from hybrid_bm25_ngram import HybridSearch
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.hybrid_bm25_ngram import HybridSearch
 
 # Sample document collection
 documents = [

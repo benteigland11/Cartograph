@@ -5,8 +5,8 @@ This file must run cleanly with no external dependencies or network calls.
 Use fake/hardcoded data to demonstrate the widget's logic.
 """
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from sparkline_chart import sparkline, sparkline_multi, sparkbar, COLOR_PRESETS
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.sparkline_chart import sparkline, sparkline_multi, sparkbar, COLOR_PRESETS
 import math
 
 print("=" * 60)

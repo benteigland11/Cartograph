@@ -7,8 +7,8 @@ Uses fake/hardcoded data to demonstrate the widget's logic.
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from retry_backoff import retry, RetryError
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.retry_backoff import retry, RetryError
 
 # Simulate a flaky function that fails twice then succeeds
 call_count = 0

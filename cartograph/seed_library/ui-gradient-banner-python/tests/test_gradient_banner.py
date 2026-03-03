@@ -2,8 +2,8 @@ import sys, os
 from unittest.mock import patch
 from io import StringIO
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from gradient_banner import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.gradient_banner import (
     gradient_banner, gradient_banner_frame, animate_banner,
     get_font_chars, GRADIENT_PRESETS, FONT_HEIGHT,
     _lerp_color, _rgb_fg, _resolve_colors, _text_to_grid, _FONT,

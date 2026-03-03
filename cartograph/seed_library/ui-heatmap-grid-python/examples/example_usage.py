@@ -8,8 +8,8 @@ import sys, os
 import math
 import random
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from heatmap_grid import heatmap, heatmap_compact, calendar_heatmap, COLOR_PRESETS
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.heatmap_grid import heatmap, heatmap_compact, calendar_heatmap, COLOR_PRESETS
 
 print("=" * 60)
 print("  HEATMAP GRID — DEMO")

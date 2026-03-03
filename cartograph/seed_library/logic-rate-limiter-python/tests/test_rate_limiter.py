@@ -3,8 +3,8 @@ import os
 import time
 import threading
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from rate_limiter import RateLimiter, RateLimitExceeded
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.rate_limiter import RateLimiter, RateLimitExceeded
 
 
 def test_basic_acquire():

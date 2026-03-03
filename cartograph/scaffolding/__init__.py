@@ -98,7 +98,7 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
         module_name = "mod_" + module_name
 
     # Build widget.json
-    meta = {"id": item_id, "name": name, "version": "1.0.0", "domain": domain, "tags": tags}
+    meta = {"id": item_id, "name": name, "version": "1.0.0", "domain": domain, "tags": tags or ["[TODO: add 3-5 tags]"]}
 
     tech_stack = {"language": normalized_lang, "dependencies": []}
 

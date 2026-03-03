@@ -6,8 +6,8 @@ When run non-interactively (piped, CI, etc.), prints a static demo showing
 the field definitions and simulated output.
 """
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from form_builder import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.form_builder import (
     run_form,
     TextField, PasswordField, NumberField,
     ConfirmField, SelectField, MultiSelectField,

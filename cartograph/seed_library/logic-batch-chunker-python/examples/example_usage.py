@@ -7,8 +7,8 @@ and no external dependencies. Use fake/hardcoded data to demonstrate the API.
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from batch_chunker import batch_chunker
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from src.batch_chunker import batch_chunker
 
 records = [
     "alpha",

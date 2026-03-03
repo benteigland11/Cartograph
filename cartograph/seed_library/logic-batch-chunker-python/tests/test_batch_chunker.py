@@ -3,8 +3,8 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from batch_chunker import batch_chunker
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from src.batch_chunker import batch_chunker
 
 
 def test_chunks_by_max_items():

@@ -5,8 +5,8 @@ When run interactively, shows animated gradient banners.
 When run non-interactively (piped), shows static demos.
 """
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from gradient_banner import gradient_banner, animate_banner, GRADIENT_PRESETS
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.gradient_banner import gradient_banner, animate_banner, GRADIENT_PRESETS
 
 print("=" * 60)
 print("  GRADIENT BANNER — DEMO")

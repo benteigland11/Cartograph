@@ -1,8 +1,8 @@
 import sys, os
 import math
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from heatmap_grid import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.heatmap_grid import (
     heatmap, heatmap_compact, calendar_heatmap,
     COLOR_PRESETS, BLOCKS,
     _lerp_color, _rgb_fg, _rgb_bg, _rgb_fg_bg,

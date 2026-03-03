@@ -2,8 +2,8 @@ import sys, os
 from unittest.mock import patch
 from io import StringIO
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from form_builder import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.form_builder import (
     TextField, PasswordField, NumberField, ConfirmField,
     SelectField, MultiSelectField, Theme, DEFAULT_THEME,
     required, min_length, max_length, in_range, matches,

@@ -2,8 +2,8 @@ import sys
 import os
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from retry_backoff import retry, RetryError
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.retry_backoff import retry, RetryError
 
 
 def test_succeeds_first_try():
