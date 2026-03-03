@@ -36,17 +36,21 @@ log = logging.getLogger("cartograph")
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "library_config.json")
 
 
-def _canonical_library_notes(language: str) -> dict:
-    """Return the authoritative library_notes for a given language."""
+def _canonical_library_notes(language: str, domain: str = "") -> dict:
+    """Return the authoritative library_notes for a given language and domain."""
     try:
         with open(_CONFIG_PATH) as f:
             cfg = json.load(f)
     except Exception:
         return {}
-    return {
+    notes = {
         "general": cfg.get("general_notes", ""),
         "language": cfg.get("language_notes", {}).get(language.lower(), ""),
     }
+    domain_note = cfg.get("domain_notes", {}).get(domain.lower(), "")
+    if domain_note:
+        notes["domain"] = domain_note
+    return notes
 
 
 def _restore_library_notes(manifest_path: str) -> None:
@@ -61,7 +65,8 @@ def _restore_library_notes(manifest_path: str) -> None:
         language = data.get("tech_stack", {}).get("language", "")
         if isinstance(language, list):
             language = language[0] if language else ""
-        canonical = _canonical_library_notes(language)
+        domain = data.get("meta", {}).get("domain", "")
+        canonical = _canonical_library_notes(language, domain)
         if canonical:
             data["library_notes"] = canonical
             with open(manifest_path, "w") as f:

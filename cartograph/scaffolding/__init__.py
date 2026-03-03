@@ -19,18 +19,21 @@ DEFAULT_INSTALL_DIR = "cartograph"
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "library_config.json")
 
-def _library_notes(language: str) -> dict:
-    """Load general + language-specific notes from library_config.json."""
+def _library_notes(language: str, domain: str = "") -> dict:
+    """Load general + language-specific + domain-specific notes from library_config.json."""
     try:
         with open(_CONFIG_PATH) as f:
             cfg = json.load(f)
     except Exception:
         return {}
-    lang_notes = cfg.get("language_notes", {}).get(language.lower(), "")
-    return {
+    notes = {
         "general": cfg.get("general_notes", ""),
-        "language": lang_notes,
+        "language": cfg.get("language_notes", {}).get(language.lower(), ""),
     }
+    domain_note = cfg.get("domain_notes", {}).get(domain.lower(), "")
+    if domain_note:
+        notes["domain"] = domain_note
+    return notes
 
 _LANG_VERSIONS = {
     "python": ">=3.10",
@@ -103,7 +106,7 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
         "meta": meta,
         "description": f"[TODO] Describe what {name} does",
         "tech_stack": tech_stack,
-        "library_notes": _library_notes(normalized_lang),
+        "library_notes": _library_notes(normalized_lang, domain),
     }
     with open(os.path.join(target_dir, "widget.json"), "w") as f:
         json.dump(manifest, f, indent=2)
