@@ -188,10 +188,10 @@ TOOLS = [
                 "domain": {
                     "type": "string",
                     "enum": ["backend", "data", "ml", "security", "infra", "frontend", "universal"],
-                    "description": "Widget domain. Inferred from widget_id prefix if omitted (e.g. 'frontend-json-viewer' → frontend)."
+                    "description": "Widget domain. Pick the one that best fits: backend (APIs, DBs, queues), data (parsing, transforms, pipelines), ml (inference, embeddings), security (auth, crypto, sanitization), infra (logging, config, health), frontend (UI, rendering, client logic), universal (pure utilities with no domain dependency)."
                 }
             },
-            "required": ["widget_id", "language", "target"]
+            "required": ["widget_id", "language", "target", "domain"]
         }
     ),
     Tool(

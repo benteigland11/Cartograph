@@ -62,12 +62,12 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
     if name_base.endswith(f"-{normalized_lang}"):
         name_base = name_base[: -len(normalized_lang) - 1]
 
-    # Infer domain from widget_id prefix if not explicitly provided
+    # Derive display name from base parts
     base_parts = name_base.split("-")
     if domain is None:
-        domain = base_parts[0] if base_parts[0] in _VALID_DOMAINS else "backend"
+        domain = "backend"
 
-    # Derive display name, stripping the domain prefix so it doesn't appear in the title
+    # Strip domain prefix from display name if it matches
     if not name:
         display_parts = base_parts[1:] if base_parts[0] in _VALID_DOMAINS else base_parts
         name = " ".join(display_parts).title() if display_parts else name_base.replace("-", " ").title()
