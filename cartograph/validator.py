@@ -9,6 +9,7 @@ import glob
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 
@@ -99,9 +100,45 @@ def validate_item(carto, path):
             _print_checklist(checklist, errors, failed=True)
             return {"status": "error", "message": f"{folder}/ is missing or empty"}
 
-    # 7b. src/__init__.py imports cleanly
+    # -- Resolve engine early so steps 7c/8 can use language-specific behaviour
+    from .languages import get_engine
+    from .engine import Cartograph, LIBRARY_PATH
+    language = tech_stack.get("language", "python").lower()
+    dependencies = tech_stack.get("dependencies", [])
+    engine = get_engine(language)
+
+    # 6b. No widget-on-widget dependencies
+    try:
+        library_ids = {w["id"] for w in Cartograph(LIBRARY_PATH).widgets}
+    except Exception:
+        library_ids = set()
+    widget_deps = [
+        d["name"] if isinstance(d, dict) else str(d)
+        for d in dependencies
+        if (d["name"] if isinstance(d, dict) else str(d)) in library_ids
+    ]
+    if not check("No widget-on-widget dependencies", not widget_deps,
+                 f"Dependencies cannot be other widgets: {', '.join(widget_deps)}. "
+                 "Copy the needed logic into src/ instead."):
+        _print_checklist(checklist, errors, failed=True)
+        return {"status": "error",
+                "message": f"Widget depends on other widgets ({', '.join(widget_deps)}). "
+                           "Widgets must be self-contained — copy the logic into src/ instead."}
+
+    if engine is None:
+        check(f"Language '{language}' recognised", False, f"Unknown language '{language}'")
+        _print_checklist(checklist, errors, failed=True)
+        return {"status": "error", "message": f"Unknown language '{language}'"}
+
+    if not engine.supported:
+        msg = f"'{language}' is not supported for validation. Supported languages: python, javascript."
+        check(f"Language '{language}' supported", False, msg)
+        _print_checklist(checklist, errors, failed=True)
+        return {"status": "error", "message": msg}
+
+    # 7b. src/__init__.py imports cleanly (Python only)
     init_path = os.path.join(path, "src", "__init__.py")
-    if os.path.exists(init_path):
+    if language == "python" and os.path.exists(init_path):
         init_result = subprocess.run(
             [sys.executable, "-c", "import src"],
             cwd=path, capture_output=True, text=True, timeout=10
@@ -114,49 +151,42 @@ def validate_item(carto, path):
                     "message": "src/__init__.py has import errors.",
                     "test_output": init_err}
 
-    # 7c. example_usage.py exists, has no TODOs, and runs cleanly
-    example_path = os.path.join(path, "examples", "example_usage.py")
-    if not check("examples/example_usage.py exists", os.path.exists(example_path),
-                 "Missing examples/example_usage.py"):
+    # 7c. Example file exists and has no TODOs (execution deferred until after install)
+    # Note: examples/usage_hint.* files are intentionally not executed — they are
+    # real code from the author that requires a browser/app context to run
+    # (see library_config.json general_notes for the full convention).
+    example_file = engine.example_filename(path)
+    example_path = os.path.join(path, "examples", example_file)
+    if not check(f"examples/{example_file} exists", os.path.exists(example_path),
+                 f"Missing examples/{example_file}"):
         _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": "Missing examples/example_usage.py"}
+        return {"status": "error", "message": f"Missing examples/{example_file}"}
 
     example_content = open(example_path).read()
     example_todos = example_content.count("[TODO]")
-    if not check("No [TODO] in example_usage.py", example_todos == 0,
-                 f"Found {example_todos} [TODO] placeholder(s) in example_usage.py — write real example code"):
+    if not check(f"No [TODO] in {example_file}", example_todos == 0,
+                 f"Found {example_todos} [TODO] placeholder(s) in examples/{example_file} — write real example code"):
         _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": "Replace [TODO] placeholders in examples/example_usage.py"}
+        return {"status": "error", "message": f"Replace [TODO] placeholders in examples/{example_file}"}
 
-    example_result = subprocess.run(
-        [sys.executable, "examples/example_usage.py"],
-        cwd=path, capture_output=True, text=True, timeout=15
-    )
-    example_ok = example_result.returncode == 0
-    example_err = (example_result.stderr or example_result.stdout)[:500]
-    if not check("example_usage.py runs cleanly", example_ok, example_err):
+    # 7d. Example imports at least one thing from src/
+    if language == "python":
+        imports_src = bool(re.search(r'from src\.|import src\.', example_content))
+    else:
+        imports_src = bool(re.search(r"from\s+['\"]\.\.?/src/", example_content))
+    if not check(f"{example_file} imports from src/", imports_src,
+                 f"examples/{example_file} does not import anything from src/ — the example must use the widget"):
         _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": "example_usage.py failed to run.",
-                "test_output": example_err}
+        return {"status": "error", "message": f"examples/{example_file} must import from src/"}
 
     # 8. Test files follow naming convention
-    test_files = glob.glob(os.path.join(path, "tests", "test_*.py"))
+    test_files = engine.find_test_files(path)
     if not check(f"Test files found ({len(test_files)})", len(test_files) > 0,
-                 "No test_*.py files found in tests/"):
+                 f"No test files found in tests/ for language '{language}'"):
         _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": "No test_*.py files found in tests/"}
+        return {"status": "error", "message": f"No test files found in tests/"}
 
-    # 9. Install deps and run tests
-    from .languages import get_engine
-    language = tech_stack.get("language", "python").lower()
-    dependencies = tech_stack.get("dependencies", [])
-    engine = get_engine(language)
-
-    if engine is None:
-        check(f"Language '{language}' recognised", False, f"Unknown language '{language}'")
-        _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": f"Unknown language '{language}'"}
-
+    # 9. Language checks, install deps, run example, run tests
     log.debug("Running language checks...")
     lang_check = engine.validate_widget(path, dependencies)
     if not check("Language checks pass", lang_check["passed"],
@@ -174,6 +204,14 @@ def validate_item(carto, path):
         check("Dependencies installed", False, str(e))
         _print_checklist(checklist, errors, failed=True)
         return {"status": "error", "message": f"Dependency install failed: {e}"}
+
+    log.debug("Running example...")
+    example_result = engine.run_example(path)
+    example_err = example_result.get("error", "")
+    if not check(f"{example_file} runs cleanly", example_result["passed"], example_err):
+        _print_checklist(checklist, errors, failed=True, test_output=example_err)
+        return {"status": "error", "message": f"{example_file} failed to run.",
+                "test_output": example_err[:500]}
 
     log.debug("Running tests...")
     result = engine.run_tests(path)
@@ -193,6 +231,11 @@ def validate_item(carto, path):
           f"Identical code already exists: {duplicate['id']}" if duplicate else None)
 
     _print_checklist(checklist, errors, failed=False)
+
+    # Write a stamp so checkin can skip re-validation if nothing changes
+    from .validation_stamp import write_stamp
+    write_stamp(path, language, engine)
+
     return {"status": "success", "message": "Widget is valid"}
 
 

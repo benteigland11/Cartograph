@@ -31,6 +31,9 @@ import re
 import shutil
 import sys
 
+from .languages import get_engine
+from .validation_stamp import is_stamp_valid, STAMP_FILE as _STAMP_FILE
+
 log = logging.getLogger("cartograph")
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "library_config.json")
@@ -89,6 +92,7 @@ _CREDENTIAL_RE = re.compile(
 )
 
 _ENVVAR_RE = re.compile(r'os\.getenv\(|os\.environ')
+_JS_ENVVAR_RE = re.compile(r'process\.env\b')
 
 _URL_RE = re.compile(
     r'["\']https?://(?!(?:localhost|127\.0\.0\.1|(?:[\w-]+\.)*example\.com|schemas?\.))[^"\']{8,}["\']'
@@ -103,31 +107,44 @@ _STDLIB = sys.stdlib_module_names  # complete, maintained by Python itself (3.10
 
 def _scan_contamination(path: str, widget: dict) -> dict:
     """
-    Scan Python source files for project-specific contamination.
+    Scan source files for project-specific contamination.
+    Handles Python (.py) and JavaScript/React (.js, .jsx) files.
     Returns {"blocks": [...], "warnings": [...]}.
     """
     blocks, warnings = [], []
+    language = widget.get("language", "python").lower()
+    is_js = language in ("javascript", "typescript", "js", "ts")
 
-    # Collect declared dependency names for import check
+    # Collect declared dependency names (for Python import check)
     deps = widget.get("dependencies", [])
     dep_names = set()
     for d in deps:
         name = d if isinstance(d, str) else d.get("name", "")
-        # strip extras [opt] and version specifiers >=, ==, ~=, etc.
         bare = re.split(r'[><=!~;\[]', name)[0].strip().lower()
         if bare:
             dep_names.add(bare)
 
-    # Widget's own module names (everything under src/)
+    # Widget's own module names (Python only)
     own_modules = set()
     src_dir = os.path.join(path, "src")
-    if os.path.isdir(src_dir):
+    if os.path.isdir(src_dir) and not is_js:
         for f in os.listdir(src_dir):
             if f.endswith(".py"):
                 own_modules.add(f[:-3])
 
-    src_files = glob.glob(os.path.join(path, "src", "**", "*.py"), recursive=True)
-    all_files = src_files + glob.glob(os.path.join(path, "tests", "**", "*.py"), recursive=True)
+    if is_js:
+        exts = ("*.js", "*.jsx", "*.ts", "*.tsx")
+        src_files = []
+        for ext in exts:
+            src_files.extend(glob.glob(os.path.join(path, "src", "**", ext), recursive=True))
+        test_files = []
+        for ext in exts:
+            test_files.extend(glob.glob(os.path.join(path, "tests", "**", ext), recursive=True))
+    else:
+        src_files = glob.glob(os.path.join(path, "src", "**", "*.py"), recursive=True)
+        test_files = glob.glob(os.path.join(path, "tests", "**", "*.py"), recursive=True)
+
+    all_files = src_files + test_files
 
     for fpath in all_files:
         rel = os.path.relpath(fpath, path)
@@ -139,8 +156,6 @@ def _scan_contamination(path: str, widget: dict) -> dict:
         for line_no, line in enumerate(code.splitlines(), 1):
             loc = f"{rel}:{line_no}"
 
-            # src/: hard block on paths and credentials
-            # tests/: warn on credentials (might be real), ignore paths (always fake)
             if fpath in src_files:
                 if _ABS_PATH_RE.search(line):
                     blocks.append(f"Absolute path in {loc}: {line.strip()}")
@@ -150,9 +165,11 @@ def _scan_contamination(path: str, widget: dict) -> dict:
                 if _CREDENTIAL_RE.search(line):
                     warnings.append(f"Possible credential in test {loc} — verify it's fake: {line.strip()}")
 
-        for m in _ENVVAR_RE.finditer(code):
+        envvar_re = _JS_ENVVAR_RE if is_js else _ENVVAR_RE
+        envvar_label = "process.env" if is_js else "os.environ/getenv"
+        for m in envvar_re.finditer(code):
             line_no = code[:m.start()].count("\n") + 1
-            warnings.append(f"os.environ/getenv call in {rel}:{line_no} — verify it's not project-specific")
+            warnings.append(f"{envvar_label} call in {rel}:{line_no} — verify it's not project-specific")
 
         for m in _URL_RE.finditer(code):
             line_no = code[:m.start()].count("\n") + 1
@@ -162,7 +179,8 @@ def _scan_contamination(path: str, widget: dict) -> dict:
             line_no = code[:m.start()].count("\n") + 1
             warnings.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
 
-        if fpath in src_files:
+        # Python-only: unlisted import check
+        if not is_js and fpath in src_files:
             for m in _IMPORT_RE.finditer(code):
                 top = m.group(1).split(".")[0].lower()
                 if top and top not in _STDLIB and top not in dep_names and top not in own_modules:
@@ -213,10 +231,16 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     if not item_id:
         return {"status": "error", "message": "widget.json is missing meta.id"}
 
-    # --- Validate ---
-    val = carto.validate_item(path)
-    if val["status"] != "success":
-        return val
+    # --- Validate (skip if a fresh stamp exists) ---
+    tech_stack = data.get("tech_stack", {})
+    language = tech_stack.get("language", "python").lower()
+    engine = get_engine(language)
+    if engine and is_stamp_valid(path, language, engine):
+        log.info("Validation stamp is fresh — skipping re-validation")
+    else:
+        val = carto.validate_item(path)
+        if val["status"] != "success":
+            return val
 
     # --- Check for outdated base version ---
     widget_record = next((w for w in carto.widgets if w["id"] == item_id), None)
@@ -291,9 +315,13 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         old_version = widget_record.get("version", "unknown")
         history_path = os.path.join(dest_path, "history", old_version)
         os.makedirs(history_path, exist_ok=True)
-        ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "history", "changelog.json")
+        ignore = shutil.ignore_patterns(
+            "__pycache__", "*.pyc", ".pytest_cache",
+            "node_modules", "package-lock.json",
+            "history", "changelog.json", _STAMP_FILE,
+        )
         for item in os.listdir(dest_path):
-            if item in ("history", "changelog.json"):
+            if item in ("history", "changelog.json", _STAMP_FILE, "node_modules", "package-lock.json"):
                 continue
             src = os.path.join(dest_path, item)
             dst = os.path.join(history_path, item)
@@ -306,10 +334,11 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     _restore_library_notes(manifest_path)
 
     # --- Copy working copy → library (never move — leave source intact) ---
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache")
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "node_modules", "package-lock.json")
     os.makedirs(dest_path, exist_ok=True)
     for item in os.listdir(path):
-        if item in ("history", "changelog.json", "__pycache__", ".pytest_cache"):
+        if item in ("history", "changelog.json", "__pycache__", ".pytest_cache", _STAMP_FILE,
+                    "node_modules", "package-lock.json"):
             continue
         src = os.path.join(path, item)
         dst = os.path.join(dest_path, item)

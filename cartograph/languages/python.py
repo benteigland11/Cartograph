@@ -9,9 +9,40 @@ from .base import LanguageEngine, log
 
 _COVERAGE_THRESHOLD = 80
 
+# Large ML frameworks that cannot be installed in a temp venv during validation.
+# These are hardware-dependent or extremely large — users must pre-install them.
+# If a widget lists one of these as a dependency, validation will use the
+# caller's existing environment install (if present) or fail with a clear message.
+_HEAVY_ML_DEPS = {
+    "torch", "torchvision", "torchaudio", "torch-nightly",
+    "tensorflow", "tensorflow-gpu", "tensorflow-cpu", "tf-nightly",
+    "keras",
+    "jax", "jaxlib",
+    "mxnet", "mxnet-cu102", "mxnet-cu110",
+    "paddle", "paddlepaddle", "paddlepaddle-gpu",
+    "flax", "optax",
+}
+
 
 class PythonEngine(LanguageEngine):
     name = "python"
+
+    def check_available(self) -> tuple[bool, str]:
+        import subprocess
+        missing = []
+        for tool in ("pytest", "coverage"):
+            r = subprocess.run(
+                [sys.executable, "-m", tool, "--version"],
+                capture_output=True,
+            )
+            if r.returncode != 0:
+                missing.append(tool)
+        if missing:
+            return False, (
+                f"Python engine requires {' and '.join(missing)} — "
+                f"run 'cartograph doctor' for setup instructions"
+            )
+        return True, ""
 
     def validate_widget(self, path: str, dependencies: list) -> dict:
         errors = []
@@ -58,12 +89,28 @@ class PythonEngine(LanguageEngine):
         log.debug("Installing %d Python package(s)...", len(all_deps))
         for dep in all_deps:
             dep_name = dep if isinstance(dep, str) else dep.get("name", "")
-            if dep_name:
-                self._run(
-                    [sys.executable, "-m", "pip", "install", "-q", dep_name],
-                    cwd=path,
-                    timeout=60,
-                )
+            if not dep_name:
+                continue
+            # Normalise: strip version specifiers to get the base package name
+            base_name = dep_name.split("[")[0].split("==")[0].split(">=")[0].split("<=")[0].split("!=")[0].strip().lower()
+            if base_name in _HEAVY_ML_DEPS:
+                # Check if it's already importable in the current environment
+                import importlib.util
+                import_name = base_name.replace("-", "_")
+                if importlib.util.find_spec(import_name) is not None:
+                    log.debug("Heavy ML dep '%s' found in environment — skipping install.", dep_name)
+                else:
+                    log.warning(
+                        "Heavy ML dep '%s' is not installed and cannot be auto-installed by Cartograph. "
+                        "Install it manually in your environment before running validation.",
+                        dep_name,
+                    )
+                continue
+            self._run(
+                [sys.executable, "-m", "pip", "install", "-q", dep_name],
+                cwd=path,
+                timeout=60,
+            )
 
     def run_tests(self, path: str) -> dict:
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}

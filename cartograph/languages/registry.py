@@ -10,14 +10,14 @@ To add a new language:
 """
 
 from .python import PythonEngine
+from .javascript import JavaScriptEngine, TypeScriptEngine
 from .base import LanguageEngine
 
-# v0.1: only Python validation is supported.
-# Other language engine files exist but are not wired in yet.
 _PYTHON_ENGINE = PythonEngine()
+_JS_ENGINE = JavaScriptEngine()
+_TS_ENGINE = TypeScriptEngine()
 
 _V01_UNSUPPORTED = frozenset([
-    "javascript", "typescript", "js", "ts",
     "go",
     "rust",
     "cpp", "c", "c++", "hip",
@@ -27,7 +27,9 @@ _V01_UNSUPPORTED = frozenset([
 
 
 class _UnsupportedEngine(LanguageEngine):
-    """Placeholder returned for languages not yet validated in v0.1."""
+    """Returned for known-but-unsupported languages. Fails fast with a clear message."""
+    supported = False
+
     def __init__(self, language: str):
         self.name = language
 
@@ -36,7 +38,7 @@ class _UnsupportedEngine(LanguageEngine):
 
     def run_tests(self, path: str) -> dict:
         return {"passed": False,
-                "error": f"'{self.name}' validation is not supported in v0.1 — only Python widgets are validated."}
+                "error": f"'{self.name}' is not supported. Supported languages: python, javascript."}
 
 
 def get_engine(language: str) -> LanguageEngine | None:
@@ -49,6 +51,10 @@ def get_engine(language: str) -> LanguageEngine | None:
     key = language.lower().strip()
     if key == "python":
         return _PYTHON_ENGINE
+    if key in ("javascript", "js"):
+        return _JS_ENGINE
+    if key in ("typescript", "ts"):
+        return _TS_ENGINE
     if key in _V01_UNSUPPORTED:
         return _UnsupportedEngine(key)
     return None
@@ -56,4 +62,4 @@ def get_engine(language: str) -> LanguageEngine | None:
 
 def supported_languages() -> list[str]:
     """Return languages with full validation support in this release."""
-    return ["python"]
+    return ["python", "javascript"]

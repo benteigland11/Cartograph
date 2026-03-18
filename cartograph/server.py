@@ -182,7 +182,7 @@ TOOLS = [
                 "widget_id": {"type": "string", "description": "Widget ID (e.g., 'logic-retry-backoff'). Language suffix auto-appended."},
                 "language": {
                     "type": "string",
-                    "enum": ["python"]
+                    "enum": ["python", "javascript", "typescript"]
                 },
                 "target": {"type": "string", "description": "Absolute path to the project root"},
                 "domain": {
@@ -275,7 +275,7 @@ If yes, package it as a widget now while the context is fresh.
 
 1. CREATE scaffold — cartograph_create with:
    - widget_id: <domain>-<name> (e.g. logic-retry-backoff, data-csv-parser)
-   - language: python
+   - language: python | javascript | typescript
    - target: absolute path to the project root
    Widget lands at <target>/cartograph/<widget_id>-python/
 
@@ -293,6 +293,8 @@ If yes, package it as a widget now while the context is fresh.
 4. WRITE EXAMPLE in examples/example_usage.py:
    - Must run and exit cleanly with no user input
    - Use hardcoded/fake data, demonstrate the primary API
+   - Optional: add examples/usage_hint.* with real integration code (router, provider, layout)
+     that requires a browser/app context. Not executed by Cartograph — author's best effort.
 
 5. VALIDATE — cartograph_validate <widget_path>
    Fix every issue. Common failures:

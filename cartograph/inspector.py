@@ -20,16 +20,22 @@ def list_popular(carto, limit=10):
     }
 
 
-def _read_dir(dirpath):
-    """Read all files in a directory into a {filename: content} dict."""
+def _read_dir(dirpath, prefix_filter=None):
+    """Read files in a directory into a {filename: content} dict.
+
+    prefix_filter: if given, only include filenames whose basename starts with that string.
+    """
     out = {}
     if os.path.exists(dirpath):
         for fpath in glob.glob(os.path.join(dirpath, "*.*")):
+            name = os.path.basename(fpath)
+            if prefix_filter and not name.startswith(prefix_filter):
+                continue
             try:
                 with open(fpath) as f:
-                    out[os.path.basename(fpath)] = f.read()
+                    out[name] = f.read()
             except Exception as e:
-                out[os.path.basename(fpath)] = f"Error reading: {e}"
+                out[name] = f"Error reading: {e}"
     return out
 
 
@@ -67,7 +73,8 @@ def inspect(carto, widget_id, show_source=False, show_all_versions=False,
         "trend": review_data.get("trend"),
         "review_count": review_data["count"],
         "versions": _get_versions(widget_path, all_versions=show_all_versions),
-        "examples": _read_dir(os.path.join(widget_path, "examples")),
+        "examples": _read_dir(os.path.join(widget_path, "examples"), prefix_filter="example_usage"),
+        "usage_hints": _read_dir(os.path.join(widget_path, "examples"), prefix_filter="usage_hint"),
     }
 
     if show_source:
