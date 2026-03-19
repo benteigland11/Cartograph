@@ -95,7 +95,7 @@ Run `cartograph doctor` to check that all language engine dependencies (pytest, 
 
 ```
 cartograph/
-  cli.py             Entry point — all commands
+  cli.py             Entry point - all commands
   engine.py          Core Cartograph class (search, load, orchestrate)
   validator.py       14-point validation pipeline
   checkin.py         Push edits back to library (versioning, contamination scan)
@@ -117,5 +117,5 @@ tests/               pytest suite
 
 ## Roadmap
 
-- Cloud registry — the flywheel only fully spins with a shared library. PRs and discussion welcome.
+- Cloud registry - the flywheel only fully spins with a shared library. PRs and discussion welcome.
 - More languages as validation pipelines are built and tested.
