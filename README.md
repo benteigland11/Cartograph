@@ -1,6 +1,6 @@
 # Cartograph
 
-A widget library MCP server for AI agents. Search, install, create, validate, and check in validated reusable code widgets across languages.
+A shared widget library for AI agents. Search, install, create, validate, and check in reusable code across projects.
 
 ## Why Cartograph
 
@@ -12,114 +12,110 @@ Those same widgets have now been reused across many projects and have settled in
 
 ## Philosophy
 
-AI coding operates with little oversight beyond what the user can catch. Our validation pipeline for widgets are built to ensure usable code gets saved into the library. We only ship what we can validate. That means Cartograph currently supports Python end-to-end: scaffolding, test running, coverage enforcement, contamination scanning, versioning, and checkin. Every widget that enters the library has passed all of those checks.
+We only ship what we can validate. Every widget that enters the library has passed a full pipeline: structure checks, manifest validation, coverage enforcement, contamination scanning, example execution, and versioning. If the pipeline can't run it, it doesn't go in.
 
-Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready, not before. All languages will use the same validation philophies as presented in the Python loop. If you have ideas for improving these pipelines, they are greatly appreciated.
+Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready, not before.
 
 ## Quick Start
 
-Install once:
+```bash
+pip install cartograph-cli
+```
+
+Then generate instructions for your AI agent:
 
 ```bash
-pip install cartograph-mcp
+cartograph setup
 ```
 
-Then register with your AI CLI:
+Running in a terminal, `cartograph setup` walks you through choosing your agent (Claude, Codex, Gemini, Antigravity, Cursor), your usage mode, and whether to write to the current project or globally. It appends the right instruction block to the right file so your agent knows how to use the library.
 
-### Claude Code
+To do it non-interactively:
 
 ```bash
-claude mcp add --scope user cartograph -- cartograph
+cartograph setup --agent claude --mode developer --write
 ```
 
-Or just open this repo in Claude Code — the included `.mcp.json` registers it automatically.
+### Usage modes
 
-### Codex
-
-```bash
-codex mcp add cartograph -- cartograph
-```
-
-### Gemini CLI
-
-```bash
-gemini mcp add --scope user cartograph cartograph
-```
-
-### Other MCP clients (Cursor, Copilot, etc.)
-
-Add to the client's MCP config:
-
-```json
-{
-  "mcpServers": {
-    "cartograph": {
-      "type": "stdio",
-      "command": "cartograph"
-    }
-  }
-}
-```
-
-### Project setup
-
-Once the MCP is registered, ask your agent to set up instructions for the current project based on the mode you would like to use (see table below):
-
-> "Set up Cartograph instructions in **developer** mode."
-
-The agent calls `cartograph_setup`, which returns the right instruction text to append to your project's instruction file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). This lets you configure Cartograph per-project, so a consumer-facing app, an internal tool, and a library maintenance session can all behave differently without touching global settings.
-
-Choose a mode based on how you want the agent to behave.
-
-| Mode | Who it's for | What it does |
+| Mode | Who it's for | What the agent does |
 |---|---|---|
-| `consumer` | Teams pulling from a shared library | Search before writing. Install and rate. No explicit widget authoring in design flow. |
-| `developer` | Most local projects (recommended) | Search first + package reusable logic when you're done. |
-| `maintainer` | Dedicated library agent | Audit existing widgets, improve low-rated ones, create new ones. |
+| `consumer` | Teams pulling from a shared library | Search before writing. Install and rate. No widget authoring. |
+| `developer` | Most local projects (recommended) | Search first + package reusable logic as you go. |
+| `maintainer` | Dedicated library sessions | Audit existing widgets, fix low-rated ones, create new ones. |
 
-Maintainer mode is worth running regularly. Think of it as weekly housekeeping for your library. The agent audits widgets, fixes issues surfaced by reviews, and improves anything that has drifted in quality. The value compounds over time: a well-maintained library means every future install starts from a higher baseline, bugs get squashed once and stay squashed, and the whole thing gets more useful the more you use it.
+Maintainer mode is worth running regularly. Think of it as weekly housekeeping for your library. The agent audits widgets, fixes issues surfaced by reviews, and improves anything that has drifted. A well-maintained library means every future install starts from a higher baseline.
 
-## CLI
+## Commands
 
-Also usable as a standalone CLI:
+```
+cartograph search <query>
+    [--domain backend|data|ml|security|infra|frontend|universal]
+    [--language python|javascript]
 
-```bash
-cartograph search "rate limiter"
-cartograph install auth-middleware-python --target /path/to/project
-cartograph create my-widget --language python --target /path/to/project
+cartograph inspect <widget_id>
+    [--source]         include source files
+    [--reviews]        include review comments
+    [--all-versions]   list full version history
+
+cartograph install <widget_id>   [--target .] [--version X]
+cartograph uninstall <widget_id> [--target .]
+cartograph update <widget_id>    [--target .] [--version X]
+cartograph status <widget_id>    [--target .]
+
+cartograph create <widget_id>
+    --language python|javascript          REQUIRED
+    --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
+
+cartograph validate [path]
+cartograph checkin [path]
+    --reason "what changed and why"       REQUIRED
+    [--bump patch|minor|major]
+
+cartograph rate <widget_id> <score 1-5>  [--comment "..."]
+cartograph setup  [--agent claude|codex|gemini|antigravity|cursor]
+                  [--mode consumer|developer|maintainer]
+                  [--write] [--global]
+cartograph stats
+cartograph doctor
 ```
 
 ## Development
 
 ```bash
-pip install -e .
+pip install -e ".[mcp]"
 pytest
 ```
 
 The widget library lives in your platform's user data directory and is seeded automatically on first run. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
+Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest) are installed correctly.
+
 ## Architecture
 
 ```
 cartograph/
+  cli.py             Entry point — all commands
   engine.py          Core Cartograph class (search, load, orchestrate)
-  server.py          MCP server (stdio + HTTP)
-  validator.py       Widget validation against Gold Standards
+  validator.py       14-point validation pipeline
   checkin.py         Push edits back to library (versioning, contamination scan)
   installer.py       Install/uninstall widgets into projects
-  inspector.py       Inspect widgets, list popular
+  inspector.py       Inspect widgets, read source and reviews
   scaffolding/       Widget scaffolding (create)
   languages/         Per-language engines (test runners, validators)
   search/            Hybrid BM25 + n-gram search
+  server.py          Optional MCP server (pip install cartograph-cli[mcp])
 tests/               pytest suite
 ```
 
 ## Status
 
 - Python: fully supported (create, validate, test, checkin)
-- Search: local BM25 + n-gram fuzzy matching
+- JavaScript: fully supported (React components, plain JS, vitest)
+- Search: local hybrid BM25 + n-gram
 - Registry: local
 
 ## Roadmap
 
-- **More languages** as validation pipelines are built and tested
+- Cloud registry — the flywheel only fully spins with a shared library. PRs and discussion welcome.
+- More languages as validation pipelines are built and tested.
