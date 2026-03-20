@@ -54,14 +54,16 @@ cartograph search <query>
     [--language python|javascript]
 
 cartograph inspect <widget_id>
-    [--source]         include source files
-    [--reviews]        include review comments
-    [--all-versions]   list full version history
+    [--source]           include source files
+    [--reviews]          include review comments
+    [--all-versions]     list full version history
+    [--version X]        inspect a specific historical version
 
 cartograph install <widget_id>   [--target .] [--version X]
 cartograph uninstall <widget_id> [--target .]
 cartograph update <widget_id>    [--target .] [--version X]
-cartograph status <widget_id>    [--target .]
+cartograph status [widget_id]    [--target .]   omit widget_id to scan all installed
+cartograph delete <widget_id>    [--confirm]    dry-run without --confirm
 
 cartograph create <widget_id>
     --language python|javascript          REQUIRED
@@ -83,7 +85,7 @@ cartograph doctor
 ## Development
 
 ```bash
-pip install -e ".[mcp]"
+pip install -e .
 pytest
 ```
 
@@ -99,12 +101,11 @@ cartograph/
   engine.py          Core Cartograph class (search, load, orchestrate)
   validator.py       14-point validation pipeline
   checkin.py         Push edits back to library (versioning, contamination scan)
-  installer.py       Install/uninstall widgets into projects
+  installer.py       Install/uninstall/delete widgets
   inspector.py       Inspect widgets, read source and reviews
   scaffolding/       Widget scaffolding (create)
   languages/         Per-language engines (test runners, validators)
   search/            Hybrid BM25 + n-gram search
-  server.py          Optional MCP server (pip install cartograph-cli[mcp])
 tests/               pytest suite
 ```
 
