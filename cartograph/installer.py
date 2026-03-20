@@ -120,13 +120,12 @@ def delete_from_library(carto, widget_id, confirm=False):
 
     if not confirm:
         return {
-            "status": "confirm_required",
+            "status": "dry_run",
             "widget_id": widget_id,
+            "version": widget.get("version", "unknown"),
             "install_count": install_count,
-            "message": (
-                f"This will permanently delete '{widget_id}' from the library "
-                f"(install count: {install_count}). Re-run with --confirm to proceed."
-            ),
+            "library_path": widget["path"],
+            "message": "No changes made. Re-run with --confirm to permanently delete.",
         }
 
     widget_path = widget["path"]

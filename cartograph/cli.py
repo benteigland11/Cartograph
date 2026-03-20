@@ -675,10 +675,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_update)
 
     # delete
-    p = sub.add_parser("delete", help="Permanently remove a widget from the library")
+    p = sub.add_parser("delete", help="Show widget stats (safe) or permanently remove with --confirm")
     p.add_argument("widget_id")
     p.add_argument("--confirm", action="store_true",
-                   help="Required to actually delete — shows a warning without it")
+                   help="Actually delete the widget from the library (irreversible)")
     p.set_defaults(func=cmd_delete)
 
     # create
