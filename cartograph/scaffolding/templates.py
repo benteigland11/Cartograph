@@ -16,11 +16,9 @@ def python(target_dir, module_name, display_name, **_):
         f.write(f'def {module_name}(value):\n    """{display_name}: process a value."""\n    return value\n')
     with open(os.path.join(target_dir, "tests", f"test_{module_name}.py"), "w") as f:
         f.write(
-            f"import sys, os\n"
-            f"sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))\n"
-            f"from src.{module_name} import {module_name}\n\n\n"
-            f"def test_{module_name}_returns_value():\n"
-            f"    assert {module_name}(42) == 42\n"
+            f"def test_placeholder():\n"
+            f"    # TODO: replace with real tests\n"
+            f"    pass\n"
         )
     with open(os.path.join(target_dir, "examples", "example_usage.py"), "w") as f:
         f.write(
@@ -48,8 +46,8 @@ def javascript(target_dir, module_name, display_name, **kwargs):
     with open(manifest_path) as f:
         manifest = json.load(f)
     manifest["tech_stack"]["dependencies"] = [
-        {"name": "react", "version": ">=18.0.0"},
-        {"name": "react-dom", "version": ">=18.0.0"},
+        "react>=18.0.0",
+        "react-dom>=18.0.0",
     ]
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)

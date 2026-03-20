@@ -177,7 +177,12 @@ def validate_item(carto, path):
     if not check(f"{example_file} imports from src/", imports_src,
                  f"examples/{example_file} does not import anything from src/ — the example must use the widget"):
         _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": f"examples/{example_file} must import from src/"}
+        return {"status": "error", "message": (
+            f"examples/{example_file} must import from src/\n\n"
+            f"Expected pattern:\n"
+            f"  sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))\n"
+            f"  from src.mymodule import MyClass"
+        )}
 
     # 8. Test files follow naming convention
     test_files = engine.find_test_files(path)

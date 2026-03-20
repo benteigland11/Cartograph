@@ -115,18 +115,25 @@ class LanguageEngine:
     def _check_dep_pinning(dependencies: list) -> list[str]:
         """
         Return a list of error messages for dependencies that have no version floor.
+        Dependencies must be strings like 'fastapi>=0.128.0', not dicts.
         A valid dep string contains >=, ==, ~=, <=, !=, or a bare version number.
         """
         _PIN_RE = re.compile(r'[><=!~]|\d')
         errors = []
         for dep in dependencies:
-            name = dep if isinstance(dep, str) else dep.get("name", "")
-            if name and not _PIN_RE.search(name.split("[")[0].split(";")[0]):
+            if not isinstance(dep, str):
+                name = dep.get("name", str(dep)) if isinstance(dep, dict) else str(dep)
+                errors.append(
+                    f"Dependency '{name}' must be a string like '{name}>=<version>', "
+                    f"not a dict — use plain strings in tech_stack.dependencies"
+                )
+                continue
+            if dep and not _PIN_RE.search(dep.split("[")[0].split(";")[0]):
                 # strip extras and markers before checking
-                bare = re.split(r'[><=!~;\[]', name)[0].strip()
-                if bare == name.strip():
+                bare = re.split(r'[><=!~;\[]', dep)[0].strip()
+                if bare == dep.strip():
                     errors.append(
-                        f"Dependency '{name}' has no version pin — "
-                        f"use '{name}>=<version>' for reproducibility"
+                        f"Dependency '{dep}' has no version pin — "
+                        f"use '{dep}>=<version>' for reproducibility"
                     )
         return errors
