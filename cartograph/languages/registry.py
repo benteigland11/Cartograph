@@ -13,9 +13,15 @@ from .python import PythonEngine
 from .javascript import JavaScriptEngine, TypeScriptEngine
 from .base import LanguageEngine
 
-_PYTHON_ENGINE = PythonEngine()
-_JS_ENGINE = JavaScriptEngine()
-_TS_ENGINE = TypeScriptEngine()
+# Canonical language name -> engine instance.
+# Add an entry here when a new language engine is ready for validation.
+_ENGINES = {
+    "python": PythonEngine(),
+    "javascript": JavaScriptEngine(),
+    "typescript": TypeScriptEngine(),
+}
+
+_ALIASES = {"js": "javascript", "ts": "typescript"}
 
 _V01_UNSUPPORTED = frozenset([
     "go",
@@ -37,29 +43,26 @@ class _UnsupportedEngine(LanguageEngine):
         pass
 
     def run_tests(self, path: str) -> dict:
+        langs = ", ".join(supported_languages())
         return {"passed": False,
-                "error": f"'{self.name}' is not supported. Supported languages: python, javascript."}
+                "error": f"'{self.name}' is not supported for validation. Supported: {langs}."}
 
 
 def get_engine(language: str) -> LanguageEngine | None:
     """Return the engine for a language string, or None if unknown.
 
-    v0.1: only Python returns a real engine. All other known languages
-    return an UnsupportedEngine stub so callers get a clear error instead
-    of a silent None.
+    Known-but-unsupported languages return an UnsupportedEngine stub so
+    callers get a clear error instead of a silent None.
     """
     key = language.lower().strip()
-    if key == "python":
-        return _PYTHON_ENGINE
-    if key in ("javascript", "js"):
-        return _JS_ENGINE
-    if key in ("typescript", "ts"):
-        return _TS_ENGINE
+    key = _ALIASES.get(key, key)
+    if key in _ENGINES:
+        return _ENGINES[key]
     if key in _V01_UNSUPPORTED:
         return _UnsupportedEngine(key)
     return None
 
 
 def supported_languages() -> list[str]:
-    """Return languages with full validation support in this release."""
-    return ["python", "javascript"]
+    """Return languages with full validation support — derived from _ENGINES."""
+    return sorted(name for name, engine in _ENGINES.items() if engine.supported)

@@ -103,19 +103,7 @@ class JavaScriptEngine(LanguageEngine):
                 "\n".join(violations)
             )
 
-        # dependency pinning check — handles both string ("react>=18") and
-        # dict ({"name": "react", "version": ">=18.0.0"}) formats
-        for dep in dependencies:
-            if isinstance(dep, dict):
-                name = dep.get("name", "")
-                version = dep.get("version", "")
-                if name and not version:
-                    errors.append(
-                        f"Dependency '{name}' has no version pin — "
-                        f"add a version field for reproducibility"
-                    )
-            else:
-                errors.extend(self._check_dep_pinning([dep]))
+        errors.extend(self._check_dep_pinning(dependencies))
 
         if errors:
             return self._fail("\n".join(errors))

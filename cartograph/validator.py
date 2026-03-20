@@ -89,7 +89,7 @@ def validate_item(carto, path):
     if not check("tech_stack.dependencies present", "dependencies" in tech_stack,
                  "Missing tech_stack.dependencies (use [] if none)"):
         _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": "Missing tech_stack.dependencies"}
+        return {"status": "error", "message": "Missing tech_stack.dependencies (use [] if none)"}
 
     # 7. Required structure: src/, tests/, examples/
     for folder in ("src", "tests", "examples"):
@@ -126,12 +126,17 @@ def validate_item(carto, path):
                            "Widgets must be self-contained — copy the logic into src/ instead."}
 
     if engine is None:
-        check(f"Language '{language}' recognised", False, f"Unknown language '{language}'")
+        from .languages.registry import supported_languages
+        langs = ", ".join(supported_languages())
+        msg = f"Unknown language '{language}'. Supported: {langs}."
+        check(f"Language '{language}' recognised", False, msg)
         _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": f"Unknown language '{language}'"}
+        return {"status": "error", "message": msg}
 
     if not engine.supported:
-        msg = f"'{language}' is not supported for validation. Supported languages: python, javascript."
+        from .languages.registry import supported_languages
+        langs = ", ".join(supported_languages())
+        msg = f"'{language}' is not supported for validation. Supported: {langs}."
         check(f"Language '{language}' supported", False, msg)
         _print_checklist(checklist, errors, failed=True)
         return {"status": "error", "message": msg}
@@ -189,7 +194,7 @@ def validate_item(carto, path):
     if not check(f"Test files found ({len(test_files)})", len(test_files) > 0,
                  f"No test files found in tests/ for language '{language}'"):
         _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": f"No test files found in tests/"}
+        return {"status": "error", "message": f"No test files found in tests/ — name them test_*.py (Python) or test_*.js/jsx (JavaScript)"}
 
     # 9. Language checks, install deps, run example, run tests
     log.debug("Running language checks...")

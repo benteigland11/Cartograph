@@ -52,7 +52,7 @@ def install(carto, widget_id, target_dir, version=None):
 
     widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
     if not widget:
-        return {"error": f"Widget '{widget_id}' not found."}
+        return {"error": f"Widget '{widget_id}' not found. Use 'cartograph search' to find available widgets."}
 
     source_path = widget["path"]
     installed_version = widget.get("version", "0.0.0")
