@@ -469,11 +469,11 @@ class Cartograph:
         from .inspector import list_popular
         return list_popular(self, limit)
     def inspect(self, widget_id, show_source=False, show_all_versions=False,
-                show_reviews=False):
+                show_reviews=False, version=None):
         from .inspector import inspect
         return inspect(self, widget_id, show_source=show_source,
                        show_all_versions=show_all_versions,
-                       show_reviews=show_reviews)
+                       show_reviews=show_reviews, version=version)
     def _log_registration(self, widget_id, widget_name, similar_widgets, differentiation, needs_review, widget_path):
         from .inspector import log_registration
         return log_registration(self, widget_id, widget_name, similar_widgets,

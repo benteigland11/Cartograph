@@ -51,34 +51,50 @@ def _get_versions(widget_path, all_versions=False):
 
 
 def inspect(carto, widget_id, show_source=False, show_all_versions=False,
-            show_reviews=False):
+            show_reviews=False, version=None):
     widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
     if not widget:
         return {"error": "Widget not found"}
 
     widget_path = widget["path"]
 
-    # Reviews summary (always)
+    if version is not None:
+        history_path = os.path.join(widget_path, "history", version)
+        if not os.path.exists(history_path):
+            available = _get_versions(widget_path, all_versions=True)
+            return {"error": f"Version '{version}' not found. Available: {', '.join(available) or 'none'}"}
+        read_path = history_path
+    else:
+        read_path = widget_path
+
+    # Reviews always come from current widget, not history
     review_data = carto._load_reviews(widget_path)
+
+    try:
+        with open(os.path.join(read_path, "widget.json")) as f:
+            manifest = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+    meta = manifest.get("meta", manifest)
 
     result = {
         "id": widget["id"],
-        "name": widget["name"],
-        "description": widget["description"],
-        "language": widget.get("language", "unknown"),
-        "domain": widget["domain"],
-        "version": widget.get("version", "0.0.0"),
-        "dependencies": widget.get("dependencies", []),
+        "name": meta.get("name", widget["name"]),
+        "description": manifest.get("description", widget["description"]),
+        "language": manifest.get("tech_stack", {}).get("language", widget.get("language", "unknown")),
+        "domain": meta.get("domain", widget["domain"]),
+        "version": meta.get("version", version or widget.get("version", "0.0.0")),
+        "dependencies": manifest.get("tech_stack", {}).get("dependencies", widget.get("dependencies", [])),
         "rating": review_data["rating"],
         "trend": review_data.get("trend"),
         "review_count": review_data["count"],
         "versions": _get_versions(widget_path, all_versions=show_all_versions),
-        "examples": _read_dir(os.path.join(widget_path, "examples"), prefix_filter="example_usage"),
-        "usage_hints": _read_dir(os.path.join(widget_path, "examples"), prefix_filter="usage_hint"),
+        "examples": _read_dir(os.path.join(read_path, "examples"), prefix_filter="example_usage"),
+        "usage_hints": _read_dir(os.path.join(read_path, "examples"), prefix_filter="usage_hint"),
     }
 
     if show_source:
-        result["source"] = _read_dir(os.path.join(widget_path, "src"))
+        result["source"] = _read_dir(os.path.join(read_path, "src"))
     if show_reviews:
         result["reviews"] = review_data["reviews"]
 

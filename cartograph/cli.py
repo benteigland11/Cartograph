@@ -71,6 +71,7 @@ def cmd_inspect(args):
         show_source=args.source,
         show_all_versions=args.all_versions,
         show_reviews=args.reviews,
+        version=getattr(args, "version", None),
     )
     _out(result)
 
@@ -640,6 +641,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", action="store_true", help="Include source files")
     p.add_argument("--all-versions", action="store_true", dest="all_versions")
     p.add_argument("--reviews", action="store_true")
+    p.add_argument("--version", default=None, help="Inspect a specific historical version (e.g. 1.2.0)")
     p.set_defaults(func=cmd_inspect)
 
     # install
