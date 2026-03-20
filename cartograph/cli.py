@@ -155,13 +155,41 @@ def cmd_checkin(args):
 
 
 def cmd_status(args):
-    result = _carto().widget_status(
-        widget_id=args.widget_id,
-        target_dir=_resolve(args.target),
-    )
-    if result.get("error"):
-        _err(result)
-    _out(result)
+    target = _resolve(args.target)
+
+    if args.widget_id:
+        result = _carto().widget_status(widget_id=args.widget_id, target_dir=target)
+        if result.get("error"):
+            _err(result)
+        _out(result)
+        return
+
+    # No widget_id — scan all installed widgets
+    install_dir = os.path.join(target, "cartograph")
+    if not os.path.isdir(install_dir):
+        _err({"error": f"No cartograph/ directory found at {target}"})
+
+    widget_ids = [
+        d for d in os.listdir(install_dir)
+        if os.path.isfile(os.path.join(install_dir, d, "widget.json"))
+    ]
+
+    if not widget_ids:
+        _out({"installed": 0, "widgets": []})
+        return
+
+    carto = _carto()
+    widgets = []
+    for wid in sorted(widget_ids):
+        r = carto.widget_status(widget_id=wid, target_dir=target)
+        widgets.append(r)
+
+    _out({
+        "installed": len(widgets),
+        "outdated": sum(1 for w in widgets if w.get("outdated")),
+        "modified": sum(1 for w in widgets if w.get("modified")),
+        "widgets": widgets,
+    })
 
 
 def cmd_rate(args):
@@ -707,8 +735,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_checkin)
 
     # status
-    p = sub.add_parser("status", help="Check if an installed widget is up to date")
-    p.add_argument("widget_id")
+    p = sub.add_parser("status", help="Check installed widget(s) — omit widget_id to scan all")
+    p.add_argument("widget_id", nargs="?", default=None)
     p.add_argument("--target", default=".", help="Project root (default: .)")
     p.set_defaults(func=cmd_status)
 
