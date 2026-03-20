@@ -32,6 +32,7 @@ import shutil
 import sys
 
 from .languages import get_engine
+from .languages.base import _dep_bare_name
 from .validation_stamp import is_stamp_valid, STAMP_FILE as _STAMP_FILE
 
 log = logging.getLogger("cartograph")
@@ -117,12 +118,7 @@ def _scan_contamination(path: str, widget: dict) -> dict:
 
     # Collect declared dependency names (for Python import check)
     deps = widget.get("dependencies", [])
-    dep_names = set()
-    for d in deps:
-        name = d if isinstance(d, str) else d.get("name", "")
-        bare = re.split(r'[><=!~;\[]', name)[0].strip().lower()
-        if bare:
-            dep_names.add(bare)
+    dep_names = {_dep_bare_name(d).lower() for d in deps if isinstance(d, str)}
 
     # Widget's own module names (Python only)
     own_modules = set()

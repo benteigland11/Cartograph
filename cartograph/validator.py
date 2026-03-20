@@ -125,19 +125,15 @@ def validate_item(carto, path):
                 "message": f"Widget depends on other widgets ({', '.join(widget_deps)}). "
                            "Widgets must be self-contained — copy the logic into src/ instead."}
 
-    if engine is None:
+    if engine is None or not engine.supported:
         from .languages.registry import supported_languages
         langs = ", ".join(supported_languages())
-        msg = f"Unknown language '{language}'. Supported: {langs}."
-        check(f"Language '{language}' recognised", False, msg)
-        _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": msg}
-
-    if not engine.supported:
-        from .languages.registry import supported_languages
-        langs = ", ".join(supported_languages())
-        msg = f"'{language}' is not supported for validation. Supported: {langs}."
-        check(f"Language '{language}' supported", False, msg)
+        if engine is None:
+            msg = f"Unknown language '{language}'. Supported: {langs}."
+            check(f"Language '{language}' recognised", False, msg)
+        else:
+            msg = f"'{language}' is not supported for validation. Supported: {langs}."
+            check(f"Language '{language}' supported", False, msg)
         _print_checklist(checklist, errors, failed=True)
         return {"status": "error", "message": msg}
 

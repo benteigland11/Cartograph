@@ -39,6 +39,15 @@ import sys
 
 log = logging.getLogger("cartograph")
 
+# Compiled once at module level — used by _dep_bare_name and _check_dep_pinning.
+_DEP_SPLIT_RE = re.compile(r'[><=!~;\[]')
+_PIN_RE = re.compile(r'[><=!~]|\d')
+
+
+def _dep_bare_name(dep: str) -> str:
+    """Return the bare package name from a dep string like 'fastapi>=0.128.0'."""
+    return _DEP_SPLIT_RE.split(dep)[0].strip()
+
 
 class LanguageEngine:
     name = "base"
@@ -128,7 +137,6 @@ class LanguageEngine:
         Dependencies must be strings like 'fastapi>=0.128.0', not dicts.
         A valid dep string contains >=, ==, ~=, <=, !=, or a bare version number.
         """
-        _PIN_RE = re.compile(r'[><=!~]|\d')
         errors = []
         for dep in dependencies:
             if not isinstance(dep, str):
@@ -138,9 +146,8 @@ class LanguageEngine:
                     f"not a dict — use plain strings in tech_stack.dependencies"
                 )
                 continue
-            if dep and not _PIN_RE.search(dep.split("[")[0].split(";")[0]):
-                # strip extras and markers before checking
-                bare = re.split(r'[><=!~;\[]', dep)[0].strip()
+            if dep and not _PIN_RE.search(_DEP_SPLIT_RE.split(dep)[0]):
+                bare = _dep_bare_name(dep)
                 if bare == dep.strip():
                     errors.append(
                         f"Dependency '{dep}' has no version pin — "

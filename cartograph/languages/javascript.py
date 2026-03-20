@@ -13,7 +13,7 @@ import shutil
 import tempfile
 import uuid
 
-from .base import LanguageEngine, log
+from .base import LanguageEngine, _dep_bare_name, log
 
 
 _CONSOLE_LOG_RE = re.compile(r'console\s*\.\s*log\s*\(')
@@ -61,8 +61,7 @@ class JavaScriptEngine(LanguageEngine):
     @staticmethod
     def _has_react(dependencies: list) -> bool:
         for dep in dependencies:
-            bare = re.split(r'[><=!~;\[]', dep)[0].strip().lower()
-            if bare == "react":
+            if _dep_bare_name(dep).lower() == "react":
                 return True
         return False
 
@@ -145,7 +144,7 @@ class JavaScriptEngine(LanguageEngine):
             if has_react:
                 pkg["devDependencies"].update(_REACT_DEV_DEPS)
             for dep in dependencies:
-                bare = re.split(r'[><=!~;\[]', dep)[0].strip()
+                bare = _dep_bare_name(dep)
                 ver_part = dep[len(bare):].strip() or "*"
                 if bare:
                     pkg["dependencies"][bare] = ver_part
