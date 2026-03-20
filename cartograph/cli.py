@@ -108,6 +108,16 @@ def cmd_update(args):
     _out(result)
 
 
+def cmd_delete(args):
+    result = _carto().delete(
+        widget_id=args.widget_id,
+        confirm=args.confirm,
+    )
+    if result.get("status") == "error":
+        _err(result)
+    _out(result)
+
+
 def cmd_create(args):
     _preflight_language(args.language)
     result = _carto().create(
@@ -663,6 +673,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target", default=".", help="Project root (default: .)")
     p.add_argument("--version", default=None)
     p.set_defaults(func=cmd_update)
+
+    # delete
+    p = sub.add_parser("delete", help="Permanently remove a widget from the library")
+    p.add_argument("widget_id")
+    p.add_argument("--confirm", action="store_true",
+                   help="Required to actually delete — shows a warning without it")
+    p.set_defaults(func=cmd_delete)
 
     # create
     p = sub.add_parser("create", help="Scaffold a new widget")

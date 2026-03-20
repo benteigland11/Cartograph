@@ -110,6 +110,43 @@ def update(carto, widget_id, target_dir, version=None):
     return result
 
 
+def delete_from_library(carto, widget_id, confirm=False):
+    """Permanently remove a widget from the library."""
+    widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
+    if not widget:
+        return {"error": f"Widget '{widget_id}' not found. Use 'cartograph search' to find available widgets."}
+
+    install_count = widget.get("install_count", 0)
+
+    if not confirm:
+        return {
+            "status": "confirm_required",
+            "widget_id": widget_id,
+            "install_count": install_count,
+            "message": (
+                f"This will permanently delete '{widget_id}' from the library "
+                f"(install count: {install_count}). Re-run with --confirm to proceed."
+            ),
+        }
+
+    widget_path = widget["path"]
+    try:
+        shutil.rmtree(widget_path)
+    except Exception as e:
+        return {"error": f"Failed to delete: {e}"}
+
+    if widget_id in carto.install_stats:
+        del carto.install_stats[widget_id]
+        carto._save_install_stats()
+
+    return {
+        "status": "success",
+        "widget_id": widget_id,
+        "deleted_from": widget_path,
+        "install_count_at_deletion": install_count,
+    }
+
+
 def uninstall(carto, widget_id, target_dir):
     """Remove an installed widget from target_dir/cartograph/widget_id."""
     if not os.path.isabs(target_dir):
