@@ -61,8 +61,7 @@ class JavaScriptEngine(LanguageEngine):
     @staticmethod
     def _has_react(dependencies: list) -> bool:
         for dep in dependencies:
-            name = dep if isinstance(dep, str) else dep.get("name", "")
-            bare = re.split(r'[><=!~;\[]', name)[0].strip().lower()
+            bare = re.split(r'[><=!~;\[]', dep)[0].strip().lower()
             if bare == "react":
                 return True
         return False
@@ -146,10 +145,10 @@ class JavaScriptEngine(LanguageEngine):
             if has_react:
                 pkg["devDependencies"].update(_REACT_DEV_DEPS)
             for dep in dependencies:
-                name = dep if isinstance(dep, str) else dep.get("name", "")
-                ver = "*" if isinstance(dep, str) else dep.get("version", "*")
-                if name:
-                    pkg["dependencies"][name] = ver
+                bare = re.split(r'[><=!~;\[]', dep)[0].strip()
+                ver_part = dep[len(bare):].strip() or "*"
+                if bare:
+                    pkg["dependencies"][bare] = ver_part
             with open(package_json_path, "w") as f:
                 json.dump(pkg, f, indent=2)
         else:

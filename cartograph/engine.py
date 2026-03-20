@@ -125,8 +125,7 @@ class Cartograph:
         self._load_library()
 
         from .search import get_backend
-        backend_name = 'hybrid' if search_backend == 'meilisearch' else search_backend
-        self._search_backend = get_backend(backend_name)
+        self._search_backend = get_backend(search_backend)
         self._search_backend.build(self.widgets)
 
 

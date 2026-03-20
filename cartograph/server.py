@@ -57,8 +57,7 @@ def get_carto():
     """
     global _carto_instance
     if _carto_instance is None:
-        _carto_instance = Cartograph(
-            LIBRARY_PATH, search_backend='meilisearch')
+        _carto_instance = Cartograph(LIBRARY_PATH)
     return _carto_instance
 
 

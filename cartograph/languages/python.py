@@ -88,7 +88,7 @@ class PythonEngine(LanguageEngine):
         all_deps = list(dependencies) + ["pytest", "pytest-cov"]
         log.debug("Installing %d Python package(s)...", len(all_deps))
         for dep in all_deps:
-            dep_name = dep if isinstance(dep, str) else dep.get("name", "")
+            dep_name = dep
             if not dep_name:
                 continue
             # Normalise: strip version specifiers to get the base package name

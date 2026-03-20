@@ -24,7 +24,7 @@ To add a new language engine:
   2. Register in languages/registry.py:
      - Import the class and add it to _ENGINES under its canonical name
      - Add any short aliases to _ALIASES (e.g. "rs" -> "rust")
-     - If the language was in _V01_UNSUPPORTED, remove it from there
+     - If the language was in _KNOWN_UNSUPPORTED, remove it from there
   3. Add a scaffold template in scaffolding/templates.py:
      - Write a function that creates src/, tests/, and examples/ stubs
      - Register it in the TEMPLATES dict at the bottom of that file

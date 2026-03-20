@@ -7,7 +7,7 @@ to the appropriate LanguageEngine subclass instance.
 To add a new language (see base.py for the full checklist):
   1. Import the engine class and add it to _ENGINES under its canonical name
   2. Add short aliases to _ALIASES if needed (e.g. "rs" -> "rust")
-  3. Remove from _V01_UNSUPPORTED if it was listed there
+  3. Remove from _KNOWN_UNSUPPORTED if it was listed there
   4. Add a scaffold template in scaffolding/templates.py
 
 The language will automatically appear in supported_languages() and all
@@ -28,7 +28,7 @@ _ENGINES = {
 
 _ALIASES = {"js": "javascript", "ts": "typescript"}
 
-_V01_UNSUPPORTED = frozenset([
+_KNOWN_UNSUPPORTED = frozenset([
     "go",
     "rust",
     "cpp", "c", "c++", "hip",
@@ -63,7 +63,7 @@ def get_engine(language: str) -> LanguageEngine | None:
     key = _ALIASES.get(key, key)
     if key in _ENGINES:
         return _ENGINES[key]
-    if key in _V01_UNSUPPORTED:
+    if key in _KNOWN_UNSUPPORTED:
         return _UnsupportedEngine(key)
     return None
 
