@@ -3,6 +3,17 @@ Language-specific file templates for widget scaffolding.
 
 Each function writes starter src/, tests/, and examples/ files for a given language.
 None of these need the Cartograph instance — they just write files to disk.
+
+To add a scaffold template for a new language:
+  1. Write a function with the signature:
+       def <lang>(target_dir, module_name, display_name, **kwargs)
+     - target_dir: the widget root (src/, tests/, examples/ already exist)
+     - module_name: snake_case identifier derived from the widget ID
+     - display_name: human-readable title for comments/docstrings
+  2. Register it in TEMPLATES at the bottom of this file.
+
+If no template is registered for a language, scaffolding falls back to
+the Python template (stub files will be wrong — always add a real one).
 """
 
 import json

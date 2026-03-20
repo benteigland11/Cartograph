@@ -4,9 +4,14 @@ Language engine registry.
 Maps language name strings (as they appear in widget.json tech_stack.language)
 to the appropriate LanguageEngine subclass instance.
 
-To add a new language:
-  1. Create languages/<lang>.py with a LanguageEngine subclass
-  2. Import and register it here
+To add a new language (see base.py for the full checklist):
+  1. Import the engine class and add it to _ENGINES under its canonical name
+  2. Add short aliases to _ALIASES if needed (e.g. "rs" -> "rust")
+  3. Remove from _V01_UNSUPPORTED if it was listed there
+  4. Add a scaffold template in scaffolding/templates.py
+
+The language will automatically appear in supported_languages() and all
+error messages once its engine has supported = True.
 """
 
 from .python import PythonEngine

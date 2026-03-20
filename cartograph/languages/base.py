@@ -15,9 +15,19 @@ Return shape for run_tests / validate_widget / run_example:
   {"passed": False, "error": "<human-readable explanation>"}
 
 To add a new language engine:
-  1. Subclass LanguageEngine
-  2. Implement validate_widget(), install_deps(), run_tests()
-  3. Register in languages/registry.py
+  1. Create languages/<lang>.py with a class that subclasses LanguageEngine.
+     - Implement validate_widget(), install_deps(), run_tests()
+     - Override find_test_files() and example_filename() if the defaults
+       (test_*.py / example_usage.py) don't fit the language
+     - Set supported = True (default is True on LanguageEngine; only set
+       False if the engine exists but isn't ready yet — see TypeScriptEngine)
+  2. Register in languages/registry.py:
+     - Import the class and add it to _ENGINES under its canonical name
+     - Add any short aliases to _ALIASES (e.g. "rs" -> "rust")
+     - If the language was in _V01_UNSUPPORTED, remove it from there
+  3. Add a scaffold template in scaffolding/templates.py:
+     - Write a function that creates src/, tests/, and examples/ stubs
+     - Register it in the TEMPLATES dict at the bottom of that file
 """
 
 import glob as _glob
