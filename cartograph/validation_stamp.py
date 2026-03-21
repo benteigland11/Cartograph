@@ -16,9 +16,11 @@ src/, tests/, examples/, and widget.json.
 
 import glob
 import hashlib
+import importlib.metadata
 import json
 import logging
 import os
+from datetime import datetime, timezone
 
 log = logging.getLogger("cartograph")
 
@@ -58,11 +60,22 @@ def _compute_fingerprint(widget_path: str, engine) -> str:
     return h.hexdigest()
 
 
-def write_stamp(widget_path: str, language: str, engine) -> None:
+def _cartograph_version() -> str:
+    try:
+        return importlib.metadata.version("cartograph-cli")
+    except Exception:
+        return "dev"
+
+
+def write_stamp(widget_path: str, language: str, engine,
+                test_results: dict | None = None) -> None:
     """Write a fresh validation stamp.  Called after successful validate_item()."""
     stamp = {
         "language": language,
         "fingerprint": _compute_fingerprint(widget_path, engine),
+        "validated_at": datetime.now(timezone.utc).isoformat(),
+        "cartograph_version": _cartograph_version(),
+        "test_results": test_results or {},
     }
     stamp_path = os.path.join(widget_path, STAMP_FILE)
     try:
@@ -71,6 +84,16 @@ def write_stamp(widget_path: str, language: str, engine) -> None:
         log.debug("Validation stamp written to %s", stamp_path)
     except OSError as e:
         log.debug("Could not write validation stamp: %s", e)
+
+
+def read_stamp(widget_path: str) -> dict | None:
+    """Return the stamp dict if it exists, else None."""
+    stamp_path = os.path.join(widget_path, STAMP_FILE)
+    try:
+        with open(stamp_path) as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def is_stamp_valid(widget_path: str, language: str, engine) -> bool:

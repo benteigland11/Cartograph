@@ -56,13 +56,38 @@ def _preflight_from_path(path: str) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_search(args):
-    result = _carto().search(
+    local = _carto().search(
         query=args.query,
         domain_filter=args.domain,
         language_filter=args.language,
         top_k=args.top_k,
     )
-    _out(result)
+
+    from .auth import is_authenticated
+    if not is_authenticated():
+        _out(local)
+        return
+
+    from .cloud import search as cloud_search
+    cloud = cloud_search(
+        query=args.query,
+        domain_filter=args.domain,
+        language_filter=args.language,
+        top_k=args.top_k,
+    )
+
+    # Merge: local results first, then cloud widgets not already present locally
+    local_ids = {w["id"] for w in local.get("widgets", [])}
+    extra = [w for w in cloud.get("widgets", []) if w["id"] not in local_ids]
+
+    merged = {
+        "widgets": local.get("widgets", []) + extra,
+        "local_count": len(local.get("widgets", [])),
+        "cloud_count": len(extra),
+    }
+    if cloud.get("error"):
+        merged["cloud_error"] = cloud["error"]
+    _out(merged)
 
 
 def cmd_inspect(args):
@@ -190,6 +215,57 @@ def cmd_status(args):
         "modified": sum(1 for w in widgets if w.get("modified")),
         "widgets": widgets,
     })
+
+
+def cmd_login(args):
+    from .cloud import login_with_token
+    token = args.token
+    if not token:
+        # Prompt when running interactively; CI should use --token or CARTOGRAPH_TOKEN
+        if sys.stdin.isatty():
+            import getpass
+            token = getpass.getpass("  Cartograph token: ").strip()
+        else:
+            _err({"error": "Provide a token with --token or set CARTOGRAPH_TOKEN"})
+    result = login_with_token(token)
+    if "error" in result:
+        _err(result)
+    _out(result)
+
+
+def cmd_logout(args):
+    from .auth import clear_token, is_authenticated
+    if not is_authenticated():
+        _out({"status": "already_logged_out"})
+        return
+    clear_token()
+    _out({"status": "success", "message": "Logged out."})
+
+
+def cmd_push(args):
+    from .auth import is_authenticated
+    if not is_authenticated():
+        _err({"error": "Not authenticated. Run: cartograph login"})
+
+    path = _resolve(args.path)
+    _preflight_from_path(path)
+
+    # widget_id comes from widget.json if not given explicitly
+    widget_id = args.widget_id
+    if not widget_id:
+        try:
+            with open(os.path.join(path, "widget.json")) as f:
+                widget_id = json.load(f).get("id")
+        except Exception:
+            pass
+    if not widget_id:
+        _err({"error": "Could not determine widget_id. Pass it explicitly or run from the widget directory."})
+
+    from .cloud import push
+    result = push(path, widget_id, visibility=args.visibility)
+    if "error" in result:
+        _err(result)
+    _out(result)
 
 
 def cmd_rate(args):
@@ -760,6 +836,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--global", action="store_true", dest="glob",
                    help="With --write: write to global config dir instead of current project")
     p.set_defaults(func=cmd_setup)
+
+    # login
+    p = sub.add_parser("login", help="Authenticate with the Cartograph cloud registry")
+    p.add_argument("--token", default=None,
+                   help="API token (prompted interactively if omitted in a terminal)")
+    p.set_defaults(func=cmd_login)
+
+    # logout
+    p = sub.add_parser("logout", help="Remove stored Cartograph cloud credentials")
+    p.set_defaults(func=cmd_logout)
+
+    # push
+    p = sub.add_parser("push", help="Publish a validated widget to the cloud registry")
+    p.add_argument("widget_id", nargs="?", default=None,
+                   help="Widget ID to push (inferred from widget.json if omitted)")
+    p.add_argument("path", nargs="?", default=".",
+                   help="Widget directory (default: .)")
+    p.add_argument("--visibility", default="public", choices=["public", "private"],
+                   help="Registry visibility (default: public)")
+    p.set_defaults(func=cmd_push)
 
     # stats
     p = sub.add_parser("stats", help="Show library statistics")
