@@ -84,6 +84,9 @@ class PythonEngine(LanguageEngine):
                 lines.append(node.lineno)
         return lines
 
+    def src_import_pattern(self) -> str | None:
+        return r'from src\.|import src\.'
+
     def install_deps(self, path: str, dependencies: list) -> None:
         all_deps = list(dependencies) + ["pytest", "pytest-cov"]
         log.debug("Installing %d Python package(s)...", len(all_deps))

@@ -7,8 +7,7 @@ to the appropriate LanguageEngine subclass instance.
 To add a new language (see base.py for the full checklist):
   1. Import the engine class and add it to _ENGINES under its canonical name
   2. Add short aliases to _ALIASES if needed (e.g. "rs" -> "rust")
-  3. Remove from _KNOWN_UNSUPPORTED if it was listed there
-  4. Add a scaffold template in scaffolding/templates.py
+  3. Add a scaffold template in scaffolding/templates.py
 
 The language will automatically appear in supported_languages() and all
 error messages once its engine has supported = True.
@@ -16,6 +15,7 @@ error messages once its engine has supported = True.
 
 from .python import PythonEngine
 from .javascript import JavaScriptEngine, TypeScriptEngine
+from .nim import NimEngine
 from .base import LanguageEngine
 
 # Canonical language name -> engine instance.
@@ -24,48 +24,16 @@ _ENGINES = {
     "python": PythonEngine(),
     "javascript": JavaScriptEngine(),
     "typescript": TypeScriptEngine(),
+    "nim": NimEngine(),
 }
 
 _ALIASES = {"js": "javascript", "ts": "typescript"}
 
-_KNOWN_UNSUPPORTED = frozenset([
-    "go",
-    "rust",
-    "cpp", "c", "c++", "hip",
-    "csharp", "c#", "dotnet",
-    "java", "kotlin", "maven", "gradle",
-])
-
-
-class _UnsupportedEngine(LanguageEngine):
-    """Returned for known-but-unsupported languages. Fails fast with a clear message."""
-    supported = False
-
-    def __init__(self, language: str):
-        self.name = language
-
-    def install_deps(self, path: str, dependencies: list) -> None:
-        pass
-
-    def run_tests(self, path: str) -> dict:
-        langs = ", ".join(supported_languages())
-        return {"passed": False,
-                "error": f"'{self.name}' is not supported for validation. Supported: {langs}."}
-
-
 def get_engine(language: str) -> LanguageEngine | None:
-    """Return the engine for a language string, or None if unknown.
-
-    Known-but-unsupported languages return an UnsupportedEngine stub so
-    callers get a clear error instead of a silent None.
-    """
+    """Return the engine for a language string, or None if unknown."""
     key = language.lower().strip()
     key = _ALIASES.get(key, key)
-    if key in _ENGINES:
-        return _ENGINES[key]
-    if key in _KNOWN_UNSUPPORTED:
-        return _UnsupportedEngine(key)
-    return None
+    return _ENGINES.get(key)
 
 
 def supported_languages() -> list[str]:

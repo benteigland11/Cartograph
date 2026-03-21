@@ -78,14 +78,22 @@ test_config.json
 test_llm.json
 model_profiles.json
 
-# Installed/authored widgets (local only, not the cartograph/ package source)
+# Widgets installed into this repo for local testing — not part of the package.
+# The cartograph/ dir doubles as the Python package and the default install target
+# when running from source.  Real subpackages are re-included below.
 cartograph/*/
 !cartograph/languages/
 !cartograph/scaffolding/
 !cartograph/search/
 !cartograph/seed_library/
 
-# Library content — tracked separately, not part of the engine
+# Widget_Library — local dev library, seeded on first run, not committed
+Widget_Library/
+
+# Validation stamps and test artifacts inside seed_library widgets
+cartograph/seed_library/**/.validation_stamp.json
+cartograph/seed_library/**/.coverage
+cartograph/seed_library/**/node_modules/
 
 # Failed / temp
 failed_widgets/
@@ -105,5 +113,3 @@ checkouts/
 *.swp
 *.swo
 .cartographer/
-Widget_Library/
-cartograph/seed_library/**/.coverage

@@ -171,26 +171,30 @@ def validate_item(carto, path):
         return {"status": "error", "message": f"Replace [TODO] placeholders in examples/{example_file}"}
 
     # 7d. Example imports at least one thing from src/
-    if language == "python":
-        imports_src = bool(re.search(r'from src\.|import src\.', example_content))
-    else:
-        imports_src = bool(re.search(r"from\s+['\"]\.\.?/src/", example_content))
-    if not check(f"{example_file} imports from src/", imports_src,
-                 f"examples/{example_file} does not import anything from src/ — the example must use the widget"):
-        _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": (
-            f"examples/{example_file} must import from src/\n\n"
-            f"Expected pattern:\n"
-            f"  sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))\n"
-            f"  from src.mymodule import MyClass"
-        )}
+    import_pattern = engine.src_import_pattern()
+    if import_pattern is not None:
+        imports_src = bool(re.search(import_pattern, example_content, re.MULTILINE))
+        if not check(f"{example_file} imports from src/", imports_src,
+                     f"examples/{example_file} does not import anything from src/ — the example must use the widget"):
+            _print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": (
+                f"examples/{example_file} must import from src/"
+            )}
 
     # 8. Test files follow naming convention
     test_files = engine.find_test_files(path)
     if not check(f"Test files found ({len(test_files)})", len(test_files) > 0,
                  f"No test files found in tests/ for language '{language}'"):
         _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": f"No test files found in tests/ — name them test_*.py (Python) or test_*.js/jsx (JavaScript)"}
+        return {"status": "error", "message": f"No test files found in tests/ matching the expected pattern for '{language}'"}
+
+    # 8b. Language-specific required files (e.g. .nimble for Nim)
+    required = engine.required_files(path)
+    for rel_path, hint in required:
+        full = os.path.join(path, rel_path)
+        if not check(f"{rel_path} exists", os.path.exists(full), hint):
+            _print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": hint}
 
     # 9. Language checks, install deps, run example, run tests
     log.debug("Running language checks...")

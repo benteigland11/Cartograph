@@ -122,8 +122,54 @@ def javascript(target_dir, module_name, display_name, **kwargs):
         )
 
 
+def nim(target_dir, module_name, display_name, **_):
+    # .nimble file is required by `nimble test` — names the package
+    with open(os.path.join(target_dir, f"{module_name}.nimble"), "w") as f:
+        f.write(
+            f'# Package\n'
+            f'version = "0.1.0"\n'
+            f'author = "Widget Author"\n'
+            f'description = "{display_name}"\n'
+            f'license = "MIT"\n'
+            f'srcDir = "src"\n\n'
+            f'# Dependencies\n'
+            f'requires "nim >= 2.0.0"\n'
+        )
+
+    with open(os.path.join(target_dir, "src", f"{module_name}.nim"), "w") as f:
+        f.write(
+            f'## {display_name}\n\n'
+            f'proc {module_name}*(value: string): string =\n'
+            f'  ## Process a value.\n'
+            f'  result = value\n'
+        )
+
+    with open(os.path.join(target_dir, "tests", f"test_{module_name}.nim"), "w") as f:
+        f.write(
+            f'import unittest\n'
+            f'import {module_name}\n\n'
+            f'suite "{display_name}":\n'
+            f'  test "placeholder":\n'
+            f'    # TODO: replace with real tests\n'
+            f'    check true\n'
+        )
+
+    with open(os.path.join(target_dir, "examples", "example_usage.nim"), "w") as f:
+        f.write(
+            f'## Example usage of {display_name}.\n'
+            f'##\n'
+            f'## This file must compile and run cleanly with no user input,\n'
+            f'## no network calls, and no external services. Use fake/hardcoded\n'
+            f'## data to demonstrate the API.\n\n'
+            f'import {module_name}\n\n'
+            f'# [TODO] Replace with a realistic call using fake data\n'
+            f'let result = {module_name}("hello")\n'
+        )
+
+
 # Registry: maps normalized language name → template function
 TEMPLATES = {
     "python": python,
     "javascript": javascript,
+    "nim": nim,
 }

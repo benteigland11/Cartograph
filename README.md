@@ -80,6 +80,10 @@ cartograph setup  [--agent claude|codex|gemini|antigravity|cursor]
                   [--write] [--global]
 cartograph stats
 cartograph doctor
+
+cartograph login   [--token TOKEN]
+cartograph logout
+cartograph push [widget_id] [path]  [--visibility public|private]
 ```
 
 ## Development

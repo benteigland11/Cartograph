@@ -23,8 +23,7 @@ To add a new language engine:
        False if the engine exists but isn't ready yet — see TypeScriptEngine)
   2. Register in languages/registry.py:
      - Import the class and add it to _ENGINES under its canonical name
-     - Add any short aliases to _ALIASES (e.g. "rs" -> "rust")
-     - If the language was in _KNOWN_UNSUPPORTED, remove it from there
+     - Add any short aliases to _ALIASES if needed
   3. Add a scaffold template in scaffolding/templates.py:
      - Write a function that creates src/, tests/, and examples/ stubs
      - Register it in the TEMPLATES dict at the bottom of that file
@@ -96,6 +95,15 @@ class LanguageEngine:
         if res.returncode != 0:
             return self._fail(res.stderr or res.stdout)
         return self._ok()
+
+    def required_files(self, path: str) -> list[tuple[str, str]]:
+        """Return [(relative_path, error_hint)] for files that must exist before tests run."""
+        return []
+
+    def src_import_pattern(self) -> str | None:
+        """Regex pattern used to verify an example imports from src/.
+        Return None to skip the check for this language."""
+        return None
 
     def watched_patterns(self, path: str) -> list[str]:
         """

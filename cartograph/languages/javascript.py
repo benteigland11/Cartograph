@@ -109,6 +109,9 @@ class JavaScriptEngine(LanguageEngine):
 
     # ------------------------------------------------------------------ interface
 
+    def src_import_pattern(self) -> str | None:
+        return r"from\s+['\"]\.\.?/src/"
+
     def find_test_files(self, path: str) -> list[str]:
         files = []
         for ext in ("js", "jsx", "ts", "tsx"):
