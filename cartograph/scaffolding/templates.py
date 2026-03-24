@@ -133,20 +133,25 @@ def nim(target_dir, module_name, display_name, **_):
             f'license = "MIT"\n'
             f'srcDir = "src"\n\n'
             f'# Dependencies\n'
-            f'requires "nim >= 2.0.0"\n'
+            f'requires "nim >= 2.0.0"\n\n'
+            f'# Tasks\n'
+            f'task test, "run tests":\n'
+            f'  for f in listFiles("tests"):\n'
+            f'    if f.endsWith(".nim"):\n'
+            f'      exec "nimble c -r --path:src " & f\n'
         )
 
     with open(os.path.join(target_dir, "src", f"{module_name}.nim"), "w") as f:
         f.write(
             f'## {display_name}\n\n'
-            f'proc {module_name}*(value: string): string =\n'
+            f'func {module_name}*(value: string): string =\n'
             f'  ## Process a value.\n'
-            f'  result = value\n'
+            f'  value\n'
         )
 
     with open(os.path.join(target_dir, "tests", f"test_{module_name}.nim"), "w") as f:
         f.write(
-            f'import unittest\n'
+            f'import std/unittest\n'
             f'import {module_name}\n\n'
             f'suite "{display_name}":\n'
             f'  test "placeholder":\n'
@@ -164,6 +169,7 @@ def nim(target_dir, module_name, display_name, **_):
             f'import {module_name}\n\n'
             f'# [TODO] Replace with a realistic call using fake data\n'
             f'let result = {module_name}("hello")\n'
+            f'discard result  # replace with meaningful output or assertions\n'
         )
 
 

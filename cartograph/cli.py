@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.parse
 
 
 def _out(result: dict) -> None:
@@ -220,17 +221,84 @@ def cmd_status(args):
 def cmd_login(args):
     from .cloud import login_with_token
     token = args.token
+
+    if token:
+        result = login_with_token(token)
+        if "error" in result:
+            _err(result)
+        _out(result)
+        return
+
+    # No token given — use browser-based OAuth flow
+    if not sys.stdin.isatty():
+        _err({"error": "Provide a token with --token or set CARTOGRAPH_TOKEN"})
+
+    import http.server
+    import threading
+    import webbrowser
+    from .auth import get_registry_url, save_token
+
+    received = {}
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            received["token"]  = params.get("token",  [""])[0]
+            received["handle"] = params.get("handle", [""])[0]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(
+                b"<html><body style='font-family:monospace;background:#0d1117;color:#e6edf3;"
+                b"max-width:500px;margin:60px auto;padding:20px'>"
+                b"<h2 style='color:#58a6ff'>Logged in</h2>"
+                b"<p>You can close this tab and return to your terminal.</p></body></html>"
+            )
+
+        def log_message(self, *args):
+            pass  # suppress request logs
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    port = server.server_address[1]
+    cli_redirect = f"http://127.0.0.1:{port}/callback"
+
+    registry = get_registry_url().rstrip("/")
+    login_url = f"{registry}/v1/auth/login?cli_redirect={urllib.parse.quote(cli_redirect)}"
+
+    print(f"\n  Opening browser for authentication...")
+    print(f"  If it doesn't open automatically, visit:\n  {login_url}\n")
+
+    webbrowser.open(login_url)
+
+    # Serve exactly one request then shut down
+    server.handle_request()
+    server.server_close()
+
+    token = received.get("token", "")
+    handle = received.get("handle", "")
     if not token:
-        # Prompt when running interactively; CI should use --token or CARTOGRAPH_TOKEN
-        if sys.stdin.isatty():
-            import getpass
-            token = getpass.getpass("  Cartograph token: ").strip()
-        else:
-            _err({"error": "Provide a token with --token or set CARTOGRAPH_TOKEN"})
-    result = login_with_token(token)
+        _err({"error": "Authentication failed — no token received."})
+
+    save_token(token)
+    _out({"status": "success", "owner": handle})
+
+
+def cmd_whoami(args):
+    from .auth import is_authenticated
+    if not is_authenticated():
+        _out({"authenticated": False})
+        return
+    from .cloud import _get
+    result = _get("/v1/auth/me")
     if "error" in result:
         _err(result)
-    _out(result)
+    _out({"authenticated": True, **result})
+
+
+def cmd_dashboard(args):
+    from .dashboard import serve
+    serve(_carto(), port=getattr(args, "port", 0))
 
 
 def cmd_logout(args):
@@ -344,17 +412,34 @@ def cmd_doctor(args):
                        "found" if npx else "not found",
                        "Reinstall Node.js — npx ships with it" if not npx else None))
 
-    if npx:
-        ok, out = run(["npx", "--yes", "vitest", "--version"])
-        js_checks.append(("vitest", ok,
-                           out.splitlines()[0] if ok else "not found",
-                           "npm install -g vitest" if not ok else None))
-
-        ok, out = run(["npx", "--yes", "esbuild", "--version"])
-        js_checks.append(("esbuild", ok,
-                           out.strip() if ok else "not found",
-                           "npm install -g esbuild" if not ok else None))
     groups.append(("JavaScript", js_checks))
+
+    # --- Nim ---
+    nim_checks = []
+    nim = shutil.which("nim")
+    if nim:
+        ok, out = run(["nim", "--version"])
+        version_line = out.splitlines()[0] if out else ""
+        try:
+            version_str = version_line.split("Version")[1].strip().split()[0]
+            major, minor = int(version_str.split(".")[0]), int(version_str.split(".")[1])
+            version_ok = (major, minor) >= (2, 0)
+        except Exception:
+            version_str, version_ok = version_line, False
+        nim_checks.append(("nim", version_ok,
+                           version_str if version_ok else f"{version_str} (need ≥2.0)",
+                           "Install Nim 2.0+ — nim-lang.org" if not version_ok else None))
+    else:
+        nim_checks.append(("nim", False, "not found", "Install Nim 2.0+ — nim-lang.org"))
+
+    nimble = shutil.which("nimble")
+    if nimble:
+        ok, out = run(["nimble", "--version"])
+        version_str = out.splitlines()[0].strip() if out else "found"
+        nim_checks.append(("nimble", True, version_str, None))
+    else:
+        nim_checks.append(("nimble", False, "not found", "Reinstall Nim — nimble ships with it"))
+    groups.append(("Nim", nim_checks))
 
     # --- Render ---
     all_checks = [c for _, checks in groups for c in checks]
@@ -404,7 +489,7 @@ useful exists, install and use it instead of writing from scratch.
 
     cartograph search <query>
         [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language python|javascript]
+        [--language <language>]
 
     cartograph inspect <widget_id>
         [--source]         include source files
@@ -474,7 +559,7 @@ Found a bug or improvement? Fix it and `cartograph checkin` to contribute it bac
 
     cartograph search <query>
         [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language python|javascript]
+        [--language <language>]
 
     cartograph inspect <widget_id>
         [--source]         include source files
@@ -487,7 +572,7 @@ Found a bug or improvement? Fix it and `cartograph checkin` to contribute it bac
     cartograph status <widget_id> [--target .]
 
     cartograph create <widget_id>
-        --language python|javascript          REQUIRED
+        --language <language>                 REQUIRED
         --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
         [--target .]
 
@@ -541,7 +626,7 @@ it counts. Edits that stay local help nobody.
 
     cartograph search <query>
         [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language python|javascript]
+        [--language <language>]
 
     cartograph inspect <widget_id>
         [--source]         include source files
@@ -554,7 +639,7 @@ it counts. Edits that stay local help nobody.
     cartograph status <widget_id> [--target .]
 
     cartograph create <widget_id>
-        --language python|javascript          REQUIRED
+        --language <language>                 REQUIRED
         --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
         [--target .]
 
@@ -788,7 +873,8 @@ def build_parser() -> argparse.ArgumentParser:
     # create
     p = sub.add_parser("create", help="Scaffold a new widget")
     p.add_argument("widget_id")
-    p.add_argument("--language", required=True, choices=["python", "javascript"])
+    from .languages.registry import supported_languages
+    p.add_argument("--language", required=True, choices=supported_languages())
     p.add_argument("--domain", required=True,
                    choices=["backend", "data", "ml", "security", "infra", "frontend", "universal"])
     p.add_argument("--name", default=None, help="Human-readable display name")
@@ -842,6 +928,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--token", default=None,
                    help="API token (prompted interactively if omitted in a terminal)")
     p.set_defaults(func=cmd_login)
+
+    # whoami
+    p = sub.add_parser("whoami", help="Show current authenticated user")
+    p.set_defaults(func=cmd_whoami)
+
+    # dashboard
+    p = sub.add_parser("dashboard", help="Open local widget dashboard in browser")
+    p.add_argument("--port", type=int, default=0, help="Port to listen on (default: random)")
+    p.set_defaults(func=cmd_dashboard)
 
     # logout
     p = sub.add_parser("logout", help="Remove stored Cartograph cloud credentials")

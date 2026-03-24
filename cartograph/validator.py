@@ -219,6 +219,7 @@ def validate_item(carto, path):
     example_result = engine.run_example(path)
     example_err = example_result.get("error", "")
     if not check(f"{example_file} runs cleanly", example_result["passed"], example_err):
+        engine.cleanup(path)
         _print_checklist(checklist, errors, failed=True, test_output=example_err)
         return {"status": "error", "message": f"{example_file} failed to run.",
                 "test_output": example_err[:500]}
@@ -227,6 +228,7 @@ def validate_item(carto, path):
     result = engine.run_tests(path)
     test_error = result.get("error", "")
     if not check("All tests pass", result["passed"], test_error):
+        engine.cleanup(path)
         _print_checklist(checklist, errors, failed=True, test_output=test_error)
         return {"status": "error", "message": "Tests failed. Fix before checkin.",
                 "test_output": test_error[:3000]}
@@ -240,6 +242,7 @@ def validate_item(carto, path):
           duplicate is None,
           f"Identical code already exists: {duplicate['id']}" if duplicate else None)
 
+    engine.cleanup(path)
     _print_checklist(checklist, errors, failed=False)
 
     # Write a stamp so checkin can skip re-validation if nothing changes

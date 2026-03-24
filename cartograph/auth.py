@@ -19,7 +19,7 @@ from platformdirs import user_config_dir
 
 log = logging.getLogger("cartograph")
 
-_DEFAULT_REGISTRY_URL = "https://api.cartograph.dev"
+_DEFAULT_REGISTRY_URL = "https://cartograph-api-562154372671.us-central1.run.app"
 _TOKEN_FILE = os.path.join(user_config_dir("cartograph"), "credentials.json")
 
 
