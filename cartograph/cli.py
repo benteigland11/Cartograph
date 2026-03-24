@@ -342,6 +342,21 @@ def cmd_push(args):
     if not widget_id:
         _err({"error": "Could not determine widget_id. Pass it explicitly or run from the widget directory."})
 
+    # Ensure a valid stamp exists — run validation if not
+    from .validation_stamp import is_stamp_valid
+    from .languages import get_engine
+    try:
+        with open(os.path.join(path, "widget.json")) as f:
+            language = json.load(f).get("tech_stack", {}).get("language", "python")
+    except Exception:
+        language = "python"
+    engine = get_engine(language)
+    if engine is None or not is_stamp_valid(path, language, engine):
+        print("  No valid stamp — running validation first...\n", file=sys.stderr)
+        validate_result = _carto().validate_item(path=path)
+        if validate_result.get("status") == "error":
+            _err(validate_result)
+
     from .cloud import push
     result = push(path, widget_id, visibility=args.visibility)
     if "error" in result:
