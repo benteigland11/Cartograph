@@ -328,19 +328,30 @@ def cmd_push(args):
     if not is_authenticated():
         _err({"error": "Not authenticated. Run: cartograph login"})
 
-    path = _resolve(args.path)
-    _preflight_from_path(path)
+    if getattr(args, "lib", False):
+        # Resolve path from library by widget_id
+        widget_id = args.widget_id
+        if not widget_id:
+            _err({"error": "Provide a widget_id when using --lib"})
+        carto = _carto()
+        widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
+        if not widget:
+            _err({"error": f"Widget '{widget_id}' not found in library."})
+        path = widget["path"]
+    else:
+        path = _resolve(args.path)
+        widget_id = args.widget_id
+        if not widget_id:
+            try:
+                with open(os.path.join(path, "widget.json")) as f:
+                    data = json.load(f)
+                widget_id = data.get("meta", {}).get("id") or data.get("id")
+            except Exception:
+                pass
+        if not widget_id:
+            _err({"error": "Could not determine widget_id. Pass it explicitly or use --lib."})
 
-    # widget_id comes from widget.json if not given explicitly
-    widget_id = args.widget_id
-    if not widget_id:
-        try:
-            with open(os.path.join(path, "widget.json")) as f:
-                widget_id = json.load(f).get("id")
-        except Exception:
-            pass
-    if not widget_id:
-        _err({"error": "Could not determine widget_id. Pass it explicitly or run from the widget directory."})
+    _preflight_from_path(path)
 
     # Ensure a valid stamp exists — run validation if not
     from .validation_stamp import is_stamp_valid
@@ -974,9 +985,10 @@ def build_parser() -> argparse.ArgumentParser:
     # push
     p = sub.add_parser("push", help="Publish a validated widget to the cloud registry")
     p.add_argument("widget_id", nargs="?", default=None,
-                   help="Widget ID to push (inferred from widget.json if omitted)")
+                   help="Widget ID (required with --lib, inferred from widget.json otherwise)")
     p.add_argument("path", nargs="?", default=".",
                    help="Widget directory (default: .)")
+    p.add_argument("--lib", action="store_true", help="Push a widget from the library by ID")
     p.add_argument("--visibility", default="public", choices=["public", "private"],
                    help="Registry visibility (default: public)")
     p.set_defaults(func=cmd_push)
