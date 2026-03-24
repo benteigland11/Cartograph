@@ -85,6 +85,10 @@ class LanguageEngine:
         """Return expected example filename in examples/. Override per language."""
         return "example_usage.py"
 
+    def cleanup(self, path: str) -> None:
+        """Remove any temp artifacts created during validation. Best-effort — never raises."""
+        pass
+
     def run_example(self, path: str) -> dict:
         """Execute the example file. Called after install_deps."""
         ep = os.path.join(path, "examples", self.example_filename(path))
