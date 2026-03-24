@@ -158,18 +158,31 @@ def cmd_create(args):
     _out(result)
 
 
+def _resolve_widget_path(args) -> str:
+    """Resolve a widget path from either --lib <widget_id> or a filesystem path."""
+    if getattr(args, "lib", False):
+        carto = _carto()
+        widget = next((w for w in carto.widgets if w["id"] == args.path), None)
+        if not widget:
+            _err({"error": f"Widget '{args.path}' not found in library. Use 'cartograph search' to browse."})
+        return widget["path"]
+    return _resolve(args.path)
+
+
 def cmd_validate(args):
-    _preflight_from_path(_resolve(args.path))
-    result = _carto().validate_item(path=_resolve(args.path))
+    path = _resolve_widget_path(args)
+    _preflight_from_path(path)
+    result = _carto().validate_item(path=path)
     if result.get("status") == "error":
         _err(result)
     _out(result)
 
 
 def cmd_checkin(args):
-    _preflight_from_path(_resolve(args.path))
+    path = _resolve(args.path)
+    _preflight_from_path(path)
     result = _carto().checkin(
-        path=_resolve(args.path),
+        path=path,
         reason=args.reason,
         version_bump=args.bump,
         override_warnings=args.override_warnings,
@@ -883,7 +896,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # validate
     p = sub.add_parser("validate", help="Run the validation pipeline on a widget")
-    p.add_argument("path", nargs="?", default=".", help="Widget directory (default: .)")
+    p.add_argument("path", nargs="?", default=".", help="Widget directory or widget_id with --lib (default: .)")
+    p.add_argument("--lib", action="store_true", help="Treat path as a library widget_id")
     p.set_defaults(func=cmd_validate)
 
     # checkin
