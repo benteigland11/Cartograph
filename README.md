@@ -12,7 +12,7 @@ Those same widgets have now been reused across many projects and have settled in
 
 ## Philosophy
 
-Something that might take getting used to is this CLI tool is made with agents in mind first. This means things like few interactive CLI commands. 
+Something that might take getting used to is this CLI tool is made with agents in mind first. This means things like few interactive CLI commands.
 
 We only ship what we can validate. Every widget that enters the library has passed a full pipeline: structure checks, manifest validation, coverage enforcement, contamination scanning, example execution, and versioning. If the pipeline can't run it, it doesn't go in.
 
@@ -29,16 +29,10 @@ pip install cartograph-cli
 Then generate instructions for your AI agent:
 
 ```bash
-cartograph setup
-```
-
-Running in a terminal, `cartograph setup` walks you through choosing your agent (Claude, Codex, Gemini, Antigravity, Cursor) and writes the instruction block to the right config file so your agent knows how to use the library.
-
-To do it non-interactively:
-
-```bash
 cartograph setup --agent claude --write
 ```
+
+We built in the ability to separate out by agentic service in case some need different guidance.
 
 ## Commands
 
@@ -93,37 +87,16 @@ pip install -e .
 pytest
 ```
 
-The widget library lives in your platform's user data directory and is seeded automatically on first run. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
+The widget library lives in your platform's user data directory. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
 Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest) are installed correctly.
-
-## Architecture
-
-```
-cartograph/
-  cli.py             Entry point - all commands
-  engine.py          Core Cartograph class (search, load, orchestrate)
-  validator.py       14-point validation pipeline
-  checkin.py         Push edits back to library (versioning, contamination scan)
-  installer.py       Install/uninstall/delete widgets
-  inspector.py       Inspect widgets, read source and reviews
-  cloud.py           Cloud registry client (search, publish, download, reviews)
-  auth.py            OAuth credentials, token refresh, registry URL
-  trust.py           HMAC-SHA256 stamp signing for push/verify
-  dashboard.py       Local web UI (served via built-in HTTP server)
-  scaffolding/       Widget scaffolding (create)
-  languages/         Per-language engines (test runners, validators)
-  search/            Hybrid BM25 + n-gram search
-tests/               pytest suite
-```
 
 ## Status
 
 - Python: fully supported (create, validate, test, checkin)
-- JavaScript/TypeScript: fully supported (React components, plain JS, vitest)
+- JavaScript: fully supported (React components, plain JS, vitest)
 - Nim: fully supported (testament)
 - Search: hybrid BM25 + n-gram (local and cloud)
-- Cloud registry: live, with auth, publishing, versioning, reviews, and rollback
 - Dashboard: `cartograph dashboard` opens a local web UI for browsing and managing widgets
 
 ## Cloud registry
@@ -134,9 +107,8 @@ The default registry is hosted by the Cartograph project. To point at your own r
 export CARTOGRAPH_REGISTRY_URL=https://your-registry.example.com
 ```
 
-Authenticate with `cartograph login`, which opens a browser-based OAuth flow. Once authenticated, you can publish, rate, review, and roll back widgets.
+Authenticate with `cartograph login`, which opens a browser-based OAuth flow. Once authenticated, you can publish widgets. You can still install cloud widgets when not logged in. We encourage you to use the default cloud registry to build up a network effect. Switching the Registry URL would be good use cases for enterprise systems that want this as an internal tool.
 
 ## Roadmap
 
-- More languages as validation pipelines are built and tested
-- Registry federation and self-hosting documentation
+- Continued support for more languages.

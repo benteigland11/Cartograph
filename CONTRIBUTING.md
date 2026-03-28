@@ -1,8 +1,12 @@
 # Note from the author - Ben Teigland
 
-I am very excited to have you along for this ride! This project was born out of personal frustrations with code quality and portability of AI written code. By trade I am not a CS person, which might be reflected in opinated decisions made about validation engines. I am trained in Electrical Engineering so a systems focus with simple first is my intention. I will be using AI to review submitted PRs, as admittedly I do not know programming well enough for manual review. However, I will not rely on a single pass. This whole project is based on scrutinizing what the AI lets through, and I intend to do that for reviews.
+I am very excited to have you along for this ride! This project was born out of personal frustrations with code quality and portability of AI written code. By trade I am not a CS person, which might be reflected in opinionated decisions made about validation engines. I am trained in Electrical Engineering so a systems focus with simple first is my intention. I will be using AI to review submitted PRs, as admittedly I do not know programming well enough for manual review. However, I will not rely on a single pass. This whole project is based on scrutinizing what the AI lets through, and I intend to do that for reviews.
 
 With that said, I do encourage you to use AI to build onto our engine. People who understand the philosophy of this tool are highest valued, if you can write the code yourself then that's an added bonus! You will not be rejected if Claude or some other chatbot is a co-author. However, if you submit a large PR it is more likely to be rejected. A large PR with 90% correct code but 10% causing issues will be rejected. You are better submitting it as chunks so get that 90% in.
+
+Thank you for you interest in supporting this project!
+
+--- Ben Teigland
 
 # Contributing to Cartograph
 

@@ -17,11 +17,9 @@ def test_registry_case_insensitive():
     assert get_engine("PYTHON") is get_engine("python")
 
 
-def test_registry_aliases_return_stub():
-    # v0.1: aliases resolve to unsupported stubs, not None
-    assert get_engine("js") is not None
-    assert get_engine("ts") is not None
-    assert get_engine("c++") is not None
+def test_registry_aliases():
+    assert get_engine("js") is get_engine("javascript")
+    assert get_engine("ts") is get_engine("typescript")
 
 
 def test_registry_unknown_returns_none():
@@ -29,17 +27,11 @@ def test_registry_unknown_returns_none():
     assert get_engine("") is None
 
 
-def test_supported_languages_v01():
+def test_supported_languages():
     langs = supported_languages()
-    assert langs == ["python"]
-
-
-def test_unsupported_engine_returns_clear_error():
-    engine = get_engine("javascript")
-    assert engine is not None
-    result = engine.run_tests("/tmp")
-    assert result["passed"] is False
-    assert "v0.1" in result["error"]
+    assert "python" in langs
+    assert "javascript" in langs
+    assert "nim" in langs
 
 
 def test_python_engine_run_tests_pass(tmp_path):

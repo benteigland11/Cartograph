@@ -81,8 +81,8 @@ def test_post_sends_data(mock_urlopen):
 
 _HTTP_CLIENT_EXAMPLE = """\
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from http_client import get
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.http_client import get
 
 # Example: fetch a URL (just show it's importable, don't hit the network)
 print(f"get function loaded: {get}")
@@ -122,8 +122,8 @@ def test_validate_fail():
 
 _JSON_PARSER_EXAMPLE = """\
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from json_parser import parse, validate
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.json_parser import parse, validate
 
 data = parse('{"name": "widget", "version": "1.0.0"}')
 print(f"Parsed: {data}")
@@ -174,8 +174,8 @@ def test_require_auth_blocks():
 
 _AUTH_MIDDLEWARE_EXAMPLE = """\
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from auth_middleware import verify_token
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.auth_middleware import verify_token
 
 result = verify_token("example.jwt.token")
 print(f"Token verified: {result}")
