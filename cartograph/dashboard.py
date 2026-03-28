@@ -24,7 +24,7 @@ _HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cartograph</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/nim.min.js"></script>
 <script>hljs.configure({ignoreUnescapedHTML: true});</script>
@@ -34,27 +34,32 @@ _HTML = r"""<!DOCTYPE html>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg:        #0d1117;
-    --surface:   #161b22;
-    --surface2:  #1c2128;
-    --border:    #30363d;
-    --text:      #e6edf3;
-    --muted:     #8b949e;
-    --blue:      #58a6ff;
-    --green:     #3fb950;
-    --orange:    #d29922;
-    --red:       #f85149;
-    --purple:    #bc8cff;
+    --bg:        #fafafa;
+    --surface:   #ffffff;
+    --surface2:  #f3f4f6;
+    --border:    #e5e7eb;
+    --text:      #1f2937;
+    --muted:     #6b7280;
+    --blue:      #2563eb;
+    --green:     #059669;
+    --orange:    #d97706;
+    --red:       #dc2626;
+    --purple:    #7c3aed;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+    --radius:    8px;
   }
 
-  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; }
 
   /* ── Nav ── */
   nav {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
     padding: 0 24px;
-    height: 54px;
+    height: 56px;
     display: flex;
     align-items: center;
     gap: 16px;
@@ -74,22 +79,22 @@ _HTML = r"""<!DOCTYPE html>
     transition: color 0.1s;
   }
   .nav-tab:hover { color: var(--text); }
-  .nav-tab.active { color: var(--text); border-bottom-color: var(--orange); font-weight: 500; }
+  .nav-tab.active { color: var(--blue); border-bottom-color: var(--blue); font-weight: 500; }
 
   .nav-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-left: auto; }
 
   .btn {
-    background: var(--surface2);
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius);
     color: var(--muted);
-    padding: 5px 12px;
+    padding: 6px 14px;
     font-size: 13px;
     cursor: pointer;
     display: flex; align-items: center; gap: 5px;
-    transition: color 0.1s, border-color 0.1s;
+    transition: all 0.15s;
   }
-  .btn:hover { color: var(--text); border-color: var(--muted); }
+  .btn:hover { color: var(--text); border-color: #d1d5db; box-shadow: var(--shadow-sm); }
   .btn.refreshing { animation: spin 0.6s linear infinite; }
 
 
@@ -100,10 +105,10 @@ _HTML = r"""<!DOCTYPE html>
     padding: 1px 6px;
     border-radius: 10px;
   }
-  .nav-tab.active .tab-badge { background: #1f6feb44; color: var(--blue); }
+  .nav-tab.active .tab-badge { background: #2563eb18; color: var(--blue); }
 
   /* ── Content ── */
-  .content { max-width: 960px; margin: 0 auto; padding: 24px; }
+  .content { max-width: 960px; margin: 0 auto; padding: 28px 24px; }
 
   /* ── Search view ── */
   .search-bar {
@@ -115,14 +120,15 @@ _HTML = r"""<!DOCTYPE html>
     width: 100%;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius);
     padding: 12px 16px 12px 40px;
     color: var(--text);
     font-size: 16px;
     outline: none;
-    transition: border-color 0.15s;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    box-shadow: var(--shadow-sm);
   }
-  .search-bar input:focus { border-color: var(--blue); }
+  .search-bar input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px #2563eb18; }
   .search-bar input::placeholder { color: var(--muted); }
   .search-bar-icon {
     position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
@@ -141,23 +147,22 @@ _HTML = r"""<!DOCTYPE html>
     font-size: 12px;
     color: var(--muted);
     cursor: pointer;
-    transition: all 0.1s;
+    transition: all 0.15s;
   }
-  .filter-chip:hover { color: var(--text); border-color: var(--muted); }
-  .filter-chip.active { color: var(--blue); border-color: var(--blue); background: #58a6ff11; }
+  .filter-chip:hover { color: var(--text); border-color: #d1d5db; }
+  .filter-chip.active { color: var(--blue); border-color: var(--blue); background: #2563eb0c; }
   .filter-label { font-size: 12px; color: var(--muted); margin-right: 4px; }
 
   /* ── Widget list ── */
-  .widget-list { display: flex; flex-direction: column; }
+  .widget-list { display: flex; flex-direction: column; gap: 2px; }
   .widget-card {
-    padding: 16px 0;
-    border-bottom: 1px solid var(--border);
+    padding: 14px 16px;
+    border-radius: var(--radius);
     cursor: pointer;
-    transition: background 0.1s;
+    transition: all 0.15s;
+    border: 1px solid transparent;
   }
-  .widget-card:first-child { border-top: 1px solid var(--border); }
-  .widget-card:hover { background: var(--surface); margin: 0 -12px; padding: 16px 12px; border-radius: 6px; border-color: transparent; }
-  .widget-card:hover + .widget-card { border-top-color: transparent; }
+  .widget-card:hover { background: var(--surface); border-color: var(--border); box-shadow: var(--shadow); }
   .widget-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
   .widget-name { font-size: 15px; font-weight: 600; color: var(--blue); }
   .widget-owner { font-size: 13px; color: var(--muted); }
@@ -184,19 +189,19 @@ _HTML = r"""<!DOCTYPE html>
     font-size: 11px; padding: 2px 8px; border-radius: 10px;
     border: 1px solid; font-weight: 500; white-space: nowrap;
   }
-  .sync-local    { color: var(--blue);   border-color: #58a6ff55; background: #58a6ff11; }
-  .sync-cloud    { color: var(--purple); border-color: #bc8cff55; background: #bc8cff11; }
-  .sync-published   { color: var(--green);  border-color: #3fb95055; background: #3fb95011; }
-  .sync-mismatch { color: var(--orange); border-color: #d2992255; background: #d2992211; }
+  .sync-local    { color: var(--blue);   border-color: #2563eb30; background: #2563eb0a; }
+  .sync-cloud    { color: var(--purple); border-color: #7c3aed30; background: #7c3aed0a; }
+  .sync-published   { color: var(--green);  border-color: #05966930; background: #0596690a; }
+  .sync-mismatch { color: var(--orange); border-color: #d9770630; background: #d977060a; }
 
   .vis-badge {
     font-size: 11px; padding: 1px 6px; border-radius: 4px;
   }
-  .vis-public  { color: var(--green); background: #3fb95015; }
-  .vis-private { color: var(--orange); background: #d2992215; }
-  .vis-local   { color: var(--blue); background: #4a9eff15; }
-  .vis-cloud   { color: var(--purple); background: #bc8cff15; }
-  .vis-mismatch { color: var(--orange); background: #d2992215; }
+  .vis-public  { color: var(--green); background: #0596690c; }
+  .vis-private { color: var(--orange); background: #d977060c; }
+  .vis-local   { color: var(--blue); background: #2563eb0c; }
+  .vis-cloud   { color: var(--purple); background: #7c3aed0c; }
+  .vis-mismatch { color: var(--orange); background: #d977060c; }
 
   /* ── Detail view ── */
   .detail-back {
@@ -220,8 +225,9 @@ _HTML = r"""<!DOCTYPE html>
   .detail-sidebar {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius);
     padding: 16px;
+    box-shadow: var(--shadow-sm);
   }
   .detail-sidebar h3 { font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.5px; margin-bottom: 10px; }
   .detail-meta-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
@@ -230,9 +236,9 @@ _HTML = r"""<!DOCTYPE html>
   .detail-meta-value { color: var(--text); font-weight: 500; }
 
   .install-cmd {
-    background: var(--bg);
+    background: var(--surface2);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius);
     padding: 10px 14px;
     font-family: monospace;
     font-size: 13px;
@@ -240,16 +246,16 @@ _HTML = r"""<!DOCTYPE html>
     margin-top: 12px;
     cursor: pointer;
     position: relative;
-    transition: border-color 0.1s;
+    transition: border-color 0.15s, box-shadow 0.15s;
   }
-  .install-cmd:hover { border-color: var(--green); }
+  .install-cmd:hover { border-color: var(--green); box-shadow: var(--shadow-sm); }
   .install-cmd .copy-hint {
     position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
     font-size: 11px; color: var(--muted); font-family: -apple-system, sans-serif;
   }
 
   .tags-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .tag { background: #1f6feb22; color: var(--blue); font-size: 12px; padding: 2px 8px; border-radius: 12px; }
+  .tag { background: #2563eb10; color: var(--blue); font-size: 12px; padding: 2px 8px; border-radius: 12px; }
 
   .detail-section { margin-bottom: 24px; }
   .detail-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
@@ -257,9 +263,10 @@ _HTML = r"""<!DOCTYPE html>
   .review-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius);
     padding: 12px;
     margin-bottom: 8px;
+    box-shadow: var(--shadow-sm);
   }
   .review-score { color: var(--orange); font-weight: 600; margin-bottom: 4px; }
   .review-comment { font-size: 13px; color: var(--muted); }
@@ -273,21 +280,75 @@ _HTML = r"""<!DOCTYPE html>
 
   .results-count { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 
-  /* ── Code viewer (stacked) ── */
-  .file-block { margin-bottom: 16px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-  .file-header {
+  /* ── File explorer (sidebar + viewer) ── */
+  .file-explorer {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    height: calc(100vh - 200px);
+    min-height: 400px;
+  }
+  .file-tree {
+    background: var(--surface2);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 8px 0;
+    font-size: 13px;
+  }
+  .file-tree-group { margin-bottom: 2px; }
+  .file-tree-folder {
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    user-select: none;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .file-tree-folder:hover { color: var(--text); }
+  .file-tree-folder .chevron { font-size: 10px; transition: transform 0.15s; display: inline-block; }
+  .file-tree-folder.collapsed .chevron { transform: rotate(-90deg); }
+  .file-tree-folder.collapsed + .file-tree-items { display: none; }
+  .file-tree-item {
+    padding: 4px 12px 4px 28px;
+    cursor: pointer;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px;
+    transition: background 0.1s;
+  }
+  .file-tree-item:hover { background: var(--border); }
+  .file-tree-item.active { background: #2563eb12; color: var(--blue); font-weight: 500; }
+  .file-tree-item.too-large { color: var(--muted); font-style: italic; }
+
+  .file-viewer {
+    overflow-y: auto;
+    overflow-x: auto;
+    background: var(--surface);
+  }
+  .file-viewer-header {
     background: var(--surface2);
     border-bottom: 1px solid var(--border);
-    padding: 6px 12px;
+    padding: 8px 14px;
     font-size: 13px;
     font-family: "SF Mono", "Fira Code", monospace;
     color: var(--muted);
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    display: flex; align-items: center; gap: 6px;
+    position: sticky; top: 0; z-index: 1;
   }
-  .file-header-name { color: var(--text); font-weight: 500; }
-  .file-header-dir { color: var(--muted); }
+  .file-viewer-header .fname { color: var(--text); font-weight: 500; }
+  .file-viewer-empty {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; color: var(--muted); font-size: 13px;
+  }
   pre.code-block {
     background: var(--surface);
     padding: 12px 16px;
@@ -301,24 +362,40 @@ _HTML = r"""<!DOCTYPE html>
   }
   pre.code-block code { background: none !important; padding: 0 !important; font-size: inherit; line-height: inherit; font-family: inherit; }
 
+  .file-too-large {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .file-too-large .size { font-weight: 600; color: var(--text); }
+
   /* Files section full-width below the grid */
   .detail-files-full {
     margin-top: 24px;
+  }
+
+  @media (max-width: 640px) {
+    .file-explorer { grid-template-columns: 1fr; max-height: none; }
+    .file-tree { border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; }
   }
 
   /* ── Profile header ── */
   .profile-header {
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 24px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border);
+    gap: 18px;
+    margin-bottom: 28px;
+    padding: 20px 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
   }
   .profile-avatar {
     width: 56px; height: 56px;
     border-radius: 50%;
-    background: var(--surface2);
+    background: linear-gradient(135deg, #2563eb18, #7c3aed18);
     border: 2px solid var(--border);
     display: flex; align-items: center; justify-content: center;
     font-size: 24px; font-weight: 600; color: var(--blue);
@@ -337,8 +414,9 @@ _HTML = r"""<!DOCTYPE html>
   @media (max-width: 640px) {
     .content { padding: 16px; }
     .nav-tabs { margin-left: 12px; }
-    .profile-header { flex-direction: column; text-align: center; }
+    .profile-header { flex-direction: column; text-align: center; padding: 16px; }
     .profile-stats { justify-content: center; }
+    .widget-card { padding: 12px; }
   }
 </style>
 </head>
@@ -624,8 +702,8 @@ function renderProfile() {
   // Filter bar
   html += `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">`;
   html += `<input type="search" id="profile-search" placeholder="Filter widgets..." style="
-    background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 12px;
-    color:var(--text);font-size:13px;width:240px;outline:none;
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:7px 14px;
+    color:var(--text);font-size:13px;width:240px;outline:none;box-shadow:var(--shadow-sm);
   " />`;
   if (isOwnProfile) {
     const counts = { all: widgets.length, local: localCount, published: pubCount };
@@ -878,7 +956,7 @@ function renderDetail(w) {
 
   html += `</div>`; // detail-grid
 
-  // Source files — full width below the grid
+  // Source files — sidebar tree + viewer
   html += `<div class="detail-files-full" id="files-section">`;
   if (detailFiles && Object.keys(detailFiles).length) {
     const fileNames = Object.keys(detailFiles).sort((a, b) => {
@@ -886,17 +964,71 @@ function renderDetail(w) {
       return order(a) - order(b) || a.localeCompare(b);
     });
 
-    html += `<h3 style="margin-bottom:12px">Files (${fileNames.length})</h3>`;
+    // Group files by folder
+    const groups = {};
+    const rootFiles = [];
     fileNames.forEach(f => {
-      const parts = f.split('/');
-      const name = parts.pop();
-      const dir = parts.length ? parts.join('/') + '/' : '';
-      const hljsLang = fileToLang(f);
-      html += `<div class="file-block">
-        <div class="file-header">${dir ? `<span class="file-header-dir">${esc(dir)}</span>` : ''}<span class="file-header-name">${esc(name)}</span></div>
-        <pre class="code-block"><code class="language-${hljsLang}">${esc(detailFiles[f] || '')}</code></pre>
-      </div>`;
+      const slash = f.indexOf('/');
+      if (slash === -1) { rootFiles.push(f); }
+      else {
+        const folder = f.substring(0, slash);
+        if (!groups[folder]) groups[folder] = [];
+        groups[folder].push(f);
+      }
     });
+
+    const firstFile = fileNames[0];
+    const isTooLarge = (content) => content && content.startsWith('[File too large:');
+
+    html += `<h3 style="margin-bottom:12px">Files (${fileNames.length})</h3>`;
+    html += `<div class="file-explorer">`;
+
+    // Sidebar tree
+    html += `<div class="file-tree">`;
+    const folderOrder = ['src', 'tests', 'examples'];
+    const sortedFolders = Object.keys(groups).sort((a, b) => {
+      const ai = folderOrder.indexOf(a), bi = folderOrder.indexOf(b);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.localeCompare(b);
+    });
+
+    sortedFolders.forEach(folder => {
+      html += `<div class="file-tree-group">`;
+      html += `<div class="file-tree-folder" onclick="this.classList.toggle('collapsed')"><span class="chevron">&#9662;</span> ${esc(folder)}/</div>`;
+      html += `<div class="file-tree-items">`;
+      groups[folder].forEach(f => {
+        const name = f.substring(f.indexOf('/') + 1);
+        const tooLarge = isTooLarge(detailFiles[f]);
+        html += `<div class="file-tree-item${f === firstFile ? ' active' : ''}${tooLarge ? ' too-large' : ''}" data-file="${esc(f)}" onclick="selectFile(this, '${esc(f)}')">${esc(name)}</div>`;
+      });
+      html += `</div></div>`;
+    });
+
+    if (rootFiles.length) {
+      rootFiles.forEach(f => {
+        const tooLarge = isTooLarge(detailFiles[f]);
+        html += `<div class="file-tree-item${f === firstFile ? ' active' : ''}${tooLarge ? ' too-large' : ''}" data-file="${esc(f)}" onclick="selectFile(this, '${esc(f)}')" style="padding-left:12px">${esc(f)}</div>`;
+      });
+    }
+    html += `</div>`;
+
+    // Viewer pane - show first file
+    const firstContent = detailFiles[firstFile] || '';
+    const firstLang = fileToLang(firstFile);
+    html += `<div class="file-viewer" id="file-viewer">`;
+    html += `<div class="file-viewer-header"><span class="fname">${esc(firstFile)}</span></div>`;
+    if (isTooLarge(firstContent)) {
+      const sizeMatch = firstContent.match(/\\d+/);
+      const sizeKB = sizeMatch ? (parseInt(sizeMatch[0]) / 1024).toFixed(0) : '?';
+      html += `<div class="file-too-large">File too large to preview<br><span class="size">${sizeKB} KB</span></div>`;
+    } else {
+      html += `<pre class="code-block"><code class="language-${firstLang}">${esc(firstContent)}</code></pre>`;
+    }
+    html += `</div>`;
+
+    html += `</div>`; // file-explorer
   } else if (detailFiles === null) {
     html += `<h3>Files</h3><div class="empty" style="padding:24px 0"><div class="spinner"></div>Loading source...</div>`;
   } else {
@@ -931,6 +1063,31 @@ async function loadDetailFiles(widgetId, owner) {
     detailFiles = {};
   }
   render();
+}
+
+function selectFile(el, filepath) {
+  // Update active state in tree
+  document.querySelectorAll('.file-tree-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+
+  // Update viewer
+  const viewer = document.getElementById('file-viewer');
+  if (!viewer || !detailFiles) return;
+  const content = detailFiles[filepath] || '';
+  const lang = fileToLang(filepath);
+  const isTooLarge = content.startsWith('[File too large:');
+
+  let html = `<div class="file-viewer-header"><span class="fname">${esc(filepath)}</span></div>`;
+  if (isTooLarge) {
+    const sizeMatch = content.match(/\d+/);
+    const sizeKB = sizeMatch ? (parseInt(sizeMatch[0]) / 1024).toFixed(0) : '?';
+    html += `<div class="file-too-large">File too large to preview<br><span class="size">${sizeKB} KB</span></div>`;
+  } else {
+    html += `<pre class="code-block"><code class="language-${lang}">${esc(content)}</code></pre>`;
+  }
+  viewer.innerHTML = html;
+  viewer.scrollTop = 0;
+  if (typeof hljs !== 'undefined') hljs.highlightAll();
 }
 
 function copyInstall(el) {
@@ -1096,7 +1253,7 @@ def _make_handler(engine):
             files = {}
             skip_dirs = {"__pycache__", ".pytest_cache", "history", ".git", "node_modules"}
             skip_files = {".coverage", ".validation_stamp.json"}
-            max_size = 50_000
+            max_size = 500_000
 
             for root, dirs, filenames in os.walk(base):
                 dirs[:] = [d for d in dirs if d not in skip_dirs]
