@@ -404,6 +404,37 @@ def _write_pid(pid, port):
         f.write(f"{pid}\n{port}\n")
 
 
+def _is_pid_alive(pid):
+    """Check if a process is still running (cross-platform)."""
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
+
+
+def _kill_pid(pid):
+    """Terminate a process by PID (cross-platform)."""
+    if sys.platform == "win32":
+        import subprocess
+        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+
 def _read_pid():
     """Returns (pid, port) or (None, None)."""
     if not os.path.exists(_PID_FILE):
@@ -412,10 +443,11 @@ def _read_pid():
         lines = open(_PID_FILE).read().strip().splitlines()
         pid = int(lines[0])
         port = int(lines[1]) if len(lines) > 1 else 0
-        # Check if process is still alive
-        os.kill(pid, 0)
+        if not _is_pid_alive(pid):
+            os.remove(_PID_FILE)
+            return None, None
         return pid, port
-    except (ValueError, IndexError, ProcessLookupError, PermissionError):
+    except (ValueError, IndexError):
         os.remove(_PID_FILE)
         return None, None
 
@@ -425,13 +457,23 @@ def stop():
     pid, _ = _read_pid()
     if pid is None:
         return False
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    _kill_pid(pid)
     if os.path.exists(_PID_FILE):
         os.remove(_PID_FILE)
     return True
+
+
+def _serve_foreground(handler, port, pid_file):
+    """Run the server in the foreground (used by spawned subprocess on Windows)."""
+    server = http.server.HTTPServer(("127.0.0.1", port), handler)
+    if sys.platform != "win32":
+        signal.signal(signal.SIGTERM, lambda *_: (server.server_close(), sys.exit(0)))
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        if os.path.exists(pid_file):
+            os.remove(pid_file)
 
 
 def serve(engine, port=9473, open_browser=True):
@@ -442,33 +484,62 @@ def serve(engine, port=9473, open_browser=True):
         stop()
 
     handler = _make_handler(engine)
-    server = http.server.HTTPServer(("127.0.0.1", port), handler)
-    actual_port = server.server_address[1]
-    url = f"http://127.0.0.1:{actual_port}"
 
-    # Fork to background
-    pid = os.fork()
-    if pid > 0:
-        # Parent - wait briefly for child to bind, then report
-        _write_pid(pid, actual_port)
-        print(f"\n  Cartograph Dashboard -> {url}  (pid {pid})")
+    if sys.platform == "win32":
+        # Windows: spawn a detached subprocess running this module
+        import subprocess
+        server = http.server.HTTPServer(("127.0.0.1", port), handler)
+        actual_port = server.server_address[1]
+        server.server_close()
+        url = f"http://127.0.0.1:{actual_port}"
+
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "cartograph.dashboard", str(actual_port)],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        _write_pid(proc.pid, actual_port)
+        print(f"\n  Cartograph Dashboard -> {url}  (pid {proc.pid})")
         print(f"  Run 'cartograph dashboard --stop' to stop it.\n")
         if open_browser:
             threading.Timer(0.3, lambda: webbrowser.open(url)).start()
-        return
+    else:
+        # Unix: fork to background
+        server = http.server.HTTPServer(("127.0.0.1", port), handler)
+        actual_port = server.server_address[1]
+        url = f"http://127.0.0.1:{actual_port}"
 
-    # Child - detach and serve
-    os.setsid()
-    sys.stdin.close()
-    devnull = open(os.devnull, "w")
-    sys.stdout = devnull
-    sys.stderr = devnull
+        pid = os.fork()
+        if pid > 0:
+            _write_pid(pid, actual_port)
+            print(f"\n  Cartograph Dashboard -> {url}  (pid {pid})")
+            print(f"  Run 'cartograph dashboard --stop' to stop it.\n")
+            if open_browser:
+                threading.Timer(0.3, lambda: webbrowser.open(url)).start()
+            return
 
-    signal.signal(signal.SIGTERM, lambda *_: (server.server_close(), sys.exit(0)))
+        # Child - detach and serve
+        os.setsid()
+        sys.stdin.close()
+        devnull = open(os.devnull, "w")
+        sys.stdout = devnull
+        sys.stderr = devnull
 
-    try:
-        server.serve_forever()
-    finally:
-        server.server_close()
-        if os.path.exists(_PID_FILE):
-            os.remove(_PID_FILE)
+        signal.signal(signal.SIGTERM, lambda *_: (server.server_close(), sys.exit(0)))
+
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
+            if os.path.exists(_PID_FILE):
+                os.remove(_PID_FILE)
+
+
+# Allow running as subprocess for Windows background serving:
+#   python -m cartograph.dashboard <port>
+if __name__ == "__main__":
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else _DEFAULT_PORT
+    from .engine import Cartograph, LIBRARY_PATH
+    engine = Cartograph(LIBRARY_PATH)
+    handler = _make_handler(engine)
+    _serve_foreground(handler, port, _PID_FILE)
