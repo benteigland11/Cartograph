@@ -3,20 +3,19 @@
 React detection: if 'react' appears in tech_stack.dependencies, the engine
 automatically enables the JSX transform (@vitejs/plugin-react) and jsdom
 environment in vitest, and runs examples via react-dom/server + esbuild.
+
+Source scanning is handled by scanners/js_scanner.js (native JS) for
+string/comment/template-literal-aware detection.
 """
 
 import glob as _glob
 import json
 import os
-import re
 import shutil
 import tempfile
 import uuid
 
 from .base import LanguageEngine, _dep_bare_name, log
-
-
-_CONSOLE_LOG_RE = re.compile(r'console\s*\.\s*log\s*\(')
 
 _REACT_DEV_DEPS = {
     "@vitejs/plugin-react": "^4.0.0",
@@ -75,31 +74,45 @@ class JavaScriptEngine(LanguageEngine):
     # ------------------------------------------------------------------ validation
 
     def validate_widget(self, path: str, dependencies: list) -> dict:
-        """Scan src/ for console.log() calls and unpinned dependencies."""
+        """Scan src/ for contamination using native JS scanner."""
         errors = []
 
-        # console.log check
-        violations = []
+        # Native scanner - handles strings, comments, template literals
         src_dir = os.path.join(path, "src")
+        src_files = []
         if os.path.isdir(src_dir):
             for ext in ("*.js", "*.jsx", "*.ts", "*.tsx"):
-                for fpath in _glob.glob(os.path.join(src_dir, "**", ext), recursive=True):
-                    try:
-                        with open(fpath) as f:
-                            for line_no, line in enumerate(f, 1):
-                                stripped = line.strip()
-                                if stripped.startswith("//") or stripped.startswith("*"):
-                                    continue
-                                if _CONSOLE_LOG_RE.search(line):
-                                    rel = os.path.relpath(fpath, path)
-                                    violations.append(f"{rel}:{line_no}: {stripped}")
-                    except Exception:
-                        continue
-        if violations:
-            errors.append(
-                "console.log() found in src/ — remove before checkin:\n" +
-                "\n".join(violations)
+                src_files.extend(_glob.glob(os.path.join(src_dir, "**", ext), recursive=True))
+
+        scanner = os.path.join(os.path.dirname(__file__), "scanners", "js_scanner.js")
+        if src_files and os.path.exists(scanner):
+            res = self._run(
+                ["node", scanner] + src_files,
+                cwd=path, timeout=60,
             )
+            findings = []
+            if res.returncode == 0 and res.stdout.strip():
+                try:
+                    findings = json.loads(res.stdout.strip())
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+            _FINDING_MESSAGES = {
+                "console_log": "console.log() found in src/ - remove debug output before checkin:",
+                "process_exit": "process.exit() found in src/ - widgets must not exit the process:",
+                "eval": "eval() found in src/ - dynamic code execution is a security risk:",
+                "risky_import": "Risky imports found in src/ - flagged for review:",
+            }
+            grouped = {}
+            for f in findings:
+                kind = f.get("kind", "unknown")
+                rel = os.path.relpath(f.get("file", ""), path)
+                loc = f"  {rel}:{f.get('line', 0)}: {f.get('detail', '')}"
+                grouped.setdefault(kind, []).append(loc)
+
+            for kind, violations in grouped.items():
+                header = _FINDING_MESSAGES.get(kind, f"{kind} found in src/:")
+                errors.append(header + "\n" + "\n".join(violations))
 
         errors.extend(self._check_dep_pinning(dependencies))
 
