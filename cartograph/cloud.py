@@ -260,18 +260,19 @@ def list_widgets(top_k: int = 500) -> dict:
     return _get(f"/v1/widgets?top_k={top_k}")
 
 
-def login_with_token(token: str) -> dict:
+def login_with_credentials(id_token: str, refresh_token: str,
+                           signing_key: str) -> dict:
     """
-    Validate a token against the registry and save it if valid.
+    Validate an ID token against the registry and save all credentials.
 
     Returns {"status": "success", "owner": ...} or {"error": ...}.
     """
-    from .auth import save_token, get_registry_url
+    from .auth import save_credentials, get_registry_url
 
     url = get_registry_url().rstrip("/") + "/v1/auth/me"
     req = urllib.request.Request(
         url,
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        headers={"Authorization": f"Bearer {id_token}", "Accept": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
@@ -283,5 +284,5 @@ def login_with_token(token: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-    save_token(token)
+    save_credentials(id_token, refresh_token, signing_key)
     return {"status": "success", "owner": data.get("owner") or data.get("username", "unknown")}

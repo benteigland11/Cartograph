@@ -23,6 +23,15 @@ _PLACEHOLDER_KEY = "cartograph-local-dev"  # not secret — just for local testi
 
 
 def _signing_key() -> bytes:
+    # Prefer per-user key from credentials (set during OAuth login)
+    try:
+        from .auth import get_signing_key
+        key = get_signing_key()
+        if key:
+            return key.encode()
+    except Exception:
+        pass
+    # Fallback to env var (CI, tests, server-side)
     key = os.environ.get(_ENV_KEY, _PLACEHOLDER_KEY)
     return key.encode()
 

@@ -1,64 +1,179 @@
 """
-Auth token storage for the Cartograph cloud registry.
+Auth credential storage for the Cartograph cloud registry.
 
-Tokens are stored in the platform user-config directory with 0o600 permissions
-so only the current user can read them.  Nothing in this module makes network
-calls — it only manages the local credential file.
+Credentials are stored in the platform user-config directory with 0o600
+permissions so only the current user can read them.  Nothing in this module
+makes network calls except the token refresh path.
+
+Stored format:
+  {"id_token": "...", "refresh_token": "...", "signing_key": "..."}
 
 Environment overrides (useful for CI/scripts):
-  CARTOGRAPH_TOKEN        — skip file storage entirely
+  CARTOGRAPH_TOKEN        — skip file storage entirely (raw ID token)
   CARTOGRAPH_REGISTRY_URL — override the default registry endpoint
 """
 
+import base64
 import json
 import logging
 import os
 import stat
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from platformdirs import user_config_dir
 
 log = logging.getLogger("cartograph")
 
 _DEFAULT_REGISTRY_URL = "https://cartograph-api-562154372671.us-central1.run.app"
-_TOKEN_FILE = os.path.join(user_config_dir("cartograph"), "credentials.json")
+_CREDENTIALS_FILE = os.path.join(user_config_dir("cartograph"), "credentials.json")
+_GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+_GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 
 
 def get_registry_url() -> str:
     return os.environ.get("CARTOGRAPH_REGISTRY_URL", _DEFAULT_REGISTRY_URL)
 
 
+def _read_credentials() -> dict:
+    """Read the credentials file, or return empty dict."""
+    try:
+        with open(_CREDENTIALS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    """Decode the payload of a JWT without verification (client-side only)."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        # Add padding
+        payload = parts[1]
+        payload += "=" * (4 - len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
+def _is_token_expired(token: str) -> bool:
+    """Check if a JWT ID token is expired (with 5min buffer)."""
+    payload = _decode_jwt_payload(token)
+    exp = payload.get("exp")
+    if not exp:
+        return True
+    return time.time() > (exp - 300)  # 5 minute buffer
+
+
+def _refresh_id_token(refresh_token: str) -> str | None:
+    """Use a refresh token to get a new ID token from Google.
+
+    Returns the new id_token, or None on failure.
+    """
+    if not refresh_token:
+        return None
+
+    # Need client_id and client_secret for refresh
+    client_id = _GOOGLE_CLIENT_ID
+    client_secret = _GOOGLE_CLIENT_SECRET
+    if not client_id or not client_secret:
+        log.debug("Cannot refresh token: GOOGLE_CLIENT_ID/SECRET not set")
+        return None
+
+    data = urllib.parse.urlencode({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }).encode()
+
+    req = urllib.request.Request(_GOOGLE_TOKEN_URL, data=data, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+        new_id_token = result.get("id_token")
+        if new_id_token:
+            # Update stored credentials with new id_token
+            creds = _read_credentials()
+            creds["id_token"] = new_id_token
+            _write_credentials(creds)
+            log.debug("ID token refreshed successfully")
+            return new_id_token
+    except Exception as e:
+        log.debug("Token refresh failed: %s", e)
+    return None
+
+
+
 def get_token() -> str | None:
-    """Return the auth token, or None if not authenticated."""
+    """Return a valid ID token, or None if not authenticated.
+
+    Checks expiration and auto-refreshes if needed.
+    """
     env = os.environ.get("CARTOGRAPH_TOKEN")
     if env:
         return env
-    try:
-        with open(_TOKEN_FILE) as f:
-            data = json.load(f)
-        return data.get("token") or None
-    except Exception:
+
+    creds = _read_credentials()
+    id_token = creds.get("id_token")
+    if not id_token:
         return None
+
+    # Check if expired and try to refresh
+    if _is_token_expired(id_token):
+        refresh_token = creds.get("refresh_token", "")
+        refreshed = _refresh_id_token(refresh_token)
+        if refreshed:
+            return refreshed
+        # Refresh failed — token is expired
+        log.debug("ID token expired and refresh failed")
+        return None
+
+    return id_token
+
+
+def get_signing_key() -> str | None:
+    """Return the user's signing key from stored credentials."""
+    env = os.environ.get("CARTOGRAPH_SIGNING_KEY")
+    if env:
+        return env
+    creds = _read_credentials()
+    return creds.get("signing_key") or None
 
 
 def is_authenticated() -> bool:
     return get_token() is not None
 
 
-def save_token(token: str) -> None:
-    """Persist a token to disk with restricted permissions."""
-    os.makedirs(os.path.dirname(_TOKEN_FILE), exist_ok=True)
-    with open(_TOKEN_FILE, "w") as f:
-        json.dump({"token": token}, f)
+def _write_credentials(creds: dict) -> None:
+    """Write credentials dict to disk with restricted permissions."""
+    os.makedirs(os.path.dirname(_CREDENTIALS_FILE), exist_ok=True)
+    with open(_CREDENTIALS_FILE, "w") as f:
+        json.dump(creds, f)
     try:
-        os.chmod(_TOKEN_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+        os.chmod(_CREDENTIALS_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
     except OSError as e:
         log.debug("Could not set credentials file permissions: %s", e)
 
 
+def save_credentials(id_token: str, refresh_token: str, signing_key: str) -> None:
+    """Persist OAuth credentials to disk."""
+    _write_credentials({
+        "id_token": id_token,
+        "refresh_token": refresh_token,
+        "signing_key": signing_key,
+    })
+
+
 def clear_token() -> None:
-    """Remove the stored token."""
+    """Remove stored credentials."""
     try:
-        os.remove(_TOKEN_FILE)
+        os.remove(_CREDENTIALS_FILE)
     except FileNotFoundError:
         pass
     except OSError as e:
