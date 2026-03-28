@@ -415,18 +415,13 @@ def restore(carto, item_id, version, reason):
         shutil.rmtree(temp_dir)
     shutil.copytree(history_path, temp_dir)
 
+    # Set manifest version to current library version so the version guard
+    # passes, then checkin() bumps it normally (patch).
     current_version = item.get("version", "1.0.0")
-    parts = current_version.split(".")
-    if len(parts) == 3:
-        parts[-1] = str(int(parts[-1]) + 1)
-        next_version = ".".join(parts)
-    else:
-        next_version = current_version + ".1"
-
     manifest_path = os.path.join(temp_dir, "widget.json")
     with open(manifest_path) as f:
         manifest = json.load(f)
-    manifest["meta"]["version"] = next_version
+    manifest["meta"]["version"] = current_version
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 

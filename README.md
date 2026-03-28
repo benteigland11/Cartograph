@@ -28,30 +28,20 @@ Then generate instructions for your AI agent:
 cartograph setup
 ```
 
-Running in a terminal, `cartograph setup` walks you through choosing your agent (Claude, Codex, Gemini, Antigravity, Cursor), your usage mode, and whether to write to the current project or globally. It appends the right instruction block to the right file so your agent knows how to use the library.
+Running in a terminal, `cartograph setup` walks you through choosing your agent (Claude, Codex, Gemini, Antigravity, Cursor) and writes the instruction block to the right config file so your agent knows how to use the library.
 
 To do it non-interactively:
 
 ```bash
-cartograph setup --agent claude --mode developer --write
+cartograph setup --agent claude --write
 ```
-
-### Usage modes
-
-| Mode | Who it's for | What the agent does |
-|---|---|---|
-| `consumer` | Teams pulling from a shared library | Search before writing. Install and rate. No widget authoring. |
-| `developer` | Most local projects (recommended) | Search first + package reusable logic as you go. |
-| `maintainer` | Dedicated library sessions | Audit existing widgets, fix low-rated ones, create new ones. |
-
-Maintainer mode is worth running regularly. Think of it as weekly housekeeping for your library. The agent audits widgets, fixes issues surfaced by reviews, and improves anything that has drifted. A well-maintained library means every future install starts from a higher baseline.
 
 ## Commands
 
 ```
 cartograph search <query>
     [--domain backend|data|ml|security|infra|frontend|universal]
-    [--language python|javascript]
+    [--language python|javascript|nim]
 
 cartograph inspect <widget_id>
     [--source]           include source files
@@ -61,29 +51,35 @@ cartograph inspect <widget_id>
 
 cartograph install <widget_id>   [--target .] [--version X]
 cartograph uninstall <widget_id> [--target .]
-cartograph update <widget_id>    [--target .] [--version X]
+cartograph upgrade <widget_id>   [--target .] [--version X]
 cartograph status [widget_id]    [--target .]   omit widget_id to scan all installed
 cartograph delete <widget_id>    [--confirm]    dry-run without --confirm
+cartograph rollback <widget_id>  [--version X] [--reason "..."]
 
 cartograph create <widget_id>
-    --language python|javascript          REQUIRED
+    --language python|javascript|nim       REQUIRED
     --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
 
-cartograph validate [path]
+cartograph validate [path] [--lib]
 cartograph checkin [path]
     --reason "what changed and why"       REQUIRED
     [--bump patch|minor|major]
+    [--publish]                           also publish to cloud
 
 cartograph rate <widget_id> <score 1-5>  [--comment "..."]
 cartograph setup  [--agent claude|codex|gemini|antigravity|cursor]
-                  [--mode consumer|developer|maintainer]
-                  [--write] [--global]
+                  [--write]
 cartograph stats
 cartograph doctor
+cartograph dashboard
 
 cartograph login   [--token TOKEN]
 cartograph logout
-cartograph push [widget_id] [path]  [--visibility public|private]
+cartograph whoami
+cartograph cloud publish [widget_id] [path]  [--visibility public|private]
+cartograph cloud unpublish <widget_id> [--confirm]
+cartograph cloud sync
+cartograph cloud rate <widget_id> <score 1-5> [--comment "..."]
 ```
 
 ## Development
@@ -107,6 +103,10 @@ cartograph/
   checkin.py         Push edits back to library (versioning, contamination scan)
   installer.py       Install/uninstall/delete widgets
   inspector.py       Inspect widgets, read source and reviews
+  cloud.py           Cloud registry client (search, publish, download, reviews)
+  auth.py            OAuth credentials, token refresh, registry URL
+  trust.py           HMAC-SHA256 stamp signing for push/verify
+  dashboard.py       Local web UI (served via built-in HTTP server)
   scaffolding/       Widget scaffolding (create)
   languages/         Per-language engines (test runners, validators)
   search/            Hybrid BM25 + n-gram search
@@ -116,11 +116,23 @@ tests/               pytest suite
 ## Status
 
 - Python: fully supported (create, validate, test, checkin)
-- JavaScript: fully supported (React components, plain JS, vitest)
-- Search: local hybrid BM25 + n-gram
-- Registry: local
+- JavaScript/TypeScript: fully supported (React components, plain JS, vitest)
+- Nim: fully supported (testament)
+- Search: hybrid BM25 + n-gram (local and cloud)
+- Cloud registry: live, with auth, publishing, versioning, reviews, and rollback
+- Dashboard: `cartograph dashboard` opens a local web UI for browsing and managing widgets
+
+## Cloud registry
+
+The default registry is hosted by the Cartograph project. To point at your own registry instance, set `CARTOGRAPH_REGISTRY_URL`:
+
+```bash
+export CARTOGRAPH_REGISTRY_URL=https://your-registry.example.com
+```
+
+Authenticate with `cartograph login`, which opens a browser-based OAuth flow. Once authenticated, you can publish, rate, review, and roll back widgets.
 
 ## Roadmap
 
-- Cloud registry - the flywheel only fully spins with a shared library. PRs and discussion welcome.
-- More languages as validation pipelines are built and tested.
+- More languages as validation pipelines are built and tested
+- Registry federation and self-hosting documentation

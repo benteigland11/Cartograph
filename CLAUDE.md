@@ -28,7 +28,7 @@ update. Wrap or extend in your own code instead.
 
     cartograph search <query>
         [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language python|javascript|typescript|nim]
+        [--language python|javascript|nim]
 
     cartograph inspect <widget_id>
         [--source]         include source files
@@ -45,7 +45,7 @@ update. Wrap or extend in your own code instead.
 **Create and publish widgets**
 
     cartograph create <widget_id>
-        --language python|javascript|typescript|nim    REQUIRED
+        --language python|javascript|nim    REQUIRED
         --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
         [--name "Display Name"] [--target .]
 
@@ -55,6 +55,7 @@ update. Wrap or extend in your own code instead.
         [--bump patch|minor|major]       defaults to minor
         [--publish]                      also publish to cloud
 
+    cartograph rollback <widget_id> [--version X] [--reason "..."]
     cartograph delete <widget_id> [--confirm]
 
 **Cloud registry**

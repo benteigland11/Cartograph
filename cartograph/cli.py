@@ -661,7 +661,8 @@ def cmd_rollback(args):
             print(f"  Cloud rollback failed: {result.get('error', 'unknown error')}")
         else:
             rolled_cloud = True
-            print(f"  ✓ Cloud: rolled back to v{version} (was v{result.get('previous_version', '?')})")
+            nv = result.get('new_version', '?')
+            print(f"  ✓ Cloud: restored v{version} as v{nv} (was v{result.get('previous_version', '?')})")
     elif auth.is_authenticated():
         # Check if widget exists on cloud
         info = cloud.inspect(cloud.whoami().get("owner", ""), base_id)
@@ -672,7 +673,8 @@ def cmd_rollback(args):
                 print(f"  Cloud rollback failed: {result.get('error', 'unknown error')}")
             else:
                 rolled_cloud = True
-                print(f"  ✓ Cloud: rolled back to v{version} (was v{result.get('previous_version', '?')})")
+                nv = result.get('new_version', '?')
+                print(f"  ✓ Cloud: restored v{version} as v{nv} (was v{result.get('previous_version', '?')})")
 
     if not rolled_local and not rolled_cloud:
         _err({"error": f"Could not rollback '{widget_id}' — not found locally or on cloud"})

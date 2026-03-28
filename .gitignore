@@ -106,6 +106,7 @@ checkouts/
 # Hidden app dirs
 .agent/
 .cartograph/
+.claude/
 
 # IDE
 .idea/
