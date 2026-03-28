@@ -29,6 +29,8 @@ Cloud version gets trickier. We ship this engine with the ability to self sign, 
 pip install cartograph-cli
 ```
 
+Cartograph itself only requires Python. The Nim, JavaScript, and TypeScript you see in the repo are native validation scanners - they only matter if you're creating widgets in those languages. Run `cartograph doctor` to see what you have available.
+
 Then generate instructions for your AI agent:
 
 ```bash
