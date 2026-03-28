@@ -1,4 +1,9 @@
-"""Nim language engine — uses nim + nimble test."""
+"""Nim language engine — uses nim + nimble test.
+
+Source scanning is handled by scanners/nim_scanner.nim (native Nim) for
+string/comment-aware detection. The Python side orchestrates validation
+steps and parses the scanner's JSON output.
+"""
 
 import glob as _glob
 import os
@@ -7,24 +12,6 @@ import shutil
 import tempfile
 
 from .base import LanguageEngine, _dep_bare_name, log
-
-# Anchored to start of statement — avoids matching echo inside string literals
-_ECHO_RE = re.compile(r'^\s*echo\b')
-# Matches quit() and system.quit() — widgets must not terminate the process
-_QUIT_RE = re.compile(r'^\s*(?:system\.)?quit\s*[\(\s]')
-# C FFI pragmas — make widgets platform-dependent and unvalidatable everywhere
-_IMPORTC_RE = re.compile(r'\{\.importc')
-_COMPILE_RE = re.compile(r'\{\.compile')
-# Global mutable state pragma
-_GLOBAL_RE = re.compile(r'\{\.global\.\}')
-# isMainModule guard — signals executable intent, not library code
-_MAIN_MODULE_RE = re.compile(r'\bwhen\s+isMainModule\b')
-# OS-targeting when defined() — blocks generalised validation
-_OS_WHEN_RE = re.compile(
-    r'\bwhen\s+defined\s*\(\s*'
-    r'(windows|linux|macosx|osx|posix|unix|freebsd|netbsd|openbsd|haiku|android|ios)',
-    re.IGNORECASE,
-)
 
 
 class NimEngine(LanguageEngine):
@@ -76,58 +63,41 @@ class NimEngine(LanguageEngine):
             except FileNotFoundError:
                 pass  # check_available() will have already flagged this
 
-        # 3. Static source scan — skip comment lines
-        echo_violations = []
-        quit_violations = []
-        ffi_violations = []
-        global_violations = []
-        main_module_violations = []
-        os_when_violations = []
-        for fpath in src_files:
-            try:
-                with open(fpath) as f:
-                    for line_no, line in enumerate(f, 1):
-                        stripped = line.strip()
-                        if stripped.startswith("#"):
-                            continue
-                        rel = os.path.relpath(fpath, path)
-                        loc = f"  {rel}:{line_no}: {stripped}"
-                        if _ECHO_RE.match(line):
-                            echo_violations.append(loc)
-                        if _QUIT_RE.match(line):
-                            quit_violations.append(loc)
-                        if _IMPORTC_RE.search(line) or _COMPILE_RE.search(line):
-                            ffi_violations.append(loc)
-                        if _GLOBAL_RE.search(line):
-                            global_violations.append(loc)
-                        if _MAIN_MODULE_RE.search(line):
-                            main_module_violations.append(loc)
-                        if _OS_WHEN_RE.search(line):
-                            os_when_violations.append(loc)
-            except Exception:
-                continue
+        # 3. Native source scanner — runs nim_scanner.nim for string/comment-aware checks
+        scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")
+        if src_files and os.path.exists(scanner):
+            res = self._run(
+                ["nim", "r", "--hints:off", "--warnings:off", scanner] + src_files,
+                cwd=path, timeout=60,
+            )
+            findings = []
+            if res.returncode == 0 and res.stdout.strip():
+                import json
+                try:
+                    findings = json.loads(res.stdout.strip().splitlines()[-1])
+                except (json.JSONDecodeError, IndexError):
+                    pass
 
-        if echo_violations:
-            errors.append("echo found in src/ — remove debug output before checkin:\n" + "\n".join(echo_violations))
-        if quit_violations:
-            errors.append("quit() found in src/ — widgets must not exit the process:\n" + "\n".join(quit_violations))
-        if ffi_violations:
-            errors.append(
-                "{.importc.} / {.compile.} found in src/ — C FFI makes widgets platform-dependent "
-                "and unvalidatable. Wrap C dependencies in a separate project:\n" + "\n".join(ffi_violations)
-            )
-        if global_violations:
-            errors.append("{.global.} found in src/ — widgets must not use global mutable state:\n" + "\n".join(global_violations))
-        if main_module_violations:
-            errors.append(
-                "when isMainModule found in src/ — widgets are libraries, not executables. "
-                "Move this logic to examples/:\n" + "\n".join(main_module_violations)
-            )
-        if os_when_violations:
-            errors.append(
-                "OS-specific 'when defined(...)' found in src/ — widgets must validate on all platforms:\n" +
-                "\n".join(os_when_violations)
-            )
+            # Group findings by kind for readable error messages
+            _FINDING_MESSAGES = {
+                "echo": "echo found in src/ - remove debug output before checkin:",
+                "quit": "quit() found in src/ - widgets must not exit the process:",
+                "ffi": "{.importc.} / {.compile.} found in src/ - C FFI makes widgets platform-dependent:",
+                "global": "{.global.} found in src/ - widgets must not use global mutable state:",
+                "main_module": "when isMainModule found in src/ - widgets are libraries, not executables:",
+                "os_specific": "OS-specific when defined() found in src/ - widgets must validate on all platforms:",
+                "risky_import": "Risky stdlib imports found in src/ - flagged for review:",
+            }
+            grouped: dict[str, list[str]] = {}
+            for f in findings:
+                kind = f.get("kind", "unknown")
+                rel = os.path.relpath(f.get("file", ""), path)
+                loc = f"  {rel}:{f.get('line', 0)}: {f.get('detail', '')}"
+                grouped.setdefault(kind, []).append(loc)
+
+            for kind, violations in grouped.items():
+                header = _FINDING_MESSAGES.get(kind, f"{kind} found in src/:")
+                errors.append(header + "\n" + "\n".join(violations))
 
         # 4. Dependencies must have a version floor
         errors.extend(self._check_dep_pinning(dependencies))
