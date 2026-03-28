@@ -723,7 +723,8 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
   const btn = document.getElementById('refresh-btn');
   btn.style.pointerEvents = 'none';
   btn.textContent = '... Refreshing';
-  await fetch('/api/reload');
+  const reloadRes = await fetch('/api/reload').then(r => r.json()).catch(e => ({error: String(e)}));
+  console.log('[refresh] reload:', reloadRes);
   await loadMyWidgets();
   if (searchQuery) await doSearch();
   btn.innerHTML = '&#8635; Refresh';
@@ -889,13 +890,15 @@ function renderProfile() {
 
   // Stats
   const localCount = widgets.filter(w => w._sync === 'local').length;
-  const pubCount = widgets.filter(w => w._sync === 'published' || w._sync === 'mismatch' || w._sync === 'cloud').length;
+  const pubCount = widgets.filter(w => w._sync === 'published' || w._sync === 'mismatch').length;
+  const cloudCount = widgets.filter(w => w._sync === 'cloud').length;
   const domains = [...new Set(widgets.map(w => w.domain).filter(Boolean))];
 
   html += `<div class="profile-stats">`;
   html += `<span><strong>${widgets.length}</strong> widget${widgets.length!==1?'s':''}</span>`;
   if (isOwnProfile && localCount) html += `<span><strong>${localCount}</strong> local</span>`;
   if (pubCount) html += `<span><strong>${pubCount}</strong> published</span>`;
+  if (cloudCount) html += `<span><strong>${cloudCount}</strong> cloud-only</span>`;
   html += `<span><strong>${domains.length}</strong> domain${domains.length!==1?'s':''}</span>`;
   html += `</div>`;
 
@@ -929,6 +932,7 @@ function renderProfile() {
       <button class="seg-btn active" data-status="all">All ${widgets.length}</button>
       <button class="seg-btn" data-status="local">Local ${localCount}</button>
       <button class="seg-btn" data-status="published">Published ${pubCount}</button>
+      ${cloudCount ? `<button class="seg-btn" data-status="cloud">Cloud ${cloudCount}</button>` : ''}
     </div>`;
   }
 
@@ -1042,7 +1046,8 @@ function filterProfile() {
   let filtered = widgets;
   if (isOwnProfile) {
     if (statusFilter === 'local') filtered = filtered.filter(w => w._sync === 'local');
-    else if (statusFilter === 'published') filtered = filtered.filter(w => w._sync === 'published' || w._sync === 'mismatch' || w._sync === 'cloud');
+    else if (statusFilter === 'published') filtered = filtered.filter(w => w._sync === 'published' || w._sync === 'mismatch');
+    else if (statusFilter === 'cloud') filtered = filtered.filter(w => w._sync === 'cloud');
   }
 
   if (selectedLangs.length) filtered = filtered.filter(w => selectedLangs.includes((w.language||'').toLowerCase()));
@@ -1716,8 +1721,13 @@ def _make_handler(engine):
             elif path == "/api/whoami":
                 self._send_json(self._whoami())
             elif path == "/api/reload":
-                engine.reload()
-                self._send_json({"status": "ok"})
+                try:
+                    before = len(engine.widgets)
+                    engine.reload()
+                    after = len(engine.widgets)
+                    self._send_json({"status": "ok", "before": before, "after": after})
+                except Exception as e:
+                    self._send_json({"status": "error", "error": str(e)})
             elif path == "/api/local":
                 self._send_json(self._local())
             elif path == "/api/cloud":
