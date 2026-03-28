@@ -125,8 +125,8 @@ def install(carto, widget_id, target_dir, version=None):
     return _install_from_cloud(widget_id, dest_path)
 
 
-def update(carto, widget_id, target_dir, version=None):
-    """Update an installed widget to the latest (or specific) version."""
+def upgrade(carto, widget_id, target_dir, version=None):
+    """Upgrade an installed widget to the latest (or specific) version."""
     dest_path = _widget_dir(target_dir, widget_id)
     if not os.path.exists(dest_path):
         return {"error": f"'{widget_id}' not found at {dest_path}. Install it first."}

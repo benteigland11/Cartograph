@@ -530,9 +530,9 @@ class Cartograph:
     def uninstall(self, widget_id, target_dir):
         from .installer import uninstall
         return uninstall(self, widget_id, target_dir)
-    def update(self, widget_id, target_dir, version=None):
-        from .installer import update
-        return update(self, widget_id, target_dir, version=version)
+    def upgrade(self, widget_id, target_dir, version=None):
+        from .installer import upgrade
+        return upgrade(self, widget_id, target_dir, version=version)
     def delete(self, widget_id, confirm=False):
         from .installer import delete_from_library
         return delete_from_library(self, widget_id, confirm=confirm)

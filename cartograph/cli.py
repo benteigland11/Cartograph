@@ -134,7 +134,7 @@ def cmd_uninstall(args):
 
 
 def cmd_upgrade(args):
-    result = _carto().update(
+    result = _carto().upgrade(
         widget_id=args.widget_id,
         target_dir=_resolve(args.target),
         version=args.version,
@@ -242,11 +242,12 @@ def cmd_status(args):
 
 
 def cmd_login(args):
-    from .cloud import login_with_token
     token = args.token
 
     if token:
-        result = login_with_token(token)
+        # Manual token login (legacy compat — treat as id_token with no refresh)
+        from .cloud import login_with_credentials
+        result = login_with_credentials(token, "", "")
         if "error" in result:
             _err(result)
         _out(result)
@@ -257,9 +258,8 @@ def cmd_login(args):
         _err({"error": "Provide a token with --token or set CARTOGRAPH_TOKEN"})
 
     import http.server
-    import threading
     import webbrowser
-    from .auth import get_registry_url, save_token
+    from .auth import get_registry_url, save_credentials
 
     received = {}
 
@@ -267,14 +267,16 @@ def cmd_login(args):
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
-            token = params.get("token", [""])[0]
-            if token:
-                received["token"]  = token
+            id_token = params.get("id_token", [""])[0]
+            if id_token:
+                received["id_token"] = id_token
+                received["refresh_token"] = params.get("refresh_token", [""])[0]
+                received["signing_key"] = params.get("signing_key", [""])[0]
                 received["handle"] = params.get("handle", [""])[0]
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            if token:
+            if id_token:
                 self.wfile.write(
                     b"<html><body style='font-family:monospace;background:#0d1117;color:#e6edf3;"
                     b"max-width:500px;margin:60px auto;padding:20px'>"
@@ -300,19 +302,23 @@ def cmd_login(args):
 
     webbrowser.open(login_url)
 
-    # Keep serving until we get a token or timeout
-    while "token" not in received:
+    # Keep serving until we get credentials or timeout
+    while "id_token" not in received:
         server.handle_request()
         if server.timeout and not received:
             break
     server.server_close()
 
-    token = received.get("token", "")
+    id_token = received.get("id_token", "")
     handle = received.get("handle", "")
-    if not token:
+    if not id_token:
         _err({"error": "Authentication timed out or was cancelled."})
 
-    save_token(token)
+    save_credentials(
+        id_token,
+        received.get("refresh_token", ""),
+        received.get("signing_key", ""),
+    )
     _out({"status": "success", "owner": handle})
 
 
@@ -556,7 +562,7 @@ cartograph/<widget_id>/
 widget_id format: `<domain>-<name>-<language>` e.g. `backend-retry-backoff-python`
 
 Do not edit installed widget files directly - local edits are overwritten on
-update. Wrap or extend in your own code instead.
+upgrade. Wrap or extend in your own code instead.
 
 ### Commands
 `<arg>` = required  `[arg]` = optional  defaults shown where relevant
@@ -615,13 +621,6 @@ _AGENT_FILENAMES = {
     "cursor":       os.path.join(".cursor", "rules", "cartograph.mdc"),
 }
 
-_GLOBAL_DIRS = {
-    "claude":      os.path.expanduser("~/.claude"),
-    "codex":       os.path.expanduser("~/.codex"),
-    "gemini":      os.path.expanduser("~/.gemini"),
-    "antigravity": os.path.expanduser("~/.gemini"),
-    # cursor: no global file — global rules live in the editor's Settings UI
-}
 
 
 def _prompt(question, options):
@@ -713,16 +712,10 @@ def cmd_setup(args):
     if interactive:
         print("\n  Cartograph setup\n")
         agent = _prompt("Which AI agent?", ["claude", "codex", "gemini", "antigravity", "cursor"])
-        if agent == "cursor":
-            use_global = False; write = True
-        else:
-            scope = _prompt("Write to?", ["project (./)", "global (~/)"])
-            write = True
-            use_global = scope.startswith("global")
+        write = True
     else:
-        agent      = args.agent
-        write      = args.write
-        use_global = args.glob
+        agent = args.agent
+        write = args.write
 
         if write and not agent:
             print("\n  --write requires --agent. Example:")
@@ -731,15 +724,9 @@ def cmd_setup(args):
             sys.exit(1)
 
         if not agent:
-            # No --write, no --agent: just print generic instructions
             print(_SETUP_INSTRUCTIONS)
             print("  # To write to a file, run: cartograph setup --write --agent <agent>")
             return
-
-    if use_global and agent == "cursor":
-        print("\n  Cursor stores global rules in the editor UI (Settings > Rules > User Rules),")
-        print("  not as a file on disk. Run without --global to write a project-level rules file.\n")
-        sys.exit(1)
 
     content  = _SETUP_INSTRUCTIONS
     filename = _AGENT_FILENAMES[agent]
@@ -748,11 +735,7 @@ def cmd_setup(args):
         content = _cursor_mdc(content)
 
     if write:
-        if use_global:
-            target_dir = _GLOBAL_DIRS[agent]
-            os.makedirs(target_dir, exist_ok=True)
-        else:
-            target_dir = os.getcwd()
+        target_dir = os.getcwd()
         filepath = os.path.join(target_dir, filename)
         parent = os.path.dirname(filepath)
         if parent:
@@ -931,9 +914,7 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["claude", "codex", "gemini", "antigravity", "cursor"],
                    help="Target agent: claude=CLAUDE.md, codex=AGENTS.md, gemini/antigravity=GEMINI.md, cursor=.cursor/rules/cartograph.mdc")
     p.add_argument("--write", action="store_true",
-                   help="Write to the target file instead of printing")
-    p.add_argument("--global", action="store_true", dest="glob",
-                   help="With --write: write to global config dir instead of current project")
+                   help="Write to the project's agent config file")
     p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("login", help="Authenticate with the Cartograph cloud registry")
