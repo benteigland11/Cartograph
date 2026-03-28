@@ -179,20 +179,43 @@ class NimEngine(LanguageEngine):
             with open(nimble_path) as f:
                 content = f.read()
 
-            # Collect bare names already declared in requires lines
-            declared = set(re.findall(r'requires\s+"([^"\s>=<!]+)', content))
-
-            additions = []
+            # Build a map of bare_name -> full dep string from widget.json
+            wanted: dict[str, str] = {}
             for dep in dependencies:
                 bare = _dep_bare_name(dep).lower()
-                if bare and bare != "nim" and bare not in declared:
-                    # Use the full dep string as the requires value
-                    additions.append(f'requires "{dep}"\n')
+                if bare and bare != "nim":
+                    wanted[bare] = dep
 
-            if additions:
-                with open(nimble_path, "a") as f:
-                    f.writelines(additions)
-                log.debug("Synced %d dep(s) to %s", len(additions), os.path.basename(nimble_path))
+            # Replace existing requires lines whose package is in wanted,
+            # then append any that are missing entirely.
+            declared: set[str] = set()
+            lines = content.splitlines(keepends=True)
+            new_lines = []
+            for line in lines:
+                m = re.match(r'(\s*requires\s+")([^"\s>=<!]+)([^"]*".*)', line)
+                if m:
+                    bare = m.group(2).lower()
+                    declared.add(bare)
+                    if bare in wanted:
+                        new_lines.append(f'requires "{wanted[bare]}"\n')
+                        log.debug("Updated requires for %s in %s", bare,
+                                  os.path.basename(nimble_path))
+                        continue
+                new_lines.append(line)
+
+            additions = [
+                f'requires "{dep}"\n'
+                for bare, dep in wanted.items()
+                if bare not in declared
+            ]
+            new_lines.extend(additions)
+
+            new_content = "".join(new_lines)
+            if new_content != content:
+                with open(nimble_path, "w") as f:
+                    f.write(new_content)
+                log.debug("Synced %d dep(s) to %s", len(additions),
+                          os.path.basename(nimble_path))
         except Exception as e:
             log.debug("Could not sync .nimble requires: %s", e)
 

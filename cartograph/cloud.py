@@ -140,16 +140,12 @@ def is_available() -> bool:
 def search(query: str, domain_filter: str | None = None,
            language_filter: str | None = None, top_k: int = 10) -> dict:
     """
-    Search the cloud registry.
+    Search the cloud registry (public — no auth required).
 
     Returns {"widgets": [...], "source": "cloud"} on success,
     or {"error": ..., "widgets": []} on failure so the caller can still
     merge partial results.
     """
-    from .auth import is_authenticated
-    if not is_authenticated():
-        return {"widgets": [], "source": "cloud", "skipped": "not authenticated"}
-
     params = f"?q={urllib.parse.quote(query)}&top_k={top_k}"
     if domain_filter:
         params += f"&domain={urllib.parse.quote(domain_filter)}"
@@ -221,6 +217,47 @@ def push(widget_path: str, widget_id: str, visibility: str = "public") -> dict:
         file_data=zip_bytes,
         filename=f"{widget_id}.zip",
     )
+
+
+def whoami() -> dict:
+    """Return the current user's profile, or {"error": ...}."""
+    return _get("/v1/auth/me")
+
+
+def inspect(owner_handle: str, widget_id: str) -> dict:
+    """Inspect a cloud widget. Public widgets don't require auth."""
+    return _get(f"/v1/widgets/{urllib.parse.quote(owner_handle)}/{urllib.parse.quote(widget_id)}")
+
+
+def download_widget(owner_handle: str, widget_id: str) -> dict:
+    """Download a widget zip from the cloud registry.
+
+    Returns {"zip_bytes": bytes, "version": str} on success,
+    or {"error": ...} on failure.
+    """
+    # Get the signed download URL
+    result = _get(
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}/download"
+    )
+    if "error" in result:
+        return result
+
+    download_url = result.get("download_url")
+    if not download_url:
+        return {"error": "No download URL returned"}
+
+    try:
+        req = urllib.request.Request(download_url)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return {"zip_bytes": resp.read(), "version": result.get("version", "0.0.0")}
+    except Exception as e:
+        return {"error": f"Download failed: {e}"}
+
+
+def list_widgets(top_k: int = 500) -> dict:
+    """Return all cloud widgets, or {"error": ...}."""
+    return _get(f"/v1/widgets?top_k={top_k}")
 
 
 def login_with_token(token: str) -> dict:

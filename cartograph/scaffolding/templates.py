@@ -123,6 +123,11 @@ def javascript(target_dir, module_name, display_name, **kwargs):
 
 
 def nim(target_dir, module_name, display_name, **_):
+    # Nim stdlib modules are resolved before --path:src, so a src file named
+    # e.g. "base64.nim" silently shadows to std/base64 and breaks imports.
+    # Suffix with _lib to guarantee no collision with any stdlib module.
+    src_module = f"{module_name}_lib"
+
     # .nimble file is required by `nimble test` — names the package
     with open(os.path.join(target_dir, f"{module_name}.nimble"), "w") as f:
         f.write(
@@ -141,7 +146,7 @@ def nim(target_dir, module_name, display_name, **_):
             f'      exec "nimble c -r --path:src " & f\n'
         )
 
-    with open(os.path.join(target_dir, "src", f"{module_name}.nim"), "w") as f:
+    with open(os.path.join(target_dir, "src", f"{src_module}.nim"), "w") as f:
         f.write(
             f'## {display_name}\n\n'
             f'func {module_name}*(value: string): string =\n'
@@ -152,7 +157,7 @@ def nim(target_dir, module_name, display_name, **_):
     with open(os.path.join(target_dir, "tests", f"test_{module_name}.nim"), "w") as f:
         f.write(
             f'import std/unittest\n'
-            f'import {module_name}\n\n'
+            f'import {src_module}\n\n'
             f'suite "{display_name}":\n'
             f'  test "placeholder":\n'
             f'    # TODO: replace with real tests\n'
@@ -166,7 +171,7 @@ def nim(target_dir, module_name, display_name, **_):
             f'## This file must compile and run cleanly with no user input,\n'
             f'## no network calls, and no external services. Use fake/hardcoded\n'
             f'## data to demonstrate the API.\n\n'
-            f'import {module_name}\n\n'
+            f'import {src_module}\n\n'
             f'# [TODO] Replace with a realistic call using fake data\n'
             f'let result = {module_name}("hello")\n'
             f'discard result  # replace with meaningful output or assertions\n'

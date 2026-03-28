@@ -64,11 +64,7 @@ def cmd_search(args):
         top_k=args.top_k,
     )
 
-    from .auth import is_authenticated
-    if not is_authenticated():
-        _out(local)
-        return
-
+    # Always search cloud — the registry is a public resource
     from .cloud import search as cloud_search
     cloud = cloud_search(
         query=args.query,
@@ -77,14 +73,28 @@ def cmd_search(args):
         top_k=args.top_k,
     )
 
-    # Merge: local results first, then cloud widgets not already present locally
-    local_ids = {w["id"] for w in local.get("widgets", [])}
-    extra = [w for w in cloud.get("widgets", []) if w["id"] not in local_ids]
+    # Unified merge: combine into one pool, deduplicate (prefer local), sort by relevance
+    local_widgets = local.get("results", [])
+    cloud_widgets = cloud.get("widgets", [])
+
+    seen = {}
+    for w in local_widgets:
+        w["_source"] = "local"
+        seen[w["id"]] = w
+    for w in cloud_widgets:
+        if w["id"] not in seen:
+            w["_source"] = "cloud"
+            seen[w["id"]] = w
+
+    combined = sorted(seen.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
+    # Strip internal marker
+    for w in combined:
+        w.pop("_source", None)
 
     merged = {
-        "widgets": local.get("widgets", []) + extra,
-        "local_count": len(local.get("widgets", [])),
-        "cloud_count": len(extra),
+        "widgets": combined,
+        "local_count": sum(1 for w in local_widgets if w["id"] in {x["id"] for x in combined}),
+        "cloud_count": sum(1 for w in cloud_widgets if w["id"] in {x["id"] for x in combined} and w["id"] not in {x["id"] for x in local_widgets}),
     }
     if cloud.get("error"):
         merged["cloud_error"] = cloud["error"]
@@ -123,7 +133,7 @@ def cmd_uninstall(args):
     _out(result)
 
 
-def cmd_update(args):
+def cmd_upgrade(args):
     result = _carto().update(
         widget_id=args.widget_id,
         target_dir=_resolve(args.target),
@@ -257,22 +267,28 @@ def cmd_login(args):
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
-            received["token"]  = params.get("token",  [""])[0]
-            received["handle"] = params.get("handle", [""])[0]
+            token = params.get("token", [""])[0]
+            if token:
+                received["token"]  = token
+                received["handle"] = params.get("handle", [""])[0]
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            self.wfile.write(
-                b"<html><body style='font-family:monospace;background:#0d1117;color:#e6edf3;"
-                b"max-width:500px;margin:60px auto;padding:20px'>"
-                b"<h2 style='color:#58a6ff'>Logged in</h2>"
-                b"<p>You can close this tab and return to your terminal.</p></body></html>"
-            )
+            if token:
+                self.wfile.write(
+                    b"<html><body style='font-family:monospace;background:#0d1117;color:#e6edf3;"
+                    b"max-width:500px;margin:60px auto;padding:20px'>"
+                    b"<h2 style='color:#58a6ff'>Logged in</h2>"
+                    b"<p>You can close this tab and return to your terminal.</p></body></html>"
+                )
+            else:
+                self.wfile.write(b"")
 
         def log_message(self, *args):
-            pass  # suppress request logs
+            pass
 
     server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    server.timeout = 120
     port = server.server_address[1]
     cli_redirect = f"http://127.0.0.1:{port}/callback"
 
@@ -284,14 +300,17 @@ def cmd_login(args):
 
     webbrowser.open(login_url)
 
-    # Serve exactly one request then shut down
-    server.handle_request()
+    # Keep serving until we get a token or timeout
+    while "token" not in received:
+        server.handle_request()
+        if server.timeout and not received:
+            break
     server.server_close()
 
     token = received.get("token", "")
     handle = received.get("handle", "")
     if not token:
-        _err({"error": "Authentication failed — no token received."})
+        _err({"error": "Authentication timed out or was cancelled."})
 
     save_token(token)
     _out({"status": "success", "owner": handle})
@@ -302,14 +321,21 @@ def cmd_whoami(args):
     if not is_authenticated():
         _out({"authenticated": False})
         return
-    from .cloud import _get
-    result = _get("/v1/auth/me")
+    from .cloud import whoami
+    result = whoami()
     if "error" in result:
         _err(result)
     _out({"authenticated": True, **result})
 
 
 def cmd_dashboard(args):
+    if getattr(args, "stop", False):
+        from .dashboard import stop
+        if stop():
+            print("\n  Dashboard stopped.\n")
+        else:
+            print("\n  No dashboard running.\n")
+        return
     from .dashboard import serve
     serve(_carto(), port=getattr(args, "port", 0))
 
@@ -372,7 +398,12 @@ def cmd_push(args):
     result = push(path, widget_id, visibility=args.visibility)
     if "error" in result:
         _err(result)
-    _out(result)
+
+    nid      = result.get("namespaced_id", widget_id)
+    version  = result.get("version", "?")
+    vis      = result.get("visibility", "public")
+    vis_icon = "🔒" if vis == "private" else "🌐"
+    print(f"\n  ✓ Published {nid}  ·  v{version}  ·  {vis_icon} {vis}\n")
 
 
 def cmd_rate(args):
@@ -504,198 +535,77 @@ def cmd_doctor(args):
         sys.exit(1)
 
 
-_CLAUDE_MD_CONSUMER = """\
+_SETUP_INSTRUCTIONS = """\
 ## Cartograph
 
-Cartograph is a shared widget library. Widgets are reusable, self-contained
-code modules. They live in your project under cartograph/<widget_id>/.
+Cartograph is a widget library manager. Widgets are reusable, self-contained
+code modules with tests, examples, and metadata. When installed into a project
+they live under `cartograph/<widget_id>/`.
 
-### One rule: search before writing reusable code
+Before writing reusable, self-contained logic, search the library first.
 
-Before implementing anything self-contained (a UI component, a parser, a retry
-helper, a data pipeline, a formatter), run `cartograph search`. If something
-useful exists, install and use it instead of writing from scratch.
+### Widget structure
+```
+cartograph/<widget_id>/
+  widget.json          metadata, version, dependencies
+  src/                 source code
+  tests/               test files (80%+ coverage required)
+  examples/            example_usage.* (must run), usage_hint.* (optional)
+```
 
-### Install workflow
-1. `cartograph search <query>` — use a single keyword or core concept (e.g. "retry", "debounce", "pagination"). No results? Go broader — try a synonym or the underlying concept, not a description.
-2. `cartograph inspect <widget_id> --source --reviews` — read the code and feedback
-3. `cartograph install <widget_id>` — installs to ./cartograph/<widget_id>/
-4. Import from `cartograph/<widget_id>/src/` — check examples/ for usage patterns
-5. `cartograph rate <widget_id> <score> --comment "..."` — rate after using
+widget_id format: `<domain>-<name>-<language>` e.g. `backend-retry-backoff-python`
+
+Do not edit installed widget files directly - local edits are overwritten on
+update. Wrap or extend in your own code instead.
 
 ### Commands
 `<arg>` = required  `[arg]` = optional  defaults shown where relevant
 
+**Find and use widgets**
+
     cartograph search <query>
         [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language <language>]
+        [--language python|javascript|typescript|nim]
 
     cartograph inspect <widget_id>
         [--source]         include source files
         [--reviews]        include review comments
         [--all-versions]   list full version history
+        [--version X]      inspect a specific version
 
     cartograph install <widget_id> [--target .] [--version X]
     cartograph uninstall <widget_id> [--target .]
-    cartograph update <widget_id> [--target .] [--version X]
-    cartograph status <widget_id> [--target .]
+    cartograph upgrade <widget_id> [--target .] [--version X]
+    cartograph status [widget_id] [--target .]
     cartograph rate <widget_id> <score 1-5> [--comment "..."] [--target .]
-    cartograph doctor
-"""
 
-_CLAUDE_MD_DEVELOPER = """\
-## Cartograph
-
-Cartograph is a shared widget library. Widgets are reusable, self-contained
-code modules. They live in your project under cartograph/<widget_id>/.
-
-### Two rules to follow on every task
-
-**1. Search before writing reusable code.**
-Before implementing anything self-contained (a UI component, a parser, a retry
-helper, a data pipeline, a formatter), run `cartograph search`. If something
-useful exists, install and use it instead of writing from scratch.
-
-**2. Spot generalizable work as you go and suggest it to the user.**
-As you write code, watch for logic that has no project-specific assumptions —
-a clean abstraction, a handy formatter, a robust error handler. When you notice
-one, suggest packaging it: "This would work well as a widget — it'll be easier
-to test, improve, and reuse across projects. Want me to package it?"
-Let the user decide. If they say yes, do it before moving on while the context
-is fresh.
-
-### Install workflow
-1. `cartograph search <query>` — use a single keyword or core concept (e.g. "retry", "debounce", "pagination"). No results? Go broader — try a synonym or the underlying concept, not a description.
-2. `cartograph inspect <widget_id> --source --reviews` — read the code and feedback
-3. `cartograph install <widget_id>` — installs to ./cartograph/<widget_id>/
-4. Import from `cartograph/<widget_id>/src/` — check examples/ for usage patterns
-5. `cartograph rate <widget_id> <score> --comment "..."` — rate after using
-
-### Checkin workflow
-You have finished writing a piece of logic. Before moving on, ask:
-"Could this work in another project without modification?" If yes, package it.
-
-1. `cartograph create <widget_id> --language python|javascript --domain <domain> [--target .]`
-   Widget lands at ./cartograph/<widget_id>/
-   widget_id format: <domain>-<name>-<language> e.g. logic-retry-backoff-python
-2. Copy your code into src/. Clean it up:
-   - Remove anything project-specific (paths, config, hardcoded values)
-   - Declare all third-party deps in widget.json tech_stack.dependencies
-3. Write tests in tests/ — 80%+ coverage required
-4. Fill in examples/example_usage.* — must run and exit cleanly with no user input
-   Optionally add examples/usage_hint.* for real app integration patterns (not validated)
-5. `cartograph validate [.]` — fix every issue before proceeding
-6. `cartograph checkin [.] --reason "..."` — one-line description of what and why
-7. `cartograph rate <widget_id> <score> --comment "..."` — honest score, one specific comment
-
-### Editing installed widgets
-Do not edit files inside cartograph/<widget_id>/ directly — local edits are
-overwritten on update. Wrap or extend in your own code instead.
-Found a bug or improvement? Fix it and `cartograph checkin` to contribute it back.
-
-### Commands
-`<arg>` = required  `[arg]` = optional  defaults shown where relevant
-
-    cartograph search <query>
-        [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language <language>]
-
-    cartograph inspect <widget_id>
-        [--source]         include source files
-        [--reviews]        include review comments
-        [--all-versions]   list full version history
-
-    cartograph install <widget_id> [--target .] [--version X]
-    cartograph uninstall <widget_id> [--target .]
-    cartograph update <widget_id> [--target .] [--version X]
-    cartograph status <widget_id> [--target .]
+**Create and publish widgets**
 
     cartograph create <widget_id>
-        --language <language>                 REQUIRED
+        --language python|javascript|typescript|nim    REQUIRED
         --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
-        [--target .]
+        [--name "Display Name"] [--target .]
 
-    cartograph validate [path]               path defaults to .
-    cartograph checkin [path]                path defaults to .
-        --reason "what changed and why"      REQUIRED
-        [--bump patch|minor|major]           defaults to minor
+    cartograph validate [path] [--lib]   path defaults to .
+    cartograph checkin [path]            path defaults to .
+        --reason "what changed and why"  REQUIRED
+        [--bump patch|minor|major]       defaults to minor
 
-    cartograph rate <widget_id> <score 1-5> [--comment "..."] [--target .]
+    cartograph push [widget_id] [path]
+        [--lib]                          push from library by ID
+        [--visibility public|private]    defaults to public
+
+    cartograph delete <widget_id> [--confirm]
+
+**Library and account**
+
+    cartograph stats
     cartograph doctor
-    cartograph setup [--mode consumer|developer|maintainer]
-        [--write]          append to ./CLAUDE.md in current project
-        [--write --global] append to ~/.claude/CLAUDE.md instead
+    cartograph login [--token X]
+    cartograph logout
+    cartograph whoami
+    cartograph dashboard
 """
-
-_CLAUDE_MD_MAINTAINER = """\
-## Cartograph — Maintainer Mode
-
-Your role is library steward. Your primary goal is the health and growth of
-the widget library, not project feature work.
-
-### What to do each session
-
-**1. Audit existing widgets.**
-`cartograph search` to browse, `cartograph inspect <id> --reviews` to read feedback.
-- Low rating or negative reviews → fix the issue and checkin an improvement
-- Broken examples → fix them
-- Low test coverage → add tests
-
-**2. Improve low-rated widgets.**
-Read the reviews. Find the friction. Fix it, bump the version, write a clear
-reason in `cartograph checkin [.] --reason "..."`.
-
-**3. Create new widgets for recurring patterns.**
-If a pattern keeps appearing across projects but isn't in the library, build it:
-`cartograph create` → develop → `cartograph validate` → `cartograph checkin`.
-
-Every change must pass `cartograph validate` and `cartograph checkin` before
-it counts. Edits that stay local help nobody.
-
-### Checkin workflow
-1. `cartograph create <widget_id> --language X --domain X`
-2. Copy + clean code into src/ — no project-specific assumptions
-3. Write tests (80%+ coverage), fill in examples/example_usage.*
-4. `cartograph validate [.]` — must pass cleanly
-5. `cartograph checkin [.] --reason "..."` — clear changelog entry
-6. `cartograph rate <widget_id> <score> --comment "..."`
-
-### Commands
-`<arg>` = required  `[arg]` = optional  defaults shown where relevant
-
-    cartograph search <query>
-        [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language <language>]
-
-    cartograph inspect <widget_id>
-        [--source]         include source files
-        [--reviews]        include review comments
-        [--all-versions]   list full version history
-
-    cartograph install <widget_id> [--target .] [--version X]
-    cartograph uninstall <widget_id> [--target .]
-    cartograph update <widget_id> [--target .] [--version X]
-    cartograph status <widget_id> [--target .]
-
-    cartograph create <widget_id>
-        --language <language>                 REQUIRED
-        --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
-        [--target .]
-
-    cartograph validate [path]               path defaults to .
-    cartograph checkin [path]                path defaults to .
-        --reason "what changed and why"      REQUIRED
-        [--bump patch|minor|major]           defaults to minor
-
-    cartograph rate <widget_id> <score 1-5> [--comment "..."] [--target .]
-    cartograph doctor
-"""
-
-_CLAUDE_MD_BY_MODE = {
-    "consumer":   _CLAUDE_MD_CONSUMER,
-    "developer":  _CLAUDE_MD_DEVELOPER,
-    "maintainer": _CLAUDE_MD_MAINTAINER,
-}
 
 _AGENT_FILENAMES = {
     "claude":       "CLAUDE.md",
@@ -798,30 +708,40 @@ def _cursor_mdc(content):
 
 
 def cmd_setup(args):
-    interactive = sys.stdin.isatty() and not any([args.agent, args.mode != "developer", args.write])
+    interactive = sys.stdin.isatty() and not any([args.agent, args.write])
 
     if interactive:
         print("\n  Cartograph setup\n")
         agent = _prompt("Which AI agent?", ["claude", "codex", "gemini", "antigravity", "cursor"])
-        mode  = _prompt("Usage mode?",     ["developer", "consumer", "maintainer"])
         if agent == "cursor":
-            scope = "project (./)"; use_global = False; write = True
+            use_global = False; write = True
         else:
             scope = _prompt("Write to?", ["project (./)", "global (~/)"])
             write = True
             use_global = scope.startswith("global")
     else:
-        agent      = args.agent or "claude"
-        mode       = args.mode
+        agent      = args.agent
         write      = args.write
         use_global = args.glob
+
+        if write and not agent:
+            print("\n  --write requires --agent. Example:")
+            print("    cartograph setup --write --agent claude\n")
+            print("  Supported agents: claude, codex, gemini, antigravity, cursor")
+            sys.exit(1)
+
+        if not agent:
+            # No --write, no --agent: just print generic instructions
+            print(_SETUP_INSTRUCTIONS)
+            print("  # To write to a file, run: cartograph setup --write --agent <agent>")
+            return
 
     if use_global and agent == "cursor":
         print("\n  Cursor stores global rules in the editor UI (Settings > Rules > User Rules),")
         print("  not as a file on disk. Run without --global to write a project-level rules file.\n")
         sys.exit(1)
 
-    content  = _CLAUDE_MD_BY_MODE[mode]
+    content  = _SETUP_INSTRUCTIONS
     filename = _AGENT_FILENAMES[agent]
 
     if agent == "cursor":
@@ -857,15 +777,67 @@ def cmd_setup(args):
 # Parser
 # ---------------------------------------------------------------------------
 
+_COMMAND_GROUPS = [
+    ("Use widgets", [
+        ("search",    "Search the widget library"),
+        ("inspect",   "Show widget details"),
+        ("install",   "Install a widget into your project"),
+        ("uninstall", "Remove a widget from your project"),
+        ("upgrade",   "Upgrade an installed widget to the latest version"),
+        ("status",    "Check installed widget(s) - omit widget_id to scan all"),
+        ("rate",      "Rate an installed widget"),
+    ]),
+    ("Build widgets", [
+        ("create",   "Scaffold a new widget"),
+        ("validate", "Run the validation pipeline on a widget"),
+        ("checkin",  "Check a widget into the library"),
+        ("delete",   "Remove a widget from the library"),
+        ("push",     "Publish a validated widget to the cloud registry"),
+    ]),
+    ("Config", [
+        ("setup",     "Generate and write agent instructions"),
+        ("login",     "Authenticate with the Cartograph cloud registry"),
+        ("logout",    "Remove stored cloud credentials"),
+        ("whoami",    "Show current authenticated user"),
+        ("dashboard", "Open local widget dashboard in browser"),
+        ("stats",     "Show library statistics"),
+        ("doctor",    "Check language engine dependencies"),
+    ]),
+]
+
+
+def _grouped_help():
+    use_color = sys.stdout.isatty()
+    if use_color:
+        g, r = "\033[32m", "\033[0m"  # green, reset
+    else:
+        g, r = "", ""
+    lines = ["", "usage: cartograph <command> [options]", ""]
+    for group_name, commands in _COMMAND_GROUPS:
+        lines.append(f"  {group_name}:")
+        for cmd, desc in commands:
+            lines.append(f"    {g}{cmd:<12s}{r} {desc}")
+        lines.append("")
+    lines.append(f"  Run '{g}cartograph <command> -h{r}' for command-specific help.")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
+    from . import __version__
     parser = argparse.ArgumentParser(
         prog="cartograph",
         description="Cartograph widget library manager",
+        usage=argparse.SUPPRESS,
+        add_help=False,
     )
+    parser.add_argument("-h", "--help", action="store_true", default=False)
+    parser.add_argument("-v", "--version", action="version",
+                        version=f"cartograph {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
-    sub.required = True
 
-    # search
+    # --- Use widgets ---
+
     p = sub.add_parser("search", help="Search the widget library")
     p.add_argument("query", help="Search query")
     p.add_argument("--domain", default=None, help="Filter by domain")
@@ -873,7 +845,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top-k", type=int, default=10, dest="top_k")
     p.set_defaults(func=cmd_search)
 
-    # inspect
     p = sub.add_parser("inspect", help="Show widget details")
     p.add_argument("widget_id")
     p.add_argument("--source", action="store_true", help="Include source files")
@@ -882,34 +853,37 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", default=None, help="Inspect a specific historical version (e.g. 1.2.0)")
     p.set_defaults(func=cmd_inspect)
 
-    # install
     p = sub.add_parser("install", help="Install a widget into your project")
     p.add_argument("widget_id")
     p.add_argument("--target", default=".", help="Project root (default: .)")
     p.add_argument("--version", default=None)
     p.set_defaults(func=cmd_install)
 
-    # uninstall
     p = sub.add_parser("uninstall", help="Remove a widget from your project")
     p.add_argument("widget_id")
     p.add_argument("--target", default=".", help="Project root (default: .)")
     p.set_defaults(func=cmd_uninstall)
 
-    # update
-    p = sub.add_parser("update", help="Update an installed widget to the latest version")
+    p = sub.add_parser("upgrade", help="Upgrade an installed widget to the latest version")
     p.add_argument("widget_id")
     p.add_argument("--target", default=".", help="Project root (default: .)")
     p.add_argument("--version", default=None)
-    p.set_defaults(func=cmd_update)
+    p.set_defaults(func=cmd_upgrade)
 
-    # delete
-    p = sub.add_parser("delete", help="Show widget stats (safe) or permanently remove with --confirm")
+    p = sub.add_parser("status", help="Check installed widget(s) - omit widget_id to scan all")
+    p.add_argument("widget_id", nargs="?", default=None)
+    p.add_argument("--target", default=".", help="Project root (default: .)")
+    p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("rate", help="Rate an installed widget")
     p.add_argument("widget_id")
-    p.add_argument("--confirm", action="store_true",
-                   help="Actually delete the widget from the library (irreversible)")
-    p.set_defaults(func=cmd_delete)
+    p.add_argument("score", type=float, help="Score from 1.0 to 5.0")
+    p.add_argument("--comment", default=None)
+    p.add_argument("--target", default=".", help="Project root (default: .)")
+    p.set_defaults(func=cmd_rate)
 
-    # create
+    # --- Build widgets ---
+
     p = sub.add_parser("create", help="Scaffold a new widget")
     p.add_argument("widget_id")
     from .languages.registry import supported_languages
@@ -920,13 +894,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target", default=".", help="Where to create the widget (default: .)")
     p.set_defaults(func=cmd_create)
 
-    # validate
     p = sub.add_parser("validate", help="Run the validation pipeline on a widget")
     p.add_argument("path", nargs="?", default=".", help="Widget directory or widget_id with --lib (default: .)")
     p.add_argument("--lib", action="store_true", help="Treat path as a library widget_id")
     p.set_defaults(func=cmd_validate)
 
-    # checkin
     p = sub.add_parser("checkin", help="Check a widget into the library")
     p.add_argument("path", nargs="?", default=".", help="Widget directory (default: .)")
     p.add_argument("--reason", required=True, help="What changed and why")
@@ -936,53 +908,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--override-reason", default=None, dest="override_reason")
     p.set_defaults(func=cmd_checkin)
 
-    # status
-    p = sub.add_parser("status", help="Check installed widget(s) — omit widget_id to scan all")
-    p.add_argument("widget_id", nargs="?", default=None)
-    p.add_argument("--target", default=".", help="Project root (default: .)")
-    p.set_defaults(func=cmd_status)
-
-    # rate
-    p = sub.add_parser("rate", help="Rate an installed widget")
+    p = sub.add_parser("delete", help="Remove a widget from the library")
     p.add_argument("widget_id")
-    p.add_argument("score", type=float, help="Score from 1.0 to 5.0")
-    p.add_argument("--comment", default=None)
-    p.add_argument("--target", default=".", help="Project root (default: .)")
-    p.set_defaults(func=cmd_rate)
+    p.add_argument("--confirm", action="store_true",
+                   help="Actually delete the widget from the library (irreversible)")
+    p.set_defaults(func=cmd_delete)
 
-    # setup
-    p = sub.add_parser("setup", help="Generate and optionally write agent instructions (interactive in terminal)")
-    p.add_argument("--agent", default=None,
-                   choices=["claude", "codex", "gemini", "antigravity", "cursor"],
-                   help="Target agent: claude=CLAUDE.md, codex=AGENTS.md, gemini/antigravity=GEMINI.md, cursor=.cursor/rules/cartograph.mdc")
-    p.add_argument("--mode", default="developer", choices=["consumer", "developer", "maintainer"],
-                   help="Usage mode (default: developer)")
-    p.add_argument("--write", action="store_true",
-                   help="Write to the target file instead of printing")
-    p.add_argument("--global", action="store_true", dest="glob",
-                   help="With --write: write to global config dir instead of current project")
-    p.set_defaults(func=cmd_setup)
-
-    # login
-    p = sub.add_parser("login", help="Authenticate with the Cartograph cloud registry")
-    p.add_argument("--token", default=None,
-                   help="API token (prompted interactively if omitted in a terminal)")
-    p.set_defaults(func=cmd_login)
-
-    # whoami
-    p = sub.add_parser("whoami", help="Show current authenticated user")
-    p.set_defaults(func=cmd_whoami)
-
-    # dashboard
-    p = sub.add_parser("dashboard", help="Open local widget dashboard in browser")
-    p.add_argument("--port", type=int, default=0, help="Port to listen on (default: random)")
-    p.set_defaults(func=cmd_dashboard)
-
-    # logout
-    p = sub.add_parser("logout", help="Remove stored Cartograph cloud credentials")
-    p.set_defaults(func=cmd_logout)
-
-    # push
     p = sub.add_parser("push", help="Publish a validated widget to the cloud registry")
     p.add_argument("widget_id", nargs="?", default=None,
                    help="Widget ID (required with --lib, inferred from widget.json otherwise)")
@@ -993,12 +924,38 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Registry visibility (default: public)")
     p.set_defaults(func=cmd_push)
 
-    # stats
+    # --- Config ---
+
+    p = sub.add_parser("setup", help="Generate and write agent instructions")
+    p.add_argument("--agent", default=None,
+                   choices=["claude", "codex", "gemini", "antigravity", "cursor"],
+                   help="Target agent: claude=CLAUDE.md, codex=AGENTS.md, gemini/antigravity=GEMINI.md, cursor=.cursor/rules/cartograph.mdc")
+    p.add_argument("--write", action="store_true",
+                   help="Write to the target file instead of printing")
+    p.add_argument("--global", action="store_true", dest="glob",
+                   help="With --write: write to global config dir instead of current project")
+    p.set_defaults(func=cmd_setup)
+
+    p = sub.add_parser("login", help="Authenticate with the Cartograph cloud registry")
+    p.add_argument("--token", default=None,
+                   help="API token (prompted interactively if omitted in a terminal)")
+    p.set_defaults(func=cmd_login)
+
+    p = sub.add_parser("logout", help="Remove stored cloud credentials")
+    p.set_defaults(func=cmd_logout)
+
+    p = sub.add_parser("whoami", help="Show current authenticated user")
+    p.set_defaults(func=cmd_whoami)
+
+    p = sub.add_parser("dashboard", help="Open local widget dashboard in browser")
+    p.add_argument("--port", type=int, default=0, help="Port to listen on (default: random)")
+    p.add_argument("--stop", action="store_true", help="Stop a running dashboard")
+    p.set_defaults(func=cmd_dashboard)
+
     p = sub.add_parser("stats", help="Show library statistics")
     p.set_defaults(func=cmd_stats)
 
-    # doctor
-    p = sub.add_parser("doctor", help="Check that all language engine dependencies are installed")
+    p = sub.add_parser("doctor", help="Check language engine dependencies")
     p.set_defaults(func=cmd_doctor)
 
     return parser
@@ -1007,6 +964,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    if args.help or not args.command:
+        print(_grouped_help())
+        sys.exit(0)
     args.func(args)
 
 

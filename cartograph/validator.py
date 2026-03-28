@@ -212,6 +212,7 @@ def validate_item(carto, path):
         check("Dependencies installed", True)
     except Exception as e:
         check("Dependencies installed", False, str(e))
+        engine.cleanup(path)
         _print_checklist(checklist, errors, failed=True)
         return {"status": "error", "message": f"Dependency install failed: {e}"}
 

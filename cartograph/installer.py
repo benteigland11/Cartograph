@@ -6,6 +6,8 @@ import glob
 import json
 import os
 import shutil
+import zipfile
+from io import BytesIO
 
 
 def _copy_widget(source_path, dest_path):
@@ -40,6 +42,45 @@ def _widget_dir(target_dir, widget_id):
     return os.path.join(target_dir, "cartograph", widget_id)
 
 
+def _install_from_cloud(widget_id, dest_path):
+    """Search cloud for a widget and install it by downloading the zip."""
+    from .cloud import search as cloud_search, download_widget
+
+    # Search cloud to find the widget and its owner
+    results = cloud_search(widget_id, top_k=5)
+    widgets = results.get("widgets", [])
+    match = next((w for w in widgets if w.get("id") == widget_id), None)
+    if not match:
+        return {"error": f"Widget '{widget_id}' not found locally or in the cloud registry."}
+
+    owner = match.get("owner", "")
+    if not owner:
+        return {"error": f"Widget '{widget_id}' found in cloud but missing owner info."}
+
+    result = download_widget(owner, widget_id)
+    if "error" in result:
+        return result
+
+    # Extract zip to destination
+    zip_bytes = result["zip_bytes"]
+    version = result.get("version", "0.0.0")
+    try:
+        os.makedirs(dest_path, exist_ok=True)
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            zf.extractall(dest_path)
+        return {
+            "status": "success",
+            "widget_id": widget_id,
+            "version": version,
+            "installed_at": dest_path,
+            "source": "cloud",
+        }
+    except Exception as e:
+        # Clean up partial install
+        shutil.rmtree(dest_path, ignore_errors=True)
+        return {"error": f"Failed to extract widget: {e}"}
+
+
 def install(carto, widget_id, target_dir, version=None):
     """Install a widget into target_dir/cartograph/widget_id."""
     from .engine import REPO_DIR
@@ -50,36 +91,38 @@ def install(carto, widget_id, target_dir, version=None):
     if target_dir == os.path.abspath(carto.library_path) or target_dir == REPO_DIR:
         return {"error": "Cannot install into the library or engine directory."}
 
-    widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
-    if not widget:
-        return {"error": f"Widget '{widget_id}' not found. Use 'cartograph search' to find available widgets."}
-
-    source_path = widget["path"]
-    installed_version = widget.get("version", "0.0.0")
-
-    if version:
-        history_path = os.path.join(source_path, "history", version)
-        if not os.path.exists(history_path):
-            return {"error": f"Version '{version}' not found for '{widget_id}'."}
-        source_path = history_path
-        installed_version = version
-
     dest_path = _widget_dir(target_dir, widget_id)
 
     if os.path.exists(dest_path):
         return {"error": f"'{widget_id}' already installed at {dest_path}. Uninstall first to reinstall."}
 
-    try:
-        _copy_widget(source_path, dest_path)
-        carto._increment_install_count(widget_id)
-        return {
-            "status": "success",
-            "widget_id": widget_id,
-            "version": installed_version,
-            "installed_at": dest_path,
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    # Try local library first
+    widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
+    if widget:
+        source_path = widget["path"]
+        installed_version = widget.get("version", "0.0.0")
+
+        if version:
+            history_path = os.path.join(source_path, "history", version)
+            if not os.path.exists(history_path):
+                return {"error": f"Version '{version}' not found for '{widget_id}'."}
+            source_path = history_path
+            installed_version = version
+
+        try:
+            _copy_widget(source_path, dest_path)
+            carto._increment_install_count(widget_id)
+            return {
+                "status": "success",
+                "widget_id": widget_id,
+                "version": installed_version,
+                "installed_at": dest_path,
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    # Fall back to cloud registry
+    return _install_from_cloud(widget_id, dest_path)
 
 
 def update(carto, widget_id, target_dir, version=None):
