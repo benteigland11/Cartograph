@@ -3,7 +3,7 @@
 [![Tests](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml/badge.svg)](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/cartograph-cli)](https://pypi.org/project/cartograph-cli/)
 
-A shared widget library for AI agents. Search, install, create, validate, and check in reusable code across projects.
+A shared widget library for AI agents. Search, install, create, validate, and check in reusable code across projects. Only requires Python - other languages in the repo are native validation scanners for their respective widget types.
 
 ## Why Cartograph
 
@@ -28,8 +28,6 @@ Cloud version gets trickier. We ship this engine with the ability to self sign, 
 ```bash
 pip install cartograph-cli
 ```
-
-Cartograph itself only requires Python. The Nim, JavaScript, and TypeScript you see in the repo are native validation scanners - they only matter if you're creating widgets in those languages. Run `cartograph doctor` to see what you have available.
 
 Then generate instructions for your AI agent:
 
