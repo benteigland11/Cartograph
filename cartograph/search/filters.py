@@ -36,14 +36,27 @@ _EXACT_BOOST_THRESHOLD = 1.0
 # When no exact match exists, cap results to avoid token bloat on noise.
 _LOW_CONFIDENCE_LIMIT = 3
 
+# --- Small-corpus bypass ---
+# BM25 uses IDF: log((N - n + 0.5) / (n + 0.5)).  When the library has
+# fewer than ~10 widgets, most terms appear in a large fraction of docs and
+# IDF collapses toward 0.  This zeros out the BM25 component, capping the
+# max combined score at ~0.9 (n-gram + exact boost) — below the 1.0
+# threshold above.  Net effect: search returns nothing even for exact
+# matches.
+#
+# Below this size we skip the strict threshold and return anything that
+# passed the backend's own _MIN_SCORE (0.10).  Once the library grows past
+# this point, the full threshold kicks in automatically.
+_SMALL_CORPUS_THRESHOLD = 10
 
-def format_results(scored_widgets: list[dict]) -> dict:
+
+def format_results(scored_widgets: list[dict], corpus_size: int = 0) -> dict:
     """Format scored widgets into a flat results list.
 
     If the top score exceeds _EXACT_BOOST_THRESHOLD, at least one query term
     appeared in a widget name or id — return up to top_k results.
-    Otherwise no exact match was found: return only the top few results and
-    flag confidence as low so the caller knows to refine the query.
+    For small corpora (< _SMALL_CORPUS_THRESHOLD), return whatever the
+    backend matched — BM25 IDF is unreliable at that scale.
     """
     results = []
     for res in scored_widgets:
@@ -60,6 +73,9 @@ def format_results(scored_widgets: list[dict]) -> dict:
             "install_count": res.get("install_count", 0),
             "relevance_score": res["relevance_score"],
         })
+
+    if corpus_size > 0 and corpus_size < _SMALL_CORPUS_THRESHOLD:
+        return {"results": results}
 
     top_score = scored_widgets[0]["relevance_score"] if scored_widgets else 0
     if top_score <= _EXACT_BOOST_THRESHOLD:

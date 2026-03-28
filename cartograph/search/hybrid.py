@@ -92,4 +92,4 @@ class HybridBackend(SearchBackend):
             scored.append({**widget, "relevance_score": round(combined, 4)})
 
         scored.sort(key=lambda x: x["relevance_score"], reverse=True)
-        return format_results(scored[:top_k])
+        return format_results(scored[:top_k], corpus_size=len(self._widgets))

@@ -25,6 +25,25 @@ def _resolve(path: str) -> str:
     return os.path.abspath(path)
 
 
+def _resolve_widget(path: str) -> str:
+    """Resolve a widget directory.
+
+    Accepts a full path, a relative path, or just a widget_id.
+    If the path doesn't exist or lacks widget.json, tries cartograph/<path>/
+    from the current directory.
+    """
+    resolved = os.path.abspath(path)
+    if os.path.isfile(os.path.join(resolved, "widget.json")):
+        return resolved
+
+    # Try cartograph/<path>/ from cwd (handles bare widget_id like "logic-test-python")
+    candidate = os.path.join(os.getcwd(), "cartograph", path)
+    if os.path.isfile(os.path.join(candidate, "widget.json")):
+        return os.path.abspath(candidate)
+
+    return resolved
+
+
 def _carto():
     from .engine import Cartograph, LIBRARY_PATH
     return Cartograph(LIBRARY_PATH)
@@ -73,17 +92,19 @@ def cmd_search(args):
         top_k=args.top_k,
     )
 
-    # Unified merge: combine into one pool, deduplicate (prefer local), sort by relevance
+    # Merge: cloud version wins for published widgets, local-only stays local
     local_widgets = local.get("results", [])
     cloud_widgets = cloud.get("widgets", [])
 
+    cloud_by_id = {w["id"]: w for w in cloud_widgets}
+
     seen = {}
-    for w in local_widgets:
-        w["_source"] = "local"
-        seen[w["id"]] = w
     for w in cloud_widgets:
+        w["_source"] = "cloud"
+        seen[w["id"]] = w
+    for w in local_widgets:
         if w["id"] not in seen:
-            w["_source"] = "cloud"
+            w["_source"] = "local"
             seen[w["id"]] = w
 
     combined = sorted(seen.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
@@ -91,10 +112,11 @@ def cmd_search(args):
     for w in combined:
         w.pop("_source", None)
 
+    cloud_ids = set(cloud_by_id)
     merged = {
         "widgets": combined,
-        "local_count": sum(1 for w in local_widgets if w["id"] in {x["id"] for x in combined}),
-        "cloud_count": sum(1 for w in cloud_widgets if w["id"] in {x["id"] for x in combined} and w["id"] not in {x["id"] for x in local_widgets}),
+        "local_count": sum(1 for w in combined if w["id"] not in cloud_ids),
+        "cloud_count": sum(1 for w in combined if w["id"] in cloud_ids),
     }
     if cloud.get("error"):
         merged["cloud_error"] = cloud["error"]
@@ -176,7 +198,7 @@ def _resolve_widget_path(args) -> str:
         if not widget:
             _err({"error": f"Widget '{args.path}' not found in library. Use 'cartograph search' to browse."})
         return widget["path"]
-    return _resolve(args.path)
+    return _resolve_widget(args.path)
 
 
 def cmd_validate(args):
@@ -213,7 +235,7 @@ def _auto_push_if_published(checkin_result: dict) -> None:
 
 
 def cmd_checkin(args):
-    path = _resolve(args.path)
+    path = _resolve_widget(args.path)
     _preflight_from_path(path)
     result = _carto().checkin(
         path=path,
@@ -406,7 +428,7 @@ def cmd_push(args):
             _err({"error": f"Widget '{widget_id}' not found in library."})
         path = widget["path"]
     else:
-        path = _resolve(args.path)
+        path = _resolve_widget(args.path)
         widget_id = args.widget_id
         if not widget_id:
             try:
@@ -420,20 +442,45 @@ def cmd_push(args):
 
     _preflight_from_path(path)
 
+    # Read widget.json once for stamp check + contamination scan
+    try:
+        with open(os.path.join(path, "widget.json")) as f:
+            widget_data = json.load(f)
+    except Exception:
+        widget_data = {}
+    tech_stack = widget_data.get("tech_stack", {})
+    language = tech_stack.get("language", "python")
+
     # Ensure a valid stamp exists — run validation if not
     from .validation_stamp import is_stamp_valid
     from .languages import get_engine
-    try:
-        with open(os.path.join(path, "widget.json")) as f:
-            language = json.load(f).get("tech_stack", {}).get("language", "python")
-    except Exception:
-        language = "python"
     engine = get_engine(language)
     if engine is None or not is_stamp_valid(path, language, engine):
         print("  No valid stamp — running validation first...\n", file=sys.stderr)
         validate_result = _carto().validate_item(path=path)
         if validate_result.get("status") == "error":
             _err(validate_result)
+
+    # Contamination scan — same gate as checkin
+    from .checkin import _scan_contamination
+    scan = _scan_contamination(path, tech_stack)
+
+    if scan["blocks"]:
+        _err({
+            "error": "Push blocked: project-specific content detected.",
+            "blocks": scan["blocks"],
+        })
+
+    if scan["warnings"] and not getattr(args, "override_warnings", False):
+        _err({
+            "status": "warnings",
+            "message": "Push paused: potential contamination found. "
+                       "Review warnings and re-run with --override-warnings and --override-reason.",
+            "warnings": scan["warnings"],
+        })
+
+    if getattr(args, "override_warnings", False) and not getattr(args, "override_reason", None):
+        _err({"error": "Push with --override-warnings requires --override-reason."})
 
     from .cloud import push
     result = push(path, widget_id, visibility=args.visibility)
@@ -940,6 +987,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lib", action="store_true", help="Push a widget from the library by ID")
     p.add_argument("--visibility", default="public", choices=["public", "private"],
                    help="Registry visibility (default: public)")
+    p.add_argument("--override-warnings", action="store_true", dest="override_warnings")
+    p.add_argument("--override-reason", default=None, dest="override_reason")
     p.set_defaults(func=cmd_push)
 
     # --- Config ---

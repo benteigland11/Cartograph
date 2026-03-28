@@ -91,4 +91,4 @@ class BM25Backend(SearchBackend):
             results.append({**w, "relevance_score": round(score, 4)})
             if len(results) >= top_k:
                 break
-        return format_results(results)
+        return format_results(results, corpus_size=len(self._widgets))
