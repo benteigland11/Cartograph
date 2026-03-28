@@ -1,0 +1,62 @@
+name: Fresh Install Test
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  fresh-install:
+    name: Fresh install from PyPI
+    runs-on: ubuntu-latest
+    needs: []
+
+    # Wait for PyPI to have the package available
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Wait for PyPI availability
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Waiting for cartograph-cli $VERSION on PyPI..."
+          for i in $(seq 1 30); do
+            if pip index versions cartograph-cli 2>/dev/null | grep -q "$VERSION"; then
+              echo "Found $VERSION on PyPI"
+              break
+            fi
+            echo "Attempt $i/30 - not yet available, waiting 10s..."
+            sleep 10
+          done
+
+      - name: Install from PyPI
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          pip install "cartograph-cli==$VERSION"
+
+      - name: cartograph --help
+        run: cartograph --help
+
+      - name: cartograph doctor
+        run: cartograph doctor || true
+
+      - name: Install test deps
+        run: pip install pytest coverage
+
+      - name: cartograph setup
+        run: cartograph setup
+
+      - name: cartograph create
+        run: cartograph create backend-ci-test-python --language python --domain backend --name "CI Test"
+
+      - name: Verify widget structure
+        run: |
+          test -f cartograph/backend-ci-test-python/widget.json
+          test -d cartograph/backend-ci-test-python/src
+          test -d cartograph/backend-ci-test-python/tests
+
+      - name: cartograph stats
+        run: cartograph stats
