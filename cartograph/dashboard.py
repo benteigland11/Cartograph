@@ -723,6 +723,7 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
   const btn = document.getElementById('refresh-btn');
   btn.style.pointerEvents = 'none';
   btn.textContent = '... Refreshing';
+  await fetch('/api/reload');
   await loadMyWidgets();
   if (searchQuery) await doSearch();
   btn.innerHTML = '&#8635; Refresh';
@@ -1714,6 +1715,9 @@ def _make_handler(engine):
                 self._send(200, "text/html", _HTML.encode())
             elif path == "/api/whoami":
                 self._send_json(self._whoami())
+            elif path == "/api/reload":
+                engine.reload()
+                self._send_json({"status": "ok"})
             elif path == "/api/local":
                 self._send_json(self._local())
             elif path == "/api/cloud":

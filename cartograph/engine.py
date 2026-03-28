@@ -128,6 +128,12 @@ class Cartograph:
         self._search_backend = get_backend(search_backend)
         self._search_backend.build(self.widgets)
 
+    def reload(self):
+        """Re-scan the library from disk and rebuild the search index."""
+        self.widgets = []
+        self._load_library()
+        self._search_backend.build(self.widgets)
+
 
     def _normalize_code(self, code):
         """Strip comments and empty lines to focus on logic."""
