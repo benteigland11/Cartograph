@@ -100,6 +100,10 @@ def build_checks(base_url, token):
         ("GET  /v1/auth/tos",
          "GET", f"{base_url}/v1/auth/tos", None, {200, 404}),
 
+        # Registry info
+        ("GET  /v1/registry/info",
+         "GET", f"{base_url}/v1/registry/info", None, {200, 404}),
+
         # Widget listing & search
         ("GET  /v1/widgets?top_k=1",
          "GET", f"{base_url}/v1/widgets?top_k=1", None, {200}),

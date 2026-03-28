@@ -268,6 +268,19 @@ def download_widget(owner_handle: str, widget_id: str) -> dict:
         return {"error": f"Download failed: {e}"}
 
 
+def registry_info() -> dict:
+    """Fetch registry capabilities (e.g. whether it validates widgets).
+
+    Returns {"validates": bool, ...} or {"error": ...}.
+    Falls back to {"validates": False} if the endpoint doesn't exist yet.
+    """
+    result = _get("/v1/registry/info")
+    if "error" in result:
+        # Endpoint doesn't exist yet - assume no validation
+        return {"validates": False}
+    return result
+
+
 def list_widgets(top_k: int = 500) -> dict:
     """Return all cloud widgets, or {"error": ...}."""
     return _get(f"/v1/widgets?top_k={top_k}")

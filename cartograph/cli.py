@@ -170,6 +170,16 @@ def cmd_inspect(args):
     _out(result)
 
 
+def _cloud_install_note(result):
+    """Print a trust note if the widget came from a registry that doesn't validate."""
+    if result.get("source") != "cloud":
+        return
+    from .cloud import registry_info
+    info = registry_info()
+    if not info.get("validates", False):
+        print("    Note: Code is validated locally by the uploader. Review before use.")
+
+
 def cmd_install(args):
     result = _carto().install(
         widget_id=args.widget_id,
@@ -179,6 +189,7 @@ def cmd_install(args):
     if result.get("status") == "error":
         _err(result)
     _out(result)
+    _cloud_install_note(result)
 
 
 def cmd_uninstall(args):
@@ -200,6 +211,7 @@ def cmd_upgrade(args):
     if result.get("status") == "error":
         _err(result)
     _out(result)
+    _cloud_install_note(result)
 
 
 def cmd_delete(args):
