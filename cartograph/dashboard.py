@@ -16,6 +16,36 @@ import urllib.parse
 
 _PID_DIR = os.path.join(os.path.expanduser("~"), ".cartograph")
 _PID_FILE = os.path.join(_PID_DIR, "dashboard.pid")
+_CONFIG_FILE = os.path.join(_PID_DIR, "config.json")
+_DEFAULT_PORT = 9473
+
+
+def _load_config():
+    if os.path.exists(_CONFIG_FILE):
+        try:
+            with open(_CONFIG_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_config(cfg):
+    os.makedirs(_PID_DIR, exist_ok=True)
+    with open(_CONFIG_FILE, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+
+def get_port():
+    """Return the saved port or the default."""
+    return _load_config().get("port", _DEFAULT_PORT)
+
+
+def set_port(port):
+    """Persist the dashboard port."""
+    cfg = _load_config()
+    cfg["port"] = port
+    _save_config(cfg)
 
 
 _HTML = r"""<!DOCTYPE html>
@@ -49,6 +79,23 @@ _HTML = r"""<!DOCTYPE html>
     --shadow:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
     --shadow-md: 0 4px 6px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
     --radius:    8px;
+  }
+
+  [data-theme="dark"] {
+    --bg:        #0f1117;
+    --surface:   #1a1d27;
+    --surface2:  #22252f;
+    --border:    #2e3240;
+    --text:      #e4e6ed;
+    --muted:     #8b8fa3;
+    --blue:      #5b9cf5;
+    --green:     #34d399;
+    --orange:    #f0a445;
+    --red:       #f06060;
+    --purple:    #a78bfa;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+    --shadow:    0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.25), 0 2px 4px rgba(0,0,0,0.15);
   }
 
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; }
@@ -108,7 +155,9 @@ _HTML = r"""<!DOCTYPE html>
   .nav-tab.active .tab-badge { background: #2563eb18; color: var(--blue); }
 
   /* ── Content ── */
-  .content { max-width: 960px; margin: 0 auto; padding: 28px 24px; }
+  .content { margin: 0 auto; padding: 28px 32px; }
+  .content.view-profile, .content.view-search { max-width: 860px; }
+  .content.view-detail { max-width: 1280px; }
 
   /* ── Search view ── */
   .search-bar {
@@ -135,23 +184,65 @@ _HTML = r"""<!DOCTYPE html>
     color: var(--muted); font-size: 16px; pointer-events: none;
   }
 
-  /* ── Filters ── */
-  .filters {
-    display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+  /* ── Filter bar ── */
+  .filter-bar {
+    display: flex; gap: 10px; margin-bottom: 18px; align-items: center; flex-wrap: wrap;
   }
-  .filter-chip {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 4px 12px;
-    font-size: 12px;
-    color: var(--muted);
-    cursor: pointer;
-    transition: all 0.15s;
+  .filter-bar input[type="search"] {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 7px 14px; color: var(--text); font-size: 13px; width: 220px; outline: none;
+    box-shadow: var(--shadow-sm); transition: border-color 0.15s;
   }
-  .filter-chip:hover { color: var(--text); border-color: #d1d5db; }
-  .filter-chip.active { color: var(--blue); border-color: var(--blue); background: #2563eb0c; }
-  .filter-label { font-size: 12px; color: var(--muted); margin-right: 4px; }
+  .filter-bar input[type="search"]:focus { border-color: var(--blue); }
+
+  /* Segmented control */
+  .seg-control {
+    display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+    background: var(--surface); box-shadow: var(--shadow-sm);
+  }
+  .seg-btn {
+    padding: 6px 14px; font-size: 12px; font-weight: 500; cursor: pointer;
+    border: none; background: none; color: var(--muted); transition: all 0.15s;
+    border-right: 1px solid var(--border); white-space: nowrap;
+  }
+  .seg-btn:last-child { border-right: none; }
+  .seg-btn:hover { color: var(--text); }
+  .seg-btn.active { background: var(--blue); color: #fff; }
+
+  /* Multi-select dropdown */
+  .multi-select {
+    position: relative; display: inline-block;
+  }
+  .multi-select-btn {
+    padding: 6px 28px 6px 12px; font-size: 12px; font-weight: 500; cursor: pointer;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+    color: var(--muted); box-shadow: var(--shadow-sm); transition: all 0.15s;
+    white-space: nowrap; position: relative;
+  }
+  .multi-select-btn::after {
+    content: ''; position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    border: 4px solid transparent; border-top: 5px solid var(--muted);
+  }
+  .multi-select-btn:hover { color: var(--text); border-color: #d1d5db; }
+  .multi-select-btn.has-selection { color: var(--blue); border-color: var(--blue); }
+  .multi-select-menu {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 50;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow-md); min-width: 160px; padding: 4px 0;
+    max-height: 240px; overflow-y: auto;
+  }
+  .multi-select.open .multi-select-menu { display: block; }
+  .multi-select-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+    font-size: 12px; color: var(--text); cursor: pointer; transition: background 0.1s;
+  }
+  .multi-select-item:hover { background: var(--surface2); }
+  .multi-select-item input[type="checkbox"] { accent-color: var(--blue); margin: 0; }
+  .multi-select-clear {
+    padding: 6px 12px; font-size: 11px; color: var(--muted); cursor: pointer;
+    border-top: 1px solid var(--border); text-align: center;
+  }
+  .multi-select-clear:hover { color: var(--blue); }
 
   /* ── Widget list ── */
   .widget-list { display: flex; flex-direction: column; gap: 2px; }
@@ -164,7 +255,11 @@ _HTML = r"""<!DOCTYPE html>
   }
   .widget-card:hover { background: var(--surface); border-color: var(--border); box-shadow: var(--shadow); }
   .widget-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
-  .widget-name { font-size: 15px; font-weight: 600; color: var(--blue); }
+  .widget-name { font-size: 15px; font-weight: 600; color: var(--text); }
+  .lang-text-python     { color: #3572A5; }
+  .lang-text-javascript { color: #b07d2e; }
+  .lang-text-typescript { color: #2b7489; }
+  .lang-text-nim        { color: #e85d00; }
   .widget-owner { font-size: 13px; color: var(--muted); }
   .widget-version { font-size: 12px; color: var(--muted); background: var(--surface2); padding: 1px 6px; border-radius: 4px; }
   .widget-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; max-width: 700px; }
@@ -174,7 +269,7 @@ _HTML = r"""<!DOCTYPE html>
   .lang-python     { background: #3572A5; }
   .lang-javascript { background: #f1e05a; }
   .lang-typescript { background: #2b7489; }
-  .lang-nim        { background: #ffc200; }
+  .lang-nim        { background: #e85d00; }
   .lang-unknown    { background: var(--muted); }
 
   .domain-tag {
@@ -219,7 +314,7 @@ _HTML = r"""<!DOCTYPE html>
     gap: 24px;
     align-items: start;
   }
-  @media (max-width: 768px) { .detail-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .detail-grid { grid-template-columns: 1fr; } }
 
   .detail-main { min-width: 0; }
   .detail-sidebar {
@@ -280,10 +375,29 @@ _HTML = r"""<!DOCTYPE html>
 
   .results-count { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 
+  /* ── User cards ── */
+  .user-card {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 16px; border-radius: var(--radius);
+    cursor: pointer; transition: all 0.15s;
+    border: 1px solid transparent;
+  }
+  .user-card:hover { background: var(--surface); border-color: var(--border); box-shadow: var(--shadow); }
+  .user-card-avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: linear-gradient(135deg, #2563eb18, #7c3aed18);
+    border: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 600; color: var(--blue); flex-shrink: 0;
+  }
+  .user-card-info { flex: 1; min-width: 0; }
+  .user-card-handle { font-size: 15px; font-weight: 600; color: var(--text); }
+  .user-card-meta { font-size: 13px; color: var(--muted); }
+
   /* ── File explorer (sidebar + viewer) ── */
   .file-explorer {
     display: grid;
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: 240px 1fr;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
@@ -345,13 +459,9 @@ _HTML = r"""<!DOCTYPE html>
     position: sticky; top: 0; z-index: 1;
   }
   .file-viewer-header .fname { color: var(--text); font-weight: 500; }
-  .file-viewer-empty {
-    display: flex; align-items: center; justify-content: center;
-    height: 100%; color: var(--muted); font-size: 13px;
-  }
   pre.code-block {
     background: var(--surface);
-    padding: 12px 16px;
+    padding: 0;
     margin: 0;
     overflow-x: auto;
     font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
@@ -359,8 +469,21 @@ _HTML = r"""<!DOCTYPE html>
     line-height: 1.55;
     color: var(--text);
     tab-size: 4;
+    display: grid;
+    grid-template-columns: auto 1fr;
   }
-  pre.code-block code { background: none !important; padding: 0 !important; font-size: inherit; line-height: inherit; font-family: inherit; }
+  pre.code-block code { background: none !important; padding: 12px 16px 12px 0 !important; font-size: inherit; line-height: inherit; font-family: inherit; display: block; min-width: 0; }
+  .line-numbers {
+    padding: 12px 12px 12px 16px;
+    text-align: right;
+    color: var(--muted);
+    user-select: none;
+    border-right: 1px solid var(--border);
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    white-space: pre;
+  }
 
   .file-too-large {
     padding: 40px 20px;
@@ -375,10 +498,6 @@ _HTML = r"""<!DOCTYPE html>
     margin-top: 24px;
   }
 
-  @media (max-width: 640px) {
-    .file-explorer { grid-template-columns: 1fr; max-height: none; }
-    .file-tree { border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; }
-  }
 
   /* ── Profile header ── */
   .profile-header {
@@ -410,13 +529,9 @@ _HTML = r"""<!DOCTYPE html>
   }
   .profile-stat strong { color: var(--text); font-weight: 600; }
 
-  /* ── Responsive ── */
-  @media (max-width: 640px) {
-    .content { padding: 16px; }
-    .nav-tabs { margin-left: 12px; }
-    .profile-header { flex-direction: column; text-align: center; padding: 16px; }
-    .profile-stats { justify-content: center; }
-    .widget-card { padding: 12px; }
+  /* ── Responsive (tablet-ish, not mobile) ── */
+  @media (max-width: 900px) {
+    .content { padding: 20px; }
   }
 </style>
 </head>
@@ -429,6 +544,7 @@ _HTML = r"""<!DOCTYPE html>
     <button class="nav-tab" data-view="search">Search</button>
   </div>
   <div class="nav-right">
+    <button class="btn" id="theme-btn" title="Toggle dark mode">&#9789;</button>
     <button class="btn" id="refresh-btn" title="Refresh data">&#8635; Refresh</button>
   </div>
 </nav>
@@ -442,12 +558,14 @@ _HTML = r"""<!DOCTYPE html>
 let currentView = 'profile';
 let searchQuery = '';
 let searchResults = [];
-let searchDomain = '';
-let searchLang = '';
+let searchDomains = [];
+let searchLangs = [];
 let myWidgets = [];
 let whoamiData = {};
 let detailWidget = null;
 let isSearching = false;
+let userSearchResults = [];
+let isUserSearch = false;
 let viewingProfile = null;  // null = own profile, string = other user's handle
 
 // ── Language helpers ──
@@ -474,8 +592,13 @@ function navigate(view, data) {
   if (view === 'detail') {
     detailWidget = data;
     detailFiles = null;
+    detailVersions = [];
+    detailViewingVersion = '';
     const wid = data.id || data.name;
-    if (wid) loadDetailFiles(wid, data.owner || '');
+    if (wid) {
+      loadDetailFiles(wid, data.owner || '');
+      loadDetailVersions(wid);
+    }
   } else if (view === 'user') {
     // Viewing another user's profile
     viewingProfile = data;
@@ -496,6 +619,15 @@ function navigate(view, data) {
   document.querySelectorAll('.nav-tab').forEach(t => {
     t.classList.toggle('active', t.dataset.view === tabView);
   });
+
+  // Persist view in URL hash
+  if (view === 'detail' && data) {
+    location.hash = `#detail/${encodeURIComponent(data.id || data.name)}`;
+  } else if (view === 'user' && data) {
+    location.hash = `#user/${encodeURIComponent(data)}`;
+  } else {
+    location.hash = `#${view}`;
+  }
 
   render();
 }
@@ -527,6 +659,33 @@ document.querySelectorAll('.nav-tab').forEach(btn => {
   btn.addEventListener('click', () => navigate(btn.dataset.view));
 });
 
+// ── Theme toggle ──
+document.getElementById('theme-btn').addEventListener('click', () => {
+  const html = document.documentElement;
+  const isDark = html.getAttribute('data-theme') === 'dark';
+  html.setAttribute('data-theme', isDark ? '' : 'dark');
+  document.getElementById('theme-btn').innerHTML = isDark ? '&#9789;' : '&#9788;';
+  // Swap highlight.js theme
+  const hljsLink = document.querySelector('link[href*="highlight.js"]');
+  if (hljsLink) {
+    hljsLink.href = isDark
+      ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css'
+      : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css';
+  }
+  localStorage.setItem('carto-theme', isDark ? 'light' : 'dark');
+});
+
+// Restore saved theme
+(function() {
+  const saved = localStorage.getItem('carto-theme');
+  if (saved === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    document.getElementById('theme-btn').innerHTML = '&#9788;';
+    const hljsLink = document.querySelector('link[href*="highlight.js"]');
+    if (hljsLink) hljsLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css';
+  }
+})();
+
 // ── Refresh ──
 document.getElementById('refresh-btn').addEventListener('click', async () => {
   const btn = document.getElementById('refresh-btn');
@@ -542,27 +701,40 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
 // ── Search ──
 async function doSearch() {
   isSearching = true;
+  isUserSearch = searchQuery.startsWith('@');
   render();
-  const params = new URLSearchParams({ q: searchQuery });
-  if (searchDomain) params.set('domain', searchDomain);
-  if (searchLang) params.set('language', searchLang);
-  try {
-    const [cloudRes, localRes] = await Promise.all([
-      fetch('/api/search?' + params).then(r => r.json()).catch(() => ({widgets:[]})),
-      fetch('/api/search-local?' + params).then(r => r.json()).catch(() => ({widgets:[]})),
-    ]);
-    const seen = new Set();
-    const merged = [];
-    for (const w of (localRes.widgets || [])) {
-      if (!seen.has(w.id)) { seen.add(w.id); merged.push(w); }
+
+  if (isUserSearch) {
+    const q = searchQuery.slice(1);
+    try {
+      const res = await fetch('/api/users/search?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      userSearchResults = data.users || [];
+    } catch {
+      userSearchResults = [];
     }
-    for (const w of (cloudRes.widgets || [])) {
-      const baseId = w.id || (w.namespaced_id || '').replace(/^@[^/]+\//, '');
-      if (!seen.has(baseId)) { seen.add(baseId); merged.push({...w, id: baseId}); }
-    }
-    searchResults = merged;
-  } catch {
     searchResults = [];
+  } else {
+    const params = new URLSearchParams({ q: searchQuery });
+    try {
+      const [cloudRes, localRes] = await Promise.all([
+        fetch('/api/search?' + params).then(r => r.json()).catch(() => ({widgets:[]})),
+        fetch('/api/search-local?' + params).then(r => r.json()).catch(() => ({widgets:[]})),
+      ]);
+      const seen = new Set();
+      const merged = [];
+      for (const w of (localRes.widgets || [])) {
+        if (!seen.has(w.id)) { seen.add(w.id); merged.push(w); }
+      }
+      for (const w of (cloudRes.widgets || [])) {
+        const baseId = w.id || (w.namespaced_id || '').replace(/^@[^/]+\//, '');
+        if (!seen.has(baseId)) { seen.add(baseId); merged.push({...w, id: baseId}); }
+      }
+      searchResults = merged;
+    } catch {
+      searchResults = [];
+    }
+    userSearchResults = [];
   }
   isSearching = false;
   render();
@@ -589,7 +761,7 @@ function widgetCard(w, opts = {}) {
 
   return `<div class="widget-card" onclick="viewDetail(${JSON.stringify(w).replace(/"/g,'&quot;').replace(/'/g,'&#39;')}, '${opts.source||'library'}')">
     <div class="widget-header">
-      <span class="widget-name">${esc(w.id || w.name || '?')}</span>
+      <span class="widget-name">${coloredName(w.id || w.name, w.language)}</span>
       ${owner ? `<span class="widget-owner" onclick="event.stopPropagation();viewUserProfile('${esc(owner)}')" style="cursor:pointer">@${esc(owner)}</span>` : ''}
       ${ver ? `<span class="widget-version">v${esc(ver)}</span>` : ''}
       ${badges}
@@ -602,6 +774,18 @@ function widgetCard(w, opts = {}) {
       ${w.rating ? `<span>${stars(w.rating)} ${w.rating.toFixed(1)}</span>` : ''}
     </div>
   </div>`;
+}
+
+function coloredName(id, lang) {
+  const name = id || '?';
+  const l = (lang||'').toLowerCase();
+  const suffix = '-' + l;
+  if (l && name.endsWith(suffix)) {
+    const base = name.slice(0, -suffix.length);
+    const cls = langClass(l).replace('lang-', 'lang-text-');
+    return `${esc(base)}-<span class="${cls}">${esc(l)}</span>`;
+  }
+  return esc(name);
 }
 
 function esc(s) {
@@ -619,6 +803,8 @@ function viewDetail(w, source) {
 // ── Render ──
 function render() {
   const el = document.getElementById('content');
+  const viewClass = (currentView === 'detail' && detailWidget) ? 'detail' : currentView;
+  el.className = 'content view-' + viewClass;
 
   if (currentView === 'detail' && detailWidget) {
     el.innerHTML = renderDetail(detailWidget);
@@ -700,35 +886,38 @@ function renderProfile() {
   const allLangs = [...new Set(widgets.map(w => (w.language||'').toLowerCase()).filter(Boolean))].sort();
 
   // Filter bar
-  html += `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">`;
-  html += `<input type="search" id="profile-search" placeholder="Filter widgets..." style="
-    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:7px 14px;
-    color:var(--text);font-size:13px;width:240px;outline:none;box-shadow:var(--shadow-sm);
-  " />`;
+  html += `<div class="filter-bar">`;
+  html += `<input type="search" id="profile-search" placeholder="Filter widgets..." />`;
+
   if (isOwnProfile) {
-    const counts = { all: widgets.length, local: localCount, published: pubCount };
-    html += `<div class="filters" style="margin-bottom:0">
-      <span class="filter-chip active" data-statusfilter="all">All <strong>${counts.all}</strong></span>
-      <span class="filter-chip" data-statusfilter="local">Local <strong>${counts.local}</strong></span>
-      <span class="filter-chip" data-statusfilter="published">Published <strong>${counts.published}</strong></span>
+    html += `<div class="seg-control">
+      <button class="seg-btn active" data-status="all">All ${widgets.length}</button>
+      <button class="seg-btn" data-status="local">Local ${localCount}</button>
+      <button class="seg-btn" data-status="published">Published ${pubCount}</button>
     </div>`;
   }
-  html += `</div>`;
 
-  if (allDomains.length > 1 || allLangs.length > 1) {
-    html += `<div class="filters">`;
-    if (allDomains.length > 1) {
-      html += `<span class="filter-label">Domain:</span>`;
-      html += `<span class="filter-chip active" data-domainfilter="">All</span>`;
-      allDomains.forEach(d => { html += `<span class="filter-chip" data-domainfilter="${esc(d)}">${esc(d)}</span>`; });
-    }
-    if (allLangs.length > 1) {
-      html += `<span class="filter-label" style="margin-left:12px">Language:</span>`;
-      html += `<span class="filter-chip active" data-langfilter="">All</span>`;
-      allLangs.forEach(l => { html += `<span class="filter-chip" data-langfilter="${esc(l)}">${esc(l)}</span>`; });
-    }
-    html += `</div>`;
+  if (allLangs.length > 1) {
+    html += `<div class="multi-select" data-filter="lang">
+      <button class="multi-select-btn">Language</button>
+      <div class="multi-select-menu">
+        ${allLangs.map(l => `<label class="multi-select-item"><input type="checkbox" value="${esc(l)}" /> ${esc(l)}</label>`).join('')}
+        <div class="multi-select-clear">Clear</div>
+      </div>
+    </div>`;
   }
+
+  if (allDomains.length > 1) {
+    html += `<div class="multi-select" data-filter="domain">
+      <button class="multi-select-btn">Domain</button>
+      <div class="multi-select-menu">
+        ${allDomains.map(d => `<label class="multi-select-item"><input type="checkbox" value="${esc(d)}" /> ${esc(d)}</label>`).join('')}
+        <div class="multi-select-clear">Clear</div>
+      </div>
+    </div>`;
+  }
+
+  html += `</div>`;
 
   const showSync = isOwnProfile;
   html += `<div id="profile-list" class="widget-list">${widgets.map(w => widgetCard(w, {showSync, source:'profile'})).join('')}</div>`;
@@ -741,36 +930,79 @@ function bindProfileEvents() {
   if (search) {
     search.addEventListener('input', () => filterProfile());
   }
-  document.querySelectorAll('[data-statusfilter]').forEach(chip => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('[data-statusfilter]').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
+
+  // Segmented control (status)
+  document.querySelectorAll('.seg-btn[data-status]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.seg-btn[data-status]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
       filterProfile();
     });
   });
-  document.querySelectorAll('[data-domainfilter]').forEach(chip => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('[data-domainfilter]').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
+
+  // Multi-select dropdowns
+  document.querySelectorAll('.multi-select').forEach(ms => {
+    const btn = ms.querySelector('.multi-select-btn');
+    const menu = ms.querySelector('.multi-select-menu');
+    const filterType = ms.dataset.filter;
+
+    menu.addEventListener('click', (e) => e.stopPropagation());
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Close other open dropdowns
+      document.querySelectorAll('.multi-select.open').forEach(other => {
+        if (other !== ms) other.classList.remove('open');
+      });
+      ms.classList.toggle('open');
+    });
+
+    menu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        updateMultiSelectLabel(ms, filterType);
+        filterProfile();
+      });
+    });
+
+    menu.querySelector('.multi-select-clear').addEventListener('click', () => {
+      menu.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+      updateMultiSelectLabel(ms, filterType);
       filterProfile();
     });
   });
-  document.querySelectorAll('[data-langfilter]').forEach(chip => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('[data-langfilter]').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      filterProfile();
-    });
+
+  // Close dropdowns on outside click
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.multi-select.open').forEach(ms => ms.classList.remove('open'));
   });
+}
+
+function updateMultiSelectLabel(ms, filterType) {
+  const checked = [...ms.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
+  const btn = ms.querySelector('.multi-select-btn');
+  const label = filterType === 'lang' ? 'Language' : 'Domain';
+  if (checked.length === 0) {
+    btn.textContent = label;
+    btn.classList.remove('has-selection');
+  } else {
+    btn.textContent = `${label} (${checked.length})`;
+    btn.classList.add('has-selection');
+  }
+}
+
+function getMultiSelectValues(filterType) {
+  const ms = document.querySelector(`.multi-select[data-filter="${filterType}"]`);
+  if (!ms) return [];
+  return [...ms.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
 }
 
 function filterProfile() {
   const isOwnProfile = !viewingProfile;
   const widgets = isOwnProfile ? myWidgets : userWidgets;
   const q = (document.getElementById('profile-search')?.value || '').toLowerCase();
-  const statusFilter = document.querySelector('[data-statusfilter].active')?.dataset.statusfilter || 'all';
-  const domainFilter = document.querySelector('[data-domainfilter].active')?.dataset.domainfilter || '';
-  const langFilter = document.querySelector('[data-langfilter].active')?.dataset.langfilter || '';
+  const statusFilter = document.querySelector('.seg-btn[data-status].active')?.dataset.status || 'all';
+  const selectedLangs = getMultiSelectValues('lang');
+  const selectedDomains = getMultiSelectValues('domain');
 
   let filtered = widgets;
   if (isOwnProfile) {
@@ -778,8 +1010,8 @@ function filterProfile() {
     else if (statusFilter === 'published') filtered = filtered.filter(w => w._sync === 'published' || w._sync === 'mismatch' || w._sync === 'cloud');
   }
 
-  if (domainFilter) filtered = filtered.filter(w => w.domain === domainFilter);
-  if (langFilter) filtered = filtered.filter(w => (w.language||'').toLowerCase() === langFilter);
+  if (selectedLangs.length) filtered = filtered.filter(w => selectedLangs.includes((w.language||'').toLowerCase()));
+  if (selectedDomains.length) filtered = filtered.filter(w => selectedDomains.includes(w.domain));
 
   if (q) {
     filtered = filtered.filter(w =>
@@ -804,58 +1036,82 @@ function renderSearch() {
 
   html += `<div class="search-bar">
     <span class="search-bar-icon">&#128269;</span>
-    <input type="search" id="search-input" placeholder="Search widgets... (e.g. retry, auth, sorting)" value="${esc(searchQuery)}" />
+    <input type="search" id="search-input" placeholder="Search widgets or @username..." value="${esc(searchQuery)}" />
   </div>`;
 
   if (!searchQuery) {
     html += `<div class="empty">
-      <div class="empty-sub">Search the local library and cloud registry</div>
+      <div class="empty-sub">Search widgets by keyword, or type <strong>@handle</strong> to find a user</div>
     </div>`;
     return html;
   }
 
-  html += `<div class="results-count">${isSearching ? 'Searching...' : `${searchResults.length} result${searchResults.length!==1?'s':''} for "${esc(searchQuery)}"`}</div>`;
-
   if (isSearching) {
-    html += `<div class="empty"><div class="spinner"></div></div>`;
-  } else if (!searchResults.length) {
+    html += `<div class="empty"><div class="spinner"></div>Searching...</div>`;
+    return html;
+  }
+
+  if (isUserSearch) {
+    html += `<div class="results-count">${userSearchResults.length} user${userSearchResults.length!==1?'s':''} matching "${esc(searchQuery)}"</div>`;
+    if (!userSearchResults.length) {
+      html += `<div class="empty"><div class="empty-title">No users found</div><div class="empty-sub">Try a different handle</div></div>`;
+    } else {
+      html += `<div class="widget-list">`;
+      userSearchResults.forEach(u => {
+        const handle = u.handle || u.owner || u.username || '';
+        const initial = (handle || '?')[0].toUpperCase();
+        const widgetCount = u.widget_count || u.widgets || '';
+        html += `<div class="user-card" onclick="viewUserProfile('${esc(handle)}')">
+          <div class="user-card-avatar">${esc(initial)}</div>
+          <div class="user-card-info">
+            <div class="user-card-handle">@${esc(handle)}</div>
+            ${widgetCount ? `<div class="user-card-meta">${widgetCount} widget${widgetCount!==1?'s':''}</div>` : ''}
+          </div>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+    return html;
+  }
+
+  html += `<div class="results-count">${searchResults.length} result${searchResults.length!==1?'s':''} for "${esc(searchQuery)}"</div>`;
+
+  if (!searchResults.length) {
     html += `<div class="empty"><div class="empty-title">No results</div><div class="empty-sub">Try different keywords or check your spelling</div></div>`;
   } else {
     // Filters on results
-    const domains = [...new Set(searchResults.map(w => w.domain).filter(Boolean))];
-    const langs = [...new Set(searchResults.map(w => w.language).filter(Boolean))];
+    const domains = [...new Set(searchResults.map(w => w.domain).filter(Boolean))].sort();
+    const langs = [...new Set(searchResults.map(w => (w.language||'').toLowerCase()).filter(Boolean))].sort();
     if (domains.length > 1 || langs.length > 1) {
-      html += `<div class="filters">`;
-      if (domains.length > 1) {
-        html += `<span class="filter-label">Domain:</span>`;
-        html += `<span class="filter-chip ${!searchDomain?'active':''}" onclick="setSearchFilter('domain','')">All</span>`;
-        domains.forEach(d => {
-          html += `<span class="filter-chip ${searchDomain===d?'active':''}" onclick="setSearchFilter('domain','${esc(d)}')">${esc(d)}</span>`;
-        });
-      }
+      html += `<div class="filter-bar" style="margin-top:12px">`;
       if (langs.length > 1) {
-        html += `<span class="filter-label" style="margin-left:12px">Language:</span>`;
-        html += `<span class="filter-chip ${!searchLang?'active':''}" onclick="setSearchFilter('lang','')">All</span>`;
-        langs.forEach(l => {
-          html += `<span class="filter-chip ${searchLang===l?'active':''}" onclick="setSearchFilter('lang','${esc(l)}')">${esc(l)}</span>`;
-        });
+        html += `<div class="multi-select" data-filter="search-lang">
+          <button class="multi-select-btn${searchLangs.length ? ' has-selection' : ''}">Language${searchLangs.length ? ' (' + searchLangs.length + ')' : ''}</button>
+          <div class="multi-select-menu">
+            ${langs.map(l => `<label class="multi-select-item"><input type="checkbox" value="${esc(l)}"${searchLangs.includes(l) ? ' checked' : ''} /> ${esc(l)}</label>`).join('')}
+            <div class="multi-select-clear">Clear</div>
+          </div>
+        </div>`;
+      }
+      if (domains.length > 1) {
+        html += `<div class="multi-select" data-filter="search-domain">
+          <button class="multi-select-btn${searchDomains.length ? ' has-selection' : ''}">Domain${searchDomains.length ? ' (' + searchDomains.length + ')' : ''}</button>
+          <div class="multi-select-menu">
+            ${domains.map(d => `<label class="multi-select-item"><input type="checkbox" value="${esc(d)}"${searchDomains.includes(d) ? ' checked' : ''} /> ${esc(d)}</label>`).join('')}
+            <div class="multi-select-clear">Clear</div>
+          </div>
+        </div>`;
       }
       html += `</div>`;
     }
 
     let filtered = searchResults;
-    if (searchDomain) filtered = filtered.filter(w => w.domain === searchDomain);
-    if (searchLang) filtered = filtered.filter(w => w.language === searchLang);
+    if (searchLangs.length) filtered = filtered.filter(w => searchLangs.includes((w.language||'').toLowerCase()));
+    if (searchDomains.length) filtered = filtered.filter(w => searchDomains.includes(w.domain));
     html += `<div class="widget-list">${filtered.map(w => widgetCard(w, {source:'search'})).join('')}</div>`;
   }
 
   return html;
-}
-
-function setSearchFilter(type, val) {
-  if (type === 'domain') searchDomain = val;
-  if (type === 'lang') searchLang = val;
-  render();
 }
 
 function bindSearchEvents() {
@@ -864,15 +1120,123 @@ function bindSearchEvents() {
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter' && e.target.value.trim()) {
         searchQuery = e.target.value.trim();
+        searchLangs = [];
+        searchDomains = [];
         doSearch();
       }
     });
     input.focus();
   }
+
+  // Multi-select dropdowns in search results
+  document.querySelectorAll('.multi-select[data-filter^="search-"]').forEach(ms => {
+    const btn = ms.querySelector('.multi-select-btn');
+    const filterType = ms.dataset.filter;
+
+    ms.querySelector('.multi-select-menu')?.addEventListener('click', (e) => e.stopPropagation());
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.multi-select.open').forEach(other => {
+        if (other !== ms) other.classList.remove('open');
+      });
+      ms.classList.toggle('open');
+    });
+
+    ms.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (filterType === 'search-lang') searchLangs = [...ms.querySelectorAll('input:checked')].map(c => c.value);
+        if (filterType === 'search-domain') searchDomains = [...ms.querySelectorAll('input:checked')].map(c => c.value);
+        render();
+      });
+    });
+
+    ms.querySelector('.multi-select-clear')?.addEventListener('click', () => {
+      ms.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+      if (filterType === 'search-lang') searchLangs = [];
+      if (filterType === 'search-domain') searchDomains = [];
+      render();
+    });
+  });
 }
 
 // ── Detail view ──
 let detailFiles = null;
+let detailVersions = [];
+let detailViewingVersion = '';
+
+function renderFilesExplorer() {
+  if (!detailFiles || !Object.keys(detailFiles).length) return '';
+
+  const fileNames = Object.keys(detailFiles).sort((a, b) => {
+    const order = f => f.startsWith('src/') ? 0 : f.startsWith('tests/') ? 1 : f.startsWith('examples/') ? 2 : f === 'widget.json' ? 3 : 4;
+    return order(a) - order(b) || a.localeCompare(b);
+  });
+
+  const groups = {};
+  const rootFiles = [];
+  fileNames.forEach(f => {
+    const slash = f.indexOf('/');
+    if (slash === -1) { rootFiles.push(f); }
+    else {
+      const folder = f.substring(0, slash);
+      if (!groups[folder]) groups[folder] = [];
+      groups[folder].push(f);
+    }
+  });
+
+  const firstFile = fileNames[0];
+  const isTooLarge = (content) => content && content.startsWith('[File too large:');
+
+  let html = `<h3 style="margin-bottom:12px">Files (${fileNames.length})${detailViewingVersion ? ` <span style="font-weight:400;color:var(--muted);font-size:12px">- v${esc(detailViewingVersion)}</span>` : ''}</h3>`;
+  html += `<div class="file-explorer">`;
+
+  html += `<div class="file-tree">`;
+  const folderOrder = ['src', 'tests', 'examples'];
+  const sortedFolders = Object.keys(groups).sort((a, b) => {
+    const ai = folderOrder.indexOf(a), bi = folderOrder.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  sortedFolders.forEach(folder => {
+    html += `<div class="file-tree-group">`;
+    html += `<div class="file-tree-folder" onclick="this.classList.toggle('collapsed')"><span class="chevron">&#9662;</span> ${esc(folder)}/</div>`;
+    html += `<div class="file-tree-items">`;
+    groups[folder].forEach(f => {
+      const name = f.substring(f.indexOf('/') + 1);
+      const tooLarge = isTooLarge(detailFiles[f]);
+      html += `<div class="file-tree-item${f === firstFile ? ' active' : ''}${tooLarge ? ' too-large' : ''}" data-file="${esc(f)}" onclick="selectFile(this, '${esc(f)}')">${esc(name)}</div>`;
+    });
+    html += `</div></div>`;
+  });
+
+  if (rootFiles.length) {
+    rootFiles.forEach(f => {
+      const tooLarge = isTooLarge(detailFiles[f]);
+      html += `<div class="file-tree-item${f === firstFile ? ' active' : ''}${tooLarge ? ' too-large' : ''}" data-file="${esc(f)}" onclick="selectFile(this, '${esc(f)}')" style="padding-left:12px">${esc(f)}</div>`;
+    });
+  }
+  html += `</div>`;
+
+  const firstContent = detailFiles[firstFile] || '';
+  const firstLang = fileToLang(firstFile);
+  html += `<div class="file-viewer" id="file-viewer">`;
+  html += `<div class="file-viewer-header"><span class="fname">${esc(firstFile)}</span></div>`;
+  if (isTooLarge(firstContent)) {
+    const sizeMatch = firstContent.match(/\\d+/);
+    const sizeKB = sizeMatch ? (parseInt(sizeMatch[0]) / 1024).toFixed(0) : '?';
+    html += `<div class="file-too-large">File too large to preview<br><span class="size">${sizeKB} KB</span></div>`;
+  } else {
+    html += codeWithLines(firstContent, firstLang);
+  }
+  html += `</div>`;
+  html += `</div>`;
+
+  return html;
+}
 
 function renderDetail(w) {
   const lang = (w.language || 'unknown').toLowerCase();
@@ -899,7 +1263,7 @@ function renderDetail(w) {
   let html = `<div class="detail-back" onclick="navigate('${w._source||'profile'}')">&#8592; Back</div>`;
 
   html += `<div class="detail-title">
-    ${esc(w.id || w.name)}
+    <span>${coloredName(w.id || w.name, w.language)}</span>
     ${statusBadge}
   </div>`;
   if (owner) html += `<div class="detail-owner">by <span style="cursor:pointer;color:var(--blue)" onclick="viewUserProfile('${esc(owner)}')">@${esc(owner)}</span></div>`;
@@ -952,6 +1316,17 @@ function renderDetail(w) {
     ${owner ? `<div class="detail-meta-row"><span class="detail-meta-label">Owner</span><span class="detail-meta-value">@${esc(owner)}</span></div>` : ''}
     ${deps.length ? `<div class="detail-meta-row"><span class="detail-meta-label">Dependencies</span><span class="detail-meta-value">${deps.map(esc).join(', ')}</span></div>` : `<div class="detail-meta-row"><span class="detail-meta-label">Dependencies</span><span class="detail-meta-value">None</span></div>`}
     ${notes.general ? `<div style="margin-top:14px"><h3>Notes</h3><div style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:6px">${esc(notes.general)}</div></div>` : ''}
+    ${detailVersions.length ? `<div style="margin-top:14px">
+      <h3>Version History</h3>
+      <div style="margin-top:8px">
+        <div class="detail-meta-row" data-version-row="" style="cursor:pointer;${!detailViewingVersion ? 'font-weight:600;color:var(--blue)' : ''}" onclick="switchVersion('${esc(w.id||w.name)}','${esc(owner)}','')">
+          <span class="detail-meta-label">v${esc(ver)}</span><span class="detail-meta-value">${!detailViewingVersion ? 'current' : 'latest'}</span>
+        </div>
+        ${detailVersions.map(v => `<div class="detail-meta-row" data-version-row="${esc(v)}" style="cursor:pointer;${detailViewingVersion===v ? 'font-weight:600;color:var(--blue)' : ''}" onclick="switchVersion('${esc(w.id||w.name)}','${esc(owner)}','${esc(v)}')">
+          <span class="detail-meta-label">v${esc(v)}</span><span class="detail-meta-value">${detailViewingVersion===v ? 'viewing' : ''}</span>
+        </div>`).join('')}
+      </div>
+    </div>` : ''}
   </div>`;
 
   html += `</div>`; // detail-grid
@@ -959,76 +1334,7 @@ function renderDetail(w) {
   // Source files — sidebar tree + viewer
   html += `<div class="detail-files-full" id="files-section">`;
   if (detailFiles && Object.keys(detailFiles).length) {
-    const fileNames = Object.keys(detailFiles).sort((a, b) => {
-      const order = f => f.startsWith('src/') ? 0 : f.startsWith('tests/') ? 1 : f.startsWith('examples/') ? 2 : f === 'widget.json' ? 3 : 4;
-      return order(a) - order(b) || a.localeCompare(b);
-    });
-
-    // Group files by folder
-    const groups = {};
-    const rootFiles = [];
-    fileNames.forEach(f => {
-      const slash = f.indexOf('/');
-      if (slash === -1) { rootFiles.push(f); }
-      else {
-        const folder = f.substring(0, slash);
-        if (!groups[folder]) groups[folder] = [];
-        groups[folder].push(f);
-      }
-    });
-
-    const firstFile = fileNames[0];
-    const isTooLarge = (content) => content && content.startsWith('[File too large:');
-
-    html += `<h3 style="margin-bottom:12px">Files (${fileNames.length})</h3>`;
-    html += `<div class="file-explorer">`;
-
-    // Sidebar tree
-    html += `<div class="file-tree">`;
-    const folderOrder = ['src', 'tests', 'examples'];
-    const sortedFolders = Object.keys(groups).sort((a, b) => {
-      const ai = folderOrder.indexOf(a), bi = folderOrder.indexOf(b);
-      if (ai !== -1 && bi !== -1) return ai - bi;
-      if (ai !== -1) return -1;
-      if (bi !== -1) return 1;
-      return a.localeCompare(b);
-    });
-
-    sortedFolders.forEach(folder => {
-      html += `<div class="file-tree-group">`;
-      html += `<div class="file-tree-folder" onclick="this.classList.toggle('collapsed')"><span class="chevron">&#9662;</span> ${esc(folder)}/</div>`;
-      html += `<div class="file-tree-items">`;
-      groups[folder].forEach(f => {
-        const name = f.substring(f.indexOf('/') + 1);
-        const tooLarge = isTooLarge(detailFiles[f]);
-        html += `<div class="file-tree-item${f === firstFile ? ' active' : ''}${tooLarge ? ' too-large' : ''}" data-file="${esc(f)}" onclick="selectFile(this, '${esc(f)}')">${esc(name)}</div>`;
-      });
-      html += `</div></div>`;
-    });
-
-    if (rootFiles.length) {
-      rootFiles.forEach(f => {
-        const tooLarge = isTooLarge(detailFiles[f]);
-        html += `<div class="file-tree-item${f === firstFile ? ' active' : ''}${tooLarge ? ' too-large' : ''}" data-file="${esc(f)}" onclick="selectFile(this, '${esc(f)}')" style="padding-left:12px">${esc(f)}</div>`;
-      });
-    }
-    html += `</div>`;
-
-    // Viewer pane - show first file
-    const firstContent = detailFiles[firstFile] || '';
-    const firstLang = fileToLang(firstFile);
-    html += `<div class="file-viewer" id="file-viewer">`;
-    html += `<div class="file-viewer-header"><span class="fname">${esc(firstFile)}</span></div>`;
-    if (isTooLarge(firstContent)) {
-      const sizeMatch = firstContent.match(/\\d+/);
-      const sizeKB = sizeMatch ? (parseInt(sizeMatch[0]) / 1024).toFixed(0) : '?';
-      html += `<div class="file-too-large">File too large to preview<br><span class="size">${sizeKB} KB</span></div>`;
-    } else {
-      html += `<pre class="code-block"><code class="language-${firstLang}">${esc(firstContent)}</code></pre>`;
-    }
-    html += `</div>`;
-
-    html += `</div>`; // file-explorer
+    html += renderFilesExplorer();
   } else if (detailFiles === null) {
     html += `<h3>Files</h3><div class="empty" style="padding:24px 0"><div class="spinner"></div>Loading source...</div>`;
   } else {
@@ -1050,19 +1356,92 @@ function fileToLang(filename) {
   return map[ext] || 'plaintext';
 }
 
-async function loadDetailFiles(widgetId, owner) {
+async function loadDetailFiles(widgetId, owner, version) {
+  const isVersionSwitch = detailFiles !== null && version !== undefined;
   detailFiles = null;
-  render();
+  detailViewingVersion = version || '';
+
+  if (isVersionSwitch) {
+    updateFilesSection();
+  } else {
+    render();
+  }
+
   try {
     let url = `/api/files/${encodeURIComponent(widgetId)}`;
-    if (owner) url += `?owner=${encodeURIComponent(owner)}`;
+    const params = [];
+    if (owner) params.push(`owner=${encodeURIComponent(owner)}`);
+    if (version) params.push(`version=${encodeURIComponent(version)}`);
+    if (params.length) url += '?' + params.join('&');
     const res = await fetch(url);
     const data = await res.json();
     detailFiles = data.files || {};
   } catch {
     detailFiles = {};
   }
+
+  if (isVersionSwitch) {
+    updateFilesSection();
+    updateVersionSidebar();
+  } else {
+    render();
+  }
+}
+
+async function loadDetailVersions(widgetId) {
+  try {
+    const res = await fetch(`/api/versions/${encodeURIComponent(widgetId)}`);
+    const data = await res.json();
+    detailVersions = data.versions || [];
+  } catch {
+    detailVersions = [];
+  }
   render();
+}
+
+function switchVersion(widgetId, owner, version) {
+  loadDetailFiles(widgetId, owner, version);
+}
+
+function updateFilesSection() {
+  const section = document.getElementById('files-section');
+  if (!section) return;
+
+  if (detailFiles && Object.keys(detailFiles).length) {
+    section.innerHTML = renderFilesExplorer();
+    if (typeof hljs !== 'undefined') hljs.highlightAll();
+  } else if (detailFiles === null) {
+    section.innerHTML = `<h3>Files</h3><div class="empty" style="padding:24px 0"><div class="spinner"></div>Loading source...</div>`;
+  } else {
+    section.innerHTML = `<h3>Files</h3><div style="color:var(--muted);font-size:13px;padding:12px 0">No source files available</div>`;
+  }
+}
+
+function updateVersionSidebar() {
+  if (!detailWidget) return;
+  const w = detailWidget;
+  const ver = w.version || w._localVersion || w._cloudVersion || '';
+  const owner = w.owner || '';
+  document.querySelectorAll('[data-version-row]').forEach(row => {
+    const v = row.dataset.versionRow;
+    const isActive = v === detailViewingVersion || (v === '' && !detailViewingVersion);
+    row.style.fontWeight = isActive ? '600' : '';
+    row.style.color = isActive ? 'var(--blue)' : '';
+    const val = row.querySelector('.detail-meta-value');
+    if (val) {
+      if (v === '') val.textContent = isActive ? 'current' : 'latest';
+      else val.textContent = isActive ? 'viewing' : '';
+    }
+  });
+}
+
+function lineNums(content) {
+  const count = (content || '').split('\n').length;
+  return Array.from({length: count}, (_, i) => i + 1).join('\n');
+}
+
+function codeWithLines(content, lang) {
+  return `<pre class="code-block"><span class="line-numbers">${lineNums(content)}</span><code class="language-${lang}">${esc(content)}</code></pre>`;
 }
 
 function selectFile(el, filepath) {
@@ -1083,7 +1462,7 @@ function selectFile(el, filepath) {
     const sizeKB = sizeMatch ? (parseInt(sizeMatch[0]) / 1024).toFixed(0) : '?';
     html += `<div class="file-too-large">File too large to preview<br><span class="size">${sizeKB} KB</span></div>`;
   } else {
-    html += `<pre class="code-block"><code class="language-${lang}">${esc(content)}</code></pre>`;
+    html += codeWithLines(content, lang);
   }
   viewer.innerHTML = html;
   viewer.scrollTop = 0;
@@ -1133,6 +1512,24 @@ async function loadMyWidgets() {
 
 async function init() {
   await loadMyWidgets();
+
+  // Restore view from URL hash
+  const hash = location.hash.slice(1);
+  if (hash.startsWith('detail/')) {
+    const wid = decodeURIComponent(hash.slice(7));
+    const w = myWidgets.find(w => w.id === wid);
+    if (w) {
+      navigate('detail', w);
+      return;
+    }
+  } else if (hash.startsWith('user/')) {
+    const owner = decodeURIComponent(hash.slice(5));
+    navigate('user', owner);
+    return;
+  } else if (hash === 'search') {
+    currentView = 'search';
+  }
+
   render();
 }
 
@@ -1167,9 +1564,14 @@ def _make_handler(engine):
                     self._send_json({"error": "Use /api/inspect/{owner}/{widget_id}"})
             elif path == "/api/search-local":
                 self._send_json(self._search_local(qs))
+            elif path == "/api/users/search":
+                self._send_json(self._search_users(qs))
+            elif path.startswith("/api/versions/"):
+                widget_id = path.removeprefix("/api/versions/")
+                self._send_json(self._versions(widget_id))
             elif path.startswith("/api/files/"):
                 widget_id = path.removeprefix("/api/files/")
-                self._send_json(self._files(widget_id, qs.get("owner", "")))
+                self._send_json(self._files(widget_id, qs.get("owner", ""), qs.get("version", "")))
             else:
                 self._send(404, "text/plain", b"Not found")
 
@@ -1226,6 +1628,16 @@ def _make_handler(engine):
             except Exception as e:
                 return {"widgets": [], "error": str(e)}
 
+        def _search_users(self, qs):
+            q = qs.get("q", "").strip()
+            if not q:
+                return {"users": [], "total": 0}
+            from .cloud import search_users
+            try:
+                return search_users(q)
+            except Exception as e:
+                return {"users": [], "error": str(e)}
+
         def _inspect(self, owner, widget_id):
             from .cloud import _get
             try:
@@ -1233,7 +1645,25 @@ def _make_handler(engine):
             except Exception as e:
                 return {"error": str(e)}
 
-        def _files(self, widget_id, owner=""):
+        def _versions(self, widget_id):
+            import os
+            widget = None
+            for w in engine.widgets:
+                if w.get("id") == widget_id or w.get("name") == widget_id:
+                    widget = w
+                    break
+            if not widget or "path" not in widget:
+                return {"widget_id": widget_id, "versions": []}
+            history_dir = os.path.join(widget["path"], "history")
+            if not os.path.isdir(history_dir):
+                return {"widget_id": widget_id, "versions": []}
+            versions = sorted(
+                [d for d in os.listdir(history_dir) if os.path.isdir(os.path.join(history_dir, d))],
+                reverse=True,
+            )
+            return {"widget_id": widget_id, "versions": versions}
+
+        def _files(self, widget_id, owner="", version=""):
             import os
             # Find the widget in local library
             widget = None
@@ -1243,9 +1673,16 @@ def _make_handler(engine):
                     break
 
             if widget and "path" in widget:
-                return self._local_files(widget_id, widget["path"])
+                base = widget["path"]
+                if version:
+                    version_path = os.path.join(base, "history", version)
+                    if os.path.isdir(version_path):
+                        base = version_path
+                    else:
+                        return {"widget_id": widget_id, "files": {}, "error": f"Version {version} not found"}
+                return self._local_files(widget_id, base)
 
-            # Not local — try fetching from cloud
+            # Not local - try fetching from cloud
             return self._cloud_files(widget_id, owner)
 
         def _local_files(self, widget_id, base):
@@ -1338,7 +1775,7 @@ def stop():
     return True
 
 
-def serve(engine, port=0, open_browser=True):
+def serve(engine, port=9473, open_browser=True):
     # Restart if already running
     existing_pid, _ = _read_pid()
     if existing_pid is not None:

@@ -159,6 +159,19 @@ def search(query: str, domain_filter: str | None = None,
     return {"widgets": result.get("widgets", []), "source": "cloud"}
 
 
+def search_users(query: str, top_k: int = 20) -> dict:
+    """
+    Search the cloud registry for users by handle/name.
+
+    Returns {"users": [...]} on success, or {"error": ..., "users": []} on failure.
+    """
+    params = f"?q={urllib.parse.quote(query)}&top_k={top_k}"
+    result = _get(f"/v1/users/search{params}")
+    if "error" in result:
+        return {"users": [], "error": result["error"]}
+    return {"users": result.get("users", [])}
+
+
 def push(widget_path: str, widget_id: str, visibility: str = "public") -> dict:
     """
     Push a validated widget to the cloud registry.

@@ -30,8 +30,18 @@ log = logging.getLogger("cartograph")
 _DEFAULT_REGISTRY_URL = "https://cartograph-api-562154372671.us-central1.run.app"
 _CREDENTIALS_FILE = os.path.join(user_config_dir("cartograph"), "credentials.json")
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-_GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-_GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+def _google_client_id() -> str:
+    env = os.environ.get("GOOGLE_CLIENT_ID", "")
+    if env:
+        return env
+    return _read_credentials().get("client_id", "")
+
+
+def _google_client_secret() -> str:
+    env = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    if env:
+        return env
+    return _read_credentials().get("client_secret", "")
 
 
 def get_registry_url() -> str:
@@ -79,8 +89,8 @@ def _refresh_id_token(refresh_token: str) -> str | None:
         return None
 
     # Need client_id and client_secret for refresh
-    client_id = _GOOGLE_CLIENT_ID
-    client_secret = _GOOGLE_CLIENT_SECRET
+    client_id = _google_client_id()
+    client_secret = _google_client_secret()
     if not client_id or not client_secret:
         log.debug("Cannot refresh token: GOOGLE_CLIENT_ID/SECRET not set")
         return None
@@ -161,13 +171,19 @@ def _write_credentials(creds: dict) -> None:
         log.debug("Could not set credentials file permissions: %s", e)
 
 
-def save_credentials(id_token: str, refresh_token: str, signing_key: str) -> None:
+def save_credentials(id_token: str, refresh_token: str, signing_key: str,
+                     client_id: str = "", client_secret: str = "") -> None:
     """Persist OAuth credentials to disk."""
-    _write_credentials({
+    creds = {
         "id_token": id_token,
         "refresh_token": refresh_token,
         "signing_key": signing_key,
-    })
+    }
+    if client_id:
+        creds["client_id"] = client_id
+    if client_secret:
+        creds["client_secret"] = client_secret
+    _write_credentials(creds)
 
 
 def clear_token() -> None:

@@ -188,6 +188,30 @@ def cmd_validate(args):
     _out(result)
 
 
+def _auto_push_if_published(checkin_result: dict) -> None:
+    """After a successful checkin update, auto-push if the widget exists on the cloud."""
+    from . import cloud, auth
+    if not auth.is_authenticated() or not cloud.is_available():
+        return
+    widget_id = checkin_result.get("id", "")
+    widget_path = checkin_result.get("path", "")
+    if not widget_id or not widget_path:
+        return
+    profile = cloud.whoami()
+    handle = profile.get("owner", "")
+    if not handle:
+        return
+    remote = cloud.inspect(handle, widget_id)
+    if remote.get("error"):
+        return  # not published — nothing to sync
+    print(f"  → Widget exists on cloud (v{remote.get('version', '?')}), pushing v{checkin_result.get('version', '?')}...")
+    push_result = cloud.push(widget_path, widget_id)
+    if push_result.get("error"):
+        print(f"  → Auto-push failed: {push_result['error']}")
+    else:
+        print(f"  → Pushed to cloud: {push_result.get('namespaced_id', widget_id)} v{push_result.get('version', '?')}")
+
+
 def cmd_checkin(args):
     path = _resolve(args.path)
     _preflight_from_path(path)
@@ -201,6 +225,10 @@ def cmd_checkin(args):
     if result.get("status") == "error":
         _err(result)
     _out(result)
+
+    # Auto-push to cloud if the widget was previously published
+    if result.get("action") == "updated":
+        _auto_push_if_published(result)
 
 
 def cmd_status(args):
@@ -318,6 +346,8 @@ def cmd_login(args):
         id_token,
         received.get("refresh_token", ""),
         received.get("signing_key", ""),
+        client_id=received.get("client_id", ""),
+        client_secret=received.get("client_secret", ""),
     )
     _out({"status": "success", "owner": handle})
 
@@ -342,8 +372,13 @@ def cmd_dashboard(args):
         else:
             print("\n  No dashboard running.\n")
         return
-    from .dashboard import serve
-    serve(_carto(), port=getattr(args, "port", 0))
+    from .dashboard import serve, get_port, set_port
+    if getattr(args, "set_port", None):
+        set_port(args.set_port)
+        print(f"\n  Dashboard port set to {args.set_port}.\n")
+        return
+    port = args.port if args.port != 0 else get_port()
+    serve(_carto(), port=port)
 
 
 def cmd_logout(args):
@@ -929,7 +964,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_whoami)
 
     p = sub.add_parser("dashboard", help="Open local widget dashboard in browser")
-    p.add_argument("--port", type=int, default=0, help="Port to listen on (default: random)")
+    p.add_argument("--port", type=int, default=0, help="Override port for this session")
+    p.add_argument("--set-port", type=int, metavar="PORT", help="Permanently set the dashboard port")
     p.add_argument("--stop", action="store_true", help="Stop a running dashboard")
     p.set_defaults(func=cmd_dashboard)
 
