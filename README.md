@@ -6,15 +6,19 @@ A shared widget library for AI agents. Search, install, create, validate, and ch
 
 AI agents write a lot of code, but it disappears. Each new project starts from scratch, and agents can't naturally reuse logic across codebases without somewhere to put it.
 
-Cartograph came out of a personal frustration. Features that took 10 to 20 hours to polish with AI coding tools would need to be rebuilt almost from scratch when the next project needed them. Once a shared library existed, those same features could be dropped into a new project in minutes.
+Cartograph came out of a personal frustration. Features that took 10 to 20 hours to polish with AI coding tools would need to be rebuilt almost from scratch when the next project needed them and most of the hardened logic would be gone. Then I built a basic engine, and those same features could be dropped into a new project in minutes.
 
 Those same widgets have now been reused across many projects and have settled into a quiet loop of continuous improvement. Each time a new edge case surfaces, the fix goes back into the library, and every project that installs it going forward starts with that bug already squashed.
 
 ## Philosophy
 
+Something that might take getting used to is this CLI tool is made with agents in mind first. This means things like few interactive CLI commands. 
+
 We only ship what we can validate. Every widget that enters the library has passed a full pipeline: structure checks, manifest validation, coverage enforcement, contamination scanning, example execution, and versioning. If the pipeline can't run it, it doesn't go in.
 
 Supporting a language means owning its full validation pipeline, not just generating files. We'll add languages as those pipelines are ready, not before.
+
+Cloud version gets trickier. We ship this engine with the ability to self sign, and you can design the cloud service to accept a self signed or do its own validation. Default is not done in the cloud because that is an expensive operation.
 
 ## Quick Start
 

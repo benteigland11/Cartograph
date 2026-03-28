@@ -20,8 +20,6 @@ cartograph = "cartograph.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["cartograph"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"cartograph/seed_library" = "cartograph/seed_library"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

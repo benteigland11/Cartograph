@@ -1,7 +1,0 @@
-[
-  {
-    "version": "1.1.0",
-    "reason": "Initial release \u2014 token bucket with blocking/non-blocking acquire, decorator support, thread-safe",
-    "timestamp": "2026-02-26T17:59:09.128234"
-  }
-]

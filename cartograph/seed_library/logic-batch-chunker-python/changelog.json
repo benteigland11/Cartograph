@@ -1,7 +1,0 @@
-[
-  {
-    "version": "1.0.0",
-    "reason": "Initial release: add iterable batch chunking with count/byte constraints, tests, and runnable example",
-    "timestamp": "2026-02-26T18:27:43.893736"
-  }
-]

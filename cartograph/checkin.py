@@ -33,7 +33,7 @@ import sys
 
 from .languages import get_engine
 from .languages.base import _dep_bare_name
-from .validation_stamp import is_stamp_valid, STAMP_FILE as _STAMP_FILE
+from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_FILE
 
 log = logging.getLogger("cartograph")
 
@@ -368,6 +368,10 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
 
     # --- Diff for AI review ---
     diff = carto._diff_against_library(path, item_id) if is_update else None
+
+    # --- Write fresh stamp at library path (files are in final state) ---
+    if engine:
+        write_stamp(dest_path, language, engine)
 
     # --- Reload library so the in-memory index reflects the new widget ---
     carto._load_library()

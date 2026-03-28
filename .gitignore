@@ -14,86 +14,26 @@ build/
 .venv/
 venv/
 env/
-test_env/
 
-# Logs
+# Logs and temp output
 *.log
 *.jsonl
+*.txt
 
-# Debug / test artifacts
-factory_debug_*/
-factory_log_*/
-aggressive_test.log
-deepseek_long_timeout_test.log
-deepseek_test.log
-factory_test_run.log
-file_by_file_test.log
-final_test.log
-previous_boot_full.log
-search_replace_improved_results.log
-search_replace_test_results.log
-search_results.txt
-stats_check.txt
-popular_tests.txt
-reviews_found.txt
-targeted_fix_test.log
-test_output.log
-test_output_v2.log
-test_run.log
-test_run_2.log
-validation_report.txt
-final_validation_report.txt
-chat_search.txt
+# Test artifacts
+.pytest_cache/
+.coverage
 
-# Test scripts (dev artifacts)
-debug_difflib_application.py
-debug_failures.py
-deepseek_r1_probe.py
-difflib_comprehensive_test.py
-line_replacement_simple_test.py
-line_replacement_test.py
-replace_fix_validation_method.py
-search_replace_test_harness.py
-search_replace_test_improved.py
-search_replace_test_specialized.py
-simple_test.py
-test_end_to_end_generation.py
-test_error_recovery_direct.py
-test_full_integration.py
-test_integrated_error_recovery.py
-test_validation_feedback_loop.py
-test_widget_generation_direct.py
-test_widget_json_validation.py
-validate_integration.py
-validate_library.py
-migrate_add_language.py
-migrate_to_lowercase.py
-
-# Shell scripts
-test_factory.sh
-watch_factory.sh
-
-# Config / secrets
-test_config.json
-test_llm.json
-model_profiles.json
-
-# Widgets installed into this repo for local testing — not part of the package.
+# Widgets installed into this repo for local testing - not part of the package.
 # The cartograph/ dir doubles as the Python package and the default install target
-# when running from source.  Real subpackages are re-included below.
+# when running from source. Real subpackages are re-included below.
 cartograph/*/
 !cartograph/languages/
 !cartograph/scaffolding/
 !cartograph/search/
-!cartograph/seed_library/
 
-# Widget_Library — local dev library, seeded on first run, not committed
+# Widget_Library - local dev library, seeded on first run, not committed
 Widget_Library/
-
-# Validation stamps and test artifacts inside seed_library widgets
-cartograph/seed_library/**/.validation_stamp.json
-cartograph/seed_library/**/.coverage
-cartograph/seed_library/**/node_modules/
 
 # Failed / temp
 failed_widgets/
@@ -106,6 +46,7 @@ checkouts/
 # Hidden app dirs
 .agent/
 .cartograph/
+.cartographer/
 .claude/
 
 # IDE
@@ -113,4 +54,3 @@ checkouts/
 .vscode/
 *.swp
 *.swo
-.cartographer/
