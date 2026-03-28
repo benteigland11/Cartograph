@@ -178,9 +178,46 @@ def nim(target_dir, module_name, display_name, **_):
         )
 
 
-# Registry: maps normalized language name → template function
+def typescript(target_dir, module_name, display_name, **_):
+    with open(os.path.join(target_dir, "src", f"{module_name}.ts"), "w") as f:
+        f.write(
+            f"/**\n"
+            f" * {display_name}\n"
+            f" */\n"
+            f"export function {module_name}(value: string): string {{\n"
+            f"  return value\n"
+            f"}}\n"
+        )
+
+    with open(os.path.join(target_dir, "tests", f"test_{module_name}.ts"), "w") as f:
+        f.write(
+            f"import {{ {module_name} }} from '../src/{module_name}'\n\n"
+            f"test('placeholder', () => {{\n"
+            f"  // TODO: replace with real tests\n"
+            f"  expect({module_name}('hello')).toBe('hello')\n"
+            f"}})\n"
+        )
+
+    with open(os.path.join(target_dir, "examples", "example_usage.ts"), "w") as f:
+        f.write(
+            f"/**\n"
+            f" * Example usage of {display_name}.\n"
+            f" *\n"
+            f" * This file must run and exit cleanly with no user input, no network calls,\n"
+            f" * and no external services or API keys. Use fake/hardcoded data to demonstrate the API.\n"
+            f" * The widget's own declared dependencies are fine - the validator installs them first.\n"
+            f" */\n"
+            f"import {{ {module_name} }} from '../src/{module_name}'\n\n"
+            f"// [TODO] Replace with a realistic call using fake data\n"
+            f"const result = {module_name}('hello')\n"
+            f"console.log(`Result: ${{result}}`)\n"
+        )
+
+
+# Registry: maps normalized language name -> template function
 TEMPLATES = {
     "python": python,
     "javascript": javascript,
+    "typescript": typescript,
     "nim": nim,
 }

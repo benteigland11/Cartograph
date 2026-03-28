@@ -241,9 +241,42 @@ class JavaScriptEngine(LanguageEngine):
 
 class TypeScriptEngine(JavaScriptEngine):
     name = "typescript"
-    supported = False  # scaffold template and example runner not yet implemented
 
     def example_filename(self, path: str = "") -> str:
         if path and self._has_react(self._read_deps(path)):
             return "example_usage.tsx"
         return "example_usage.ts"
+
+    def run_example(self, path: str) -> dict:
+        deps = self._read_deps(path)
+        example_file = self.example_filename(path)
+        example_path = os.path.join(path, "examples", example_file)
+
+        if not self._has_react(deps):
+            res = self._run(["npx", "tsx", example_path], cwd=path, timeout=30)
+            if res.returncode != 0:
+                return self._fail(res.stderr or res.stdout)
+            return self._ok()
+
+        # React TSX: bundle with esbuild, run with node
+        with tempfile.NamedTemporaryFile(suffix=".cjs", delete=False, dir=path) as f:
+            bundle_path = f.name
+        try:
+            esbuild_name = "esbuild.cmd" if os.name == "nt" else "esbuild"
+            esbuild = os.path.join(path, "node_modules", ".bin", esbuild_name)
+            build = self._run(
+                [esbuild, example_path,
+                 "--bundle", "--platform=node", "--jsx=automatic",
+                 f"--outfile={bundle_path}"],
+                cwd=path, timeout=30,
+            )
+            if build.returncode != 0:
+                return self._fail(f"esbuild failed:\n{build.stderr or build.stdout}")
+
+            run = self._run(["node", bundle_path], cwd=path, timeout=30)
+            if run.returncode != 0:
+                return self._fail(run.stderr or run.stdout)
+            return self._ok()
+        finally:
+            if os.path.exists(bundle_path):
+                os.remove(bundle_path)
