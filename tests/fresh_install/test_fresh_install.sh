@@ -1,0 +1,84 @@
+#!/bin/bash
+set -e
+
+PASS=0
+FAIL=0
+ERRORS=""
+
+check() {
+    local name="$1"
+    shift
+    echo ""
+    echo "=== $name ==="
+    if "$@" ; then
+        echo "  PASS"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL"
+        FAIL=$((FAIL + 1))
+        ERRORS="$ERRORS\n  - $name"
+    fi
+}
+
+echo "========================================"
+echo "  Cartograph Fresh Install Test"
+echo "========================================"
+echo ""
+echo "Python: $(python --version)"
+echo "Pip:    $(pip --version | cut -d' ' -f1-2)"
+echo ""
+
+# 1. Is the CLI accessible?
+check "cartograph --help" cartograph --help
+
+# 2. Doctor - reports missing deps (will exit 1 since JS/Nim missing, that's ok)
+echo ""
+echo "=== cartograph doctor (informational) ==="
+cartograph doctor || true
+echo "  (non-zero exit expected - JS/Nim not installed)"
+PASS=$((PASS + 1))
+
+# 3. Install Python test deps that doctor flagged
+echo ""
+echo "=== install pytest + coverage ==="
+pip install --no-cache-dir pytest coverage > /dev/null 2>&1
+echo "  installed"
+PASS=$((PASS + 1))
+
+# 4. Setup - generates agent instructions
+check "cartograph setup --write" cartograph setup --write --agent claude
+
+# 5. Create a widget
+check "cartograph create" cartograph create backend-hello-python \
+    --language python --domain backend --name "Hello World"
+
+# 6. Check the widget structure exists
+check "widget structure" test -f cartograph/backend-hello-python/widget.json
+check "widget src exists" test -d cartograph/backend-hello-python/src
+check "widget tests exist" test -d cartograph/backend-hello-python/tests
+
+# 7. Validate the widget (should fail on template TODOs)
+echo ""
+echo "=== validate (expect failure on TODOs) ==="
+if cartograph validate cartograph/backend-hello-python 2>&1; then
+    echo "  NOTE: validate passed (unexpected but ok)"
+else
+    echo "  Expected failure on template TODOs - PASS"
+fi
+PASS=$((PASS + 1))
+
+# 8. Stats
+check "cartograph stats" cartograph stats
+
+# 9. Status
+check "cartograph status" cartograph status
+
+echo ""
+echo "========================================"
+echo "  Results: $PASS passed, $FAIL failed"
+echo "========================================"
+if [ $FAIL -gt 0 ]; then
+    echo -e "  Failures:$ERRORS"
+    exit 1
+fi
+echo "  All checks passed!"

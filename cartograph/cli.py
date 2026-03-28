@@ -24,6 +24,38 @@ def _err(result: dict) -> None:
     sys.exit(1)
 
 
+def _check_and_prompt_tos():
+    """Check TOS status and prompt user to accept if needed."""
+    from .cloud import check_tos, get_tos, accept_tos
+    status = check_tos()
+    if "error" in status or status.get("accepted", True):
+        return
+
+    # Need to accept TOS
+    tos = get_tos()
+    if "error" in tos:
+        print("  Warning: Could not fetch Terms of Service.")
+        return
+
+    print(f"\n{'='*60}")
+    print(tos.get("text", ""))
+    print(f"{'='*60}\n")
+
+    if not sys.stdin.isatty():
+        print("  TOS acceptance required. Run `cartograph login` interactively.")
+        return
+
+    answer = input("  Do you accept the Terms of Service? [y/N] ").strip().lower()
+    if answer in ("y", "yes"):
+        result = accept_tos()
+        if "error" in result:
+            print(f"  Warning: Could not record TOS acceptance: {result['error']}")
+        else:
+            print(f"  Terms of Service v{tos.get('version', '?')} accepted.")
+    else:
+        print("  TOS not accepted. You will not be able to publish widgets.")
+
+
 def _resolve(path: str) -> str:
     return os.path.abspath(path)
 
@@ -408,6 +440,11 @@ def cmd_login(args):
         client_id=received.get("client_id", ""),
         client_secret=received.get("client_secret", ""),
     )
+    print(f"  Logged in as @{handle}")
+
+    # --- TOS check ---
+    _check_and_prompt_tos()
+
     _out({"status": "success", "owner": handle})
 
 

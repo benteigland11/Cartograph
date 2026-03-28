@@ -357,6 +357,35 @@ def rollback_widget(owner_handle: str, widget_id: str, version: str) -> dict:
     )
 
 
+def get_tos() -> dict:
+    """Fetch current TOS text and version from registry."""
+    return _get("/v1/auth/tos")
+
+
+def accept_tos() -> dict:
+    """Accept the current TOS version."""
+    return _post("/v1/auth/accept-tos", {})
+
+
+def check_tos() -> dict:
+    """Check if the current user has accepted the latest TOS.
+
+    Returns {"accepted": bool, "current_version": int, "user_version": int}
+    or {"error": ...}.
+    """
+    me = whoami()
+    if "error" in me:
+        return me
+    tos = get_tos()
+    if "error" in tos:
+        return tos
+    return {
+        "accepted": me.get("tos_accepted", False),
+        "current_version": tos.get("version", 0),
+        "user_version": me.get("tos_version", 0),
+    }
+
+
 def login_with_credentials(id_token: str, refresh_token: str,
                            signing_key: str) -> dict:
     """
