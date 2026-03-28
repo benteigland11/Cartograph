@@ -42,7 +42,7 @@ We built in the ability to separate out by agentic service in case some need dif
 ```
 cartograph search <query>
     [--domain backend|data|ml|security|infra|frontend|universal]
-    [--language python|javascript|nim]
+    [--language python|javascript|typescript|nim]
 
 cartograph inspect <widget_id>
     [--source]           include source files
@@ -58,7 +58,7 @@ cartograph delete <widget_id>    [--confirm]    dry-run without --confirm
 cartograph rollback <widget_id>  [--version X] [--reason "..."]
 
 cartograph create <widget_id>
-    --language python|javascript|nim       REQUIRED
+    --language python|javascript|typescript|nim       REQUIRED
     --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
 
 cartograph validate [path] [--lib]

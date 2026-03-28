@@ -28,7 +28,7 @@ update. Wrap or extend in your own code instead.
 
     cartograph search <query>
         [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language python|javascript|nim]
+        [--language python|javascript|typescript|nim]
 
     cartograph inspect <widget_id>
         [--source]         include source files
@@ -45,7 +45,7 @@ update. Wrap or extend in your own code instead.
 **Create and publish widgets**
 
     cartograph create <widget_id>
-        --language python|javascript|nim    REQUIRED
+        --language python|javascript|typescript|nim    REQUIRED
         --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
         [--name "Display Name"] [--target .]
 
