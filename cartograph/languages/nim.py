@@ -63,7 +63,33 @@ class NimEngine(LanguageEngine):
             except FileNotFoundError:
                 pass  # check_available() will have already flagged this
 
-        # 3. Native source scanner — runs nim_scanner.nim for string/comment-aware checks
+        # 3. Compile check — verify src compiles as a library (catches linker/codegen issues
+        # that nim check misses). Uses --noMain since widgets are libraries, not executables.
+        for fpath in src_files:
+            rel = os.path.relpath(fpath, path)
+            try:
+                res = self._run(
+                    ["nim", "c", "--compileOnly", "--hints:off", "--warnings:off",
+                     f"--path:{src_dir}", "--nimcache:/tmp/cartograph_nimcache",
+                     fpath],
+                    cwd=path, timeout=120,
+                )
+                if res.returncode != 0:
+                    output = (res.stderr or res.stdout).strip()
+                    lines = output.splitlines()
+                    missing_import = any(
+                        "cannot find module" in l.lower() or "cannot open file" in l.lower()
+                        for l in lines
+                    )
+                    if missing_import:
+                        continue
+                    real_errors = [l for l in lines if l.strip()]
+                    if real_errors:
+                        errors.append(f"nim compile failed on {rel}:\n" + "\n".join(real_errors))
+            except FileNotFoundError:
+                pass
+
+        # 4. Native source scanner — runs nim_scanner.nim for string/comment-aware checks
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")
         if src_files and os.path.exists(scanner):
             res = self._run(
