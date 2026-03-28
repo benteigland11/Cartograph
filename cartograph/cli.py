@@ -888,18 +888,6 @@ _AGENT_FILENAMES = {
 
 
 
-def _prompt(question, options):
-    """Simple numbered menu. Returns the chosen option string."""
-    print(f"\n  {question}")
-    for i, opt in enumerate(options, 1):
-        print(f"    {i}) {opt}")
-    while True:
-        raw = input("  > ").strip()
-        if raw.isdigit() and 1 <= int(raw) <= len(options):
-            return options[int(raw) - 1]
-        if raw in options:
-            return raw
-        print(f"  Enter a number 1-{len(options)} or one of: {', '.join(options)}")
 
 
 def cmd_stats(args):
@@ -1089,26 +1077,19 @@ def _cursor_mdc(content):
 
 
 def cmd_setup(args):
-    interactive = sys.stdin.isatty() and not any([args.agent, args.write])
+    agent = args.agent
+    write = args.write
 
-    if interactive:
-        print("\n  Cartograph setup\n")
-        agent = _prompt("Which AI agent?", ["claude", "codex", "gemini", "antigravity", "cursor"])
-        write = True
-    else:
-        agent = args.agent
-        write = args.write
+    if write and not agent:
+        print("\n  --write requires --agent. Example:")
+        print("    cartograph setup --write --agent claude\n")
+        print("  Supported agents: claude, codex, gemini, antigravity, cursor")
+        sys.exit(1)
 
-        if write and not agent:
-            print("\n  --write requires --agent. Example:")
-            print("    cartograph setup --write --agent claude\n")
-            print("  Supported agents: claude, codex, gemini, antigravity, cursor")
-            sys.exit(1)
-
-        if not agent:
-            print(_SETUP_INSTRUCTIONS)
-            print("  # To write to a file, run: cartograph setup --write --agent <agent>")
-            return
+    if not agent:
+        print(_SETUP_INSTRUCTIONS)
+        print("  # To write to a file, run: cartograph setup --write --agent <agent>")
+        return
 
     content  = _SETUP_INSTRUCTIONS
     filename = _AGENT_FILENAMES[agent]
