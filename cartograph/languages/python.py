@@ -132,3 +132,11 @@ class PythonEngine(LanguageEngine):
         if res.returncode != 0:
             return self._fail(res.stdout + res.stderr)
         return self._ok()
+
+    def cleanup(self, path: str) -> None:
+        import shutil
+        for root, dirs, _files in os.walk(path):
+            for d in dirs:
+                if d in ("__pycache__", ".pytest_cache"):
+                    shutil.rmtree(os.path.join(root, d), ignore_errors=True)
+            dirs[:] = [d for d in dirs if d not in ("__pycache__", ".pytest_cache")]

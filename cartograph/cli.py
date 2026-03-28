@@ -8,8 +8,11 @@ Output is always JSON so both humans and AI agents can consume it.
 import argparse
 import json
 import os
+import shutil
 import sys
 import urllib.parse
+import zipfile
+from io import BytesIO
 
 
 def _out(result: dict) -> None:
@@ -92,31 +95,32 @@ def cmd_search(args):
         top_k=args.top_k,
     )
 
-    # Merge: cloud version wins for published widgets, local-only stays local
+    # Merge: cloud version wins for published widgets, local-only stays local.
+    # Cloud results have id="@handle/widget_id", local have id="widget_id".
+    # Deduplicate on base widget_id (strip @handle/ prefix).
     local_widgets = local.get("results", [])
     cloud_widgets = cloud.get("widgets", [])
 
-    cloud_by_id = {w["id"]: w for w in cloud_widgets}
+    def _base_id(w):
+        wid = w.get("id", "")
+        return wid.split("/", 1)[1] if "/" in wid else wid
+
+    cloud_base_ids = {_base_id(w) for w in cloud_widgets}
 
     seen = {}
     for w in cloud_widgets:
-        w["_source"] = "cloud"
-        seen[w["id"]] = w
+        seen[_base_id(w)] = w
     for w in local_widgets:
-        if w["id"] not in seen:
-            w["_source"] = "local"
-            seen[w["id"]] = w
+        bid = _base_id(w)
+        if bid not in seen:
+            seen[bid] = w
 
     combined = sorted(seen.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
-    # Strip internal marker
-    for w in combined:
-        w.pop("_source", None)
 
-    cloud_ids = set(cloud_by_id)
     merged = {
+        "local_count": sum(1 for w in combined if _base_id(w) not in cloud_base_ids),
+        "cloud_count": sum(1 for w in combined if _base_id(w) in cloud_base_ids),
         "widgets": combined,
-        "local_count": sum(1 for w in combined if w["id"] not in cloud_ids),
-        "cloud_count": sum(1 for w in combined if w["id"] in cloud_ids),
     }
     if cloud.get("error"):
         merged["cloud_error"] = cloud["error"]
@@ -173,6 +177,16 @@ def cmd_delete(args):
     )
     if result.get("status") == "error":
         _err(result)
+
+    # Also remove from cloud if published
+    if result.get("status") == "success":
+        from . import cloud, auth
+        if auth.is_authenticated() and cloud.is_available():
+            cloud_result = cloud.delete_widget(args.widget_id)
+            if "error" not in cloud_result:
+                result["cloud"] = "deleted"
+            # Silently skip if not on cloud (404)
+
     _out(result)
 
 
@@ -208,6 +222,24 @@ def cmd_validate(args):
     if result.get("status") == "error":
         _err(result)
     _out(result)
+
+
+def _force_push(checkin_result: dict) -> None:
+    """Push to cloud regardless of whether the widget was previously published."""
+    from . import cloud, auth
+    if not auth.is_authenticated():
+        print("  → Cannot push: not authenticated. Run: cartograph login", file=sys.stderr)
+        return
+    widget_id = checkin_result.get("id", "")
+    widget_path = checkin_result.get("path", "")
+    if not widget_id or not widget_path:
+        return
+    print(f"  → Pushing {widget_id} v{checkin_result.get('version', '?')} to cloud...")
+    push_result = cloud.push(widget_path, widget_id)
+    if push_result.get("error"):
+        print(f"  → Push failed: {push_result['error']}")
+    else:
+        print(f"  → Pushed: {push_result.get('namespaced_id', widget_id)} v{push_result.get('version', '?')}")
 
 
 def _auto_push_if_published(checkin_result: dict) -> None:
@@ -248,9 +280,12 @@ def cmd_checkin(args):
         _err(result)
     _out(result)
 
-    # Auto-push to cloud if the widget was previously published
-    if result.get("action") == "updated":
-        _auto_push_if_published(result)
+    # Push to cloud: always if --publish, otherwise only if already published
+    if result.get("action") in ("updated", "registered"):
+        if getattr(args, "publish", False):
+            _force_push(result)
+        else:
+            _auto_push_if_published(result)
 
 
 def cmd_status(args):
@@ -323,6 +358,8 @@ def cmd_login(args):
                 received["refresh_token"] = params.get("refresh_token", [""])[0]
                 received["signing_key"] = params.get("signing_key", [""])[0]
                 received["handle"] = params.get("handle", [""])[0]
+                received["client_id"] = params.get("client_id", [""])[0]
+                received["client_secret"] = params.get("client_secret", [""])[0]
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
@@ -412,7 +449,7 @@ def cmd_logout(args):
     _out({"status": "success", "message": "Logged out."})
 
 
-def cmd_push(args):
+def cmd_cloud_publish(args):
     from .auth import is_authenticated
     if not is_authenticated():
         _err({"error": "Not authenticated. Run: cartograph login"})
@@ -504,6 +541,143 @@ def cmd_rate(args):
     if result.get("error"):
         _err(result)
     _out(result)
+
+
+def cmd_cloud_unpublish(args):
+    """Remove a widget from the cloud registry (keeps local copy)."""
+    from . import cloud, auth
+    if not auth.is_authenticated():
+        _err({"error": "Not authenticated. Run: cartograph login"})
+    if not args.confirm:
+        _err({"error": f"This will remove '{args.widget_id}' from the cloud registry. Add --confirm to proceed."})
+    result = cloud.delete_widget(args.widget_id)
+    if "error" in result:
+        _err(result)
+    print(f"\n  Unpublished {args.widget_id} from cloud. Local copy unchanged.\n")
+
+
+def cmd_cloud_rate(args):
+    """Rate a cloud widget."""
+    from . import cloud, auth
+    if not auth.is_authenticated():
+        _err({"error": "Not authenticated. Run: cartograph login"})
+
+    # Parse @handle/widget_id or plain widget_id
+    widget_id = args.widget_id
+    if widget_id.startswith("@"):
+        parts = widget_id[1:].split("/", 1)
+        if len(parts) != 2:
+            _err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
+        owner, widget_id = parts
+    else:
+        # Look up owner from cloud search
+        results = cloud.search(widget_id, top_k=1)
+        widgets = results.get("widgets", [])
+        match = next((w for w in widgets if w.get("id") == widget_id), None)
+        if not match:
+            _err({"error": f"Widget '{widget_id}' not found on cloud."})
+        owner = match.get("owner", "")
+
+    result = cloud.rate_widget(owner, widget_id, args.score, args.comment)
+    if "error" in result:
+        _err(result)
+    print(f"\n  Rated {args.widget_id}: {args.score}/5\n")
+
+
+def cmd_rollback(args):
+    """Roll back a widget to a previous version (local and/or cloud)."""
+    from . import cloud, auth
+    from .checkin import restore
+
+    widget_id = args.widget_id
+    version = args.version
+
+    # Determine if this is a cloud widget (@handle/id) or local
+    owner_handle = None
+    base_id = widget_id
+    if widget_id.startswith("@"):
+        parts = widget_id[1:].split("/", 1)
+        if len(parts) != 2:
+            _err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
+        owner_handle, base_id = parts
+
+    carto = _carto()
+
+    # If no version specified, list available versions
+    if not version:
+        if owner_handle:
+            # Cloud: list versions from GCS
+            result = cloud.get_versions(owner_handle, base_id)
+            if "error" in result:
+                _err(result)
+            versions = result.get("versions", [])
+            current = result.get("current_version", "?")
+            if not versions:
+                _err({"error": f"No versions found for {widget_id}"})
+            print(f"\n  Versions for {widget_id} (current: {current}):\n")
+            for v in versions:
+                marker = " ← current" if v == current else ""
+                print(f"    {v}{marker}")
+            print()
+        else:
+            # Local: list from history/
+            item = next((w for w in carto.widgets if w["id"] == base_id), None)
+            if not item:
+                _err({"error": f"Widget '{base_id}' not found in library"})
+            import os
+            history_dir = os.path.join(item["path"], "history")
+            if not os.path.isdir(history_dir):
+                _err({"error": f"No version history for '{base_id}'"})
+            versions = sorted(os.listdir(history_dir), reverse=True)
+            current = item.get("version", "?")
+            if not versions:
+                _err({"error": f"No version history for '{base_id}'"})
+            print(f"\n  Versions for {base_id} (current: {current}):\n")
+            for v in versions:
+                marker = " ← current" if v == current else ""
+                print(f"    {v}{marker}")
+            print(f"\n  Run: cartograph rollback {base_id} --version <version>\n")
+        return
+
+    # Perform rollback
+    rolled_local = False
+    rolled_cloud = False
+
+    # Local rollback (if widget exists locally)
+    local_widget = next((w for w in carto.widgets if w["id"] == base_id), None)
+    if local_widget:
+        result = restore(carto, base_id, version, reason=args.reason or f"Rollback to v{version}")
+        if result.get("status") == "error":
+            print(f"  Local rollback failed: {result.get('message', 'unknown error')}")
+        else:
+            rolled_local = True
+            new_version = result.get("version", "?")
+            print(f"  ✓ Local: rolled back to v{version} (now v{new_version})")
+
+    # Cloud rollback (if @handle/id or widget is published)
+    if owner_handle:
+        result = cloud.rollback_widget(owner_handle, base_id, version)
+        if "error" in result:
+            print(f"  Cloud rollback failed: {result.get('error', 'unknown error')}")
+        else:
+            rolled_cloud = True
+            print(f"  ✓ Cloud: rolled back to v{version} (was v{result.get('previous_version', '?')})")
+    elif auth.is_authenticated():
+        # Check if widget exists on cloud
+        info = cloud.inspect(cloud.whoami().get("owner", ""), base_id)
+        if "error" not in info:
+            owner = info.get("owner", "")
+            result = cloud.rollback_widget(owner, base_id, version)
+            if "error" in result:
+                print(f"  Cloud rollback failed: {result.get('error', 'unknown error')}")
+            else:
+                rolled_cloud = True
+                print(f"  ✓ Cloud: rolled back to v{version} (was v{result.get('previous_version', '?')})")
+
+    if not rolled_local and not rolled_cloud:
+        _err({"error": f"Could not rollback '{widget_id}' — not found locally or on cloud"})
+
+    print()
 
 
 def cmd_doctor(args):
@@ -644,7 +818,7 @@ cartograph/<widget_id>/
 widget_id format: `<domain>-<name>-<language>` e.g. `backend-retry-backoff-python`
 
 Do not edit installed widget files directly - local edits are overwritten on
-upgrade. Wrap or extend in your own code instead.
+update. Wrap or extend in your own code instead.
 
 ### Commands
 `<arg>` = required  `[arg]` = optional  defaults shown where relevant
@@ -678,12 +852,19 @@ upgrade. Wrap or extend in your own code instead.
     cartograph checkin [path]            path defaults to .
         --reason "what changed and why"  REQUIRED
         [--bump patch|minor|major]       defaults to minor
-
-    cartograph push [widget_id] [path]
-        [--lib]                          push from library by ID
-        [--visibility public|private]    defaults to public
+        [--publish]                      also publish to cloud
 
     cartograph delete <widget_id> [--confirm]
+
+**Cloud registry**
+
+    cartograph cloud publish [widget_id] [path]
+        [--lib]                          publish from library by ID
+        [--visibility public|private]    defaults to public
+
+    cartograph cloud unpublish <widget_id> --confirm
+    cartograph cloud sync [--dry-run]
+    cartograph cloud rate <@handle/widget_id> <score 1-5> [--comment "..."]
 
 **Library and account**
 
@@ -778,6 +959,123 @@ def cmd_stats(args):
         print()
 
 
+def cmd_sync(args):
+    """Reconcile local library with cloud. Local newer → push, cloud newer → download."""
+    from . import cloud, auth
+    from packaging.version import Version, InvalidVersion
+
+    if not auth.is_authenticated():
+        _err({"error": "Not authenticated. Run: cartograph login"})
+    if not cloud.is_available():
+        _err({"error": "Cloud registry is unreachable."})
+
+    dry_run = args.dry_run
+    carto = _carto()
+    local_widgets = {w["id"]: w for w in carto.widgets}
+
+    profile = cloud.whoami()
+    if "error" in profile:
+        _err(profile)
+    handle = profile.get("owner", "")
+
+    cloud_widgets_list = cloud.list_my_widgets()
+    cloud_by_id = {w["id"]: w for w in cloud_widgets_list}
+
+    all_ids = sorted(set(local_widgets) | set(cloud_by_id))
+    if not all_ids:
+        print("\n  Nothing to sync — library and cloud are both empty.\n")
+        return
+
+    def _ver(s):
+        try:
+            return Version(s)
+        except (InvalidVersion, TypeError):
+            return Version("0.0.0")
+
+    actions = []  # (widget_id, action, detail)
+    for wid in all_ids:
+        local = local_widgets.get(wid)
+        remote = cloud_by_id.get(wid)
+
+        if local and not remote:
+            actions.append((wid, "local_only", local.get("version", "?")))
+            continue
+        if remote and not local:
+            actions.append((wid, "pull", remote.get("version", "?")))
+            continue
+
+        lv = _ver(local.get("version", "0.0.0"))
+        rv = _ver(remote.get("version", "0.0.0"))
+        if lv > rv:
+            actions.append((wid, "push", f"{lv} → {rv}"))
+        elif rv > lv:
+            actions.append((wid, "pull", f"{rv} → {lv}"))
+        else:
+            actions.append((wid, "ok", str(lv)))
+
+    # Print plan
+    pushes = [(w, d) for w, a, d in actions if a == "push"]
+    pulls = [(w, d) for w, a, d in actions if a == "pull"]
+    synced = [(w, d) for w, a, d in actions if a == "ok"]
+    local_only = [(w, d) for w, a, d in actions if a == "local_only"]
+
+    print()
+    if synced:
+        print(f"  In sync     {len(synced)}")
+    if local_only:
+        print(f"  Local only  {len(local_only)}  (not published — skipping)")
+    if pushes:
+        print(f"  Push        {len(pushes)}  (local is newer)")
+        for wid, detail in pushes:
+            print(f"    {wid}  {detail}")
+    if pulls:
+        print(f"  Pull        {len(pulls)}  (cloud is newer)")
+        for wid, detail in pulls:
+            print(f"    {wid}  {detail}")
+    print()
+
+    if not pushes and not pulls:
+        print("  Everything is in sync.\n")
+        return
+
+    if dry_run:
+        print("  Dry run — no changes made.\n")
+        return
+
+    # Execute pushes
+    for wid, detail in pushes:
+        w = local_widgets[wid]
+        print(f"  Pushing {wid}...", end=" ", flush=True)
+        result = cloud.push(w["path"], wid)
+        if result.get("error"):
+            print(f"FAILED: {result['error']}")
+        else:
+            print(f"ok → v{result.get('version', '?')}")
+
+    # Execute pulls — download and extract into library
+    for wid, detail in pulls:
+        remote = cloud_by_id[wid]
+        owner = remote.get("owner", handle)
+        print(f"  Pulling {wid}...", end=" ", flush=True)
+        result = cloud.download_widget(owner, wid)
+        if "error" in result:
+            print(f"FAILED: {result['error']}")
+            continue
+        # Extract into library, overwriting existing
+        dest = os.path.join(carto.library_path, wid)
+        try:
+            if os.path.exists(dest):
+                shutil.rmtree(dest)
+            os.makedirs(dest, exist_ok=True)
+            with zipfile.ZipFile(BytesIO(result["zip_bytes"])) as zf:
+                zf.extractall(dest)
+            print(f"ok → v{result.get('version', '?')}")
+        except Exception as e:
+            print(f"FAILED: {e}")
+
+    print()
+
+
 def _cursor_mdc(content):
     """Wrap plain markdown content in Cursor's MDC frontmatter format."""
     return (
@@ -855,9 +1153,15 @@ _COMMAND_GROUPS = [
     ("Build widgets", [
         ("create",   "Scaffold a new widget"),
         ("validate", "Run the validation pipeline on a widget"),
-        ("checkin",  "Check a widget into the library"),
-        ("delete",   "Remove a widget from the library"),
-        ("push",     "Publish a validated widget to the cloud registry"),
+        ("checkin",  "Check a widget into the library (--publish to also publish)"),
+        ("rollback", "Roll back a widget to a previous version (local + cloud)"),
+        ("delete",   "Remove a widget from the library (and cloud if published)"),
+    ]),
+    ("Cloud registry", [
+        ("cloud publish",   "Publish a widget to the cloud registry"),
+        ("cloud unpublish", "Remove a widget from the cloud (keeps local)"),
+        ("cloud sync",      "Reconcile local library with cloud"),
+        ("cloud rate",      "Rate a cloud widget"),
     ]),
     ("Config", [
         ("setup",     "Generate and write agent instructions"),
@@ -969,6 +1273,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reason", required=True, help="What changed and why")
     p.add_argument("--bump", default="minor", choices=["major", "minor", "patch"],
                    help="Version bump type (default: minor)")
+    p.add_argument("--publish", action="store_true",
+                   help="Publish to cloud after checkin (even if not previously published)")
     p.add_argument("--override-warnings", action="store_true", dest="override_warnings")
     p.add_argument("--override-reason", default=None, dest="override_reason")
     p.set_defaults(func=cmd_checkin)
@@ -979,17 +1285,47 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Actually delete the widget from the library (irreversible)")
     p.set_defaults(func=cmd_delete)
 
-    p = sub.add_parser("push", help="Publish a validated widget to the cloud registry")
+    p = sub.add_parser("rollback", help="Roll back a widget to a previous version")
+    p.add_argument("widget_id", help="Widget ID (local) or @handle/widget_id (cloud)")
+    p.add_argument("--version", default=None, help="Version to roll back to (omit to list available)")
+    p.add_argument("--reason", default="", help="Reason for rollback")
+    p.set_defaults(func=cmd_rollback)
+
+    # --- Cloud subcommands ---
+
+    cloud_parser = sub.add_parser("cloud", help="Cloud registry operations")
+    cloud_sub = cloud_parser.add_subparsers(dest="cloud_command")
+
+    p = cloud_sub.add_parser("publish", help="Publish a validated widget to the cloud registry")
     p.add_argument("widget_id", nargs="?", default=None,
                    help="Widget ID (required with --lib, inferred from widget.json otherwise)")
     p.add_argument("path", nargs="?", default=".",
                    help="Widget directory (default: .)")
-    p.add_argument("--lib", action="store_true", help="Push a widget from the library by ID")
+    p.add_argument("--lib", action="store_true", help="Publish a widget from the library by ID")
     p.add_argument("--visibility", default="public", choices=["public", "private"],
                    help="Registry visibility (default: public)")
     p.add_argument("--override-warnings", action="store_true", dest="override_warnings")
     p.add_argument("--override-reason", default=None, dest="override_reason")
-    p.set_defaults(func=cmd_push)
+    p.set_defaults(func=cmd_cloud_publish)
+
+    p = cloud_sub.add_parser("unpublish", help="Remove a widget from the cloud registry (keeps local)")
+    p.add_argument("widget_id")
+    p.add_argument("--confirm", action="store_true",
+                   help="Actually remove from cloud (required)")
+    p.set_defaults(func=cmd_cloud_unpublish)
+
+    p = cloud_sub.add_parser("sync", help="Reconcile local library with cloud (publish newer, download newer)")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="Show what would happen without making changes")
+    p.set_defaults(func=cmd_sync)
+
+    p = cloud_sub.add_parser("rate", help="Rate a cloud widget")
+    p.add_argument("widget_id", help="Widget ID (e.g. @handle/widget-id or just widget-id)")
+    p.add_argument("score", type=int, help="Score from 1 to 5")
+    p.add_argument("--comment", default="", help="Optional review comment")
+    p.set_defaults(func=cmd_cloud_rate)
+
+    cloud_parser.set_defaults(func=lambda args: cloud_parser.print_help())
 
     # --- Config ---
 

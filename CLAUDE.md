@@ -38,7 +38,7 @@ update. Wrap or extend in your own code instead.
 
     cartograph install <widget_id> [--target .] [--version X]
     cartograph uninstall <widget_id> [--target .]
-    cartograph update <widget_id> [--target .] [--version X]
+    cartograph upgrade <widget_id> [--target .] [--version X]
     cartograph status [widget_id] [--target .]
     cartograph rate <widget_id> <score 1-5> [--comment "..."] [--target .]
 
@@ -53,12 +53,18 @@ update. Wrap or extend in your own code instead.
     cartograph checkin [path]            path defaults to .
         --reason "what changed and why"  REQUIRED
         [--bump patch|minor|major]       defaults to minor
-
-    cartograph push [widget_id] [path]
-        [--lib]                          push from library by ID
-        [--visibility public|private]    defaults to public
+        [--publish]                      also publish to cloud
 
     cartograph delete <widget_id> [--confirm]
+
+**Cloud registry**
+
+    cartograph cloud publish [widget_id] [path]
+        [--lib]                          publish from library by ID
+        [--visibility public|private]    defaults to public
+    cartograph cloud unpublish <widget_id> [--confirm]
+    cartograph cloud sync                reconcile local with cloud
+    cartograph cloud rate <widget_id> <score 1-5> [--comment "..."]
 
 **Library and account**
 

@@ -60,8 +60,8 @@ def format_results(scored_widgets: list[dict], corpus_size: int = 0) -> dict:
     """
     results = []
     for res in scored_widgets:
-        results.append({
-            "id": res["id"],
+        entry = {
+            "id": res.get("namespaced_id") or res["id"],
             "name": res["name"],
             "version": res.get("version", "0.0.0"),
             "description": res["description"],
@@ -72,7 +72,8 @@ def format_results(scored_widgets: list[dict], corpus_size: int = 0) -> dict:
             "trend": res.get("trend"),
             "install_count": res.get("install_count", 0),
             "relevance_score": res["relevance_score"],
-        })
+        }
+        results.append(entry)
 
     if corpus_size > 0 and corpus_size < _SMALL_CORPUS_THRESHOLD:
         return {"results": results}

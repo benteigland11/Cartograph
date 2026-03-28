@@ -453,11 +453,24 @@ def add_review(carto, widget_id, target_dir, score, comment=None):
     except (ValueError, TypeError):
         return {"error": "Score must be a number between 1 and 5."}
 
+    # Get reviewer identity if authenticated
+    author = ""
+    try:
+        from .auth import is_authenticated
+        if is_authenticated():
+            from .cloud import whoami
+            profile = whoami()
+            author = profile.get("owner", "") or profile.get("username", "")
+    except Exception:
+        pass
+
     review_entry = {
         "rating": score,
         "version": widget.get("version", "unknown"),
         "timestamp": datetime.datetime.now().isoformat(),
     }
+    if author:
+        review_entry["author"] = author
     if comment:
         review_entry["comment"] = comment
 

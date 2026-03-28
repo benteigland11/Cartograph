@@ -54,6 +54,7 @@ _HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cartograph</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' rx='40' fill='%231a1d27'/%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='0%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23FFF'/%3E%3Cstop offset='50%25' stop-color='%23E4E4E7'/%3E%3Cstop offset='100%25' stop-color='%23A1A1AA'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M 125,45 A 60 60 0 1 0 125,155' fill='none' stroke='url(%23g)' stroke-width='24' stroke-linecap='round'/%3E%3Crect x='88' y='88' width='24' height='24' rx='4' fill='%23FFEA00'/%3E%3Crect x='135' y='92' width='16' height='16' rx='3' fill='%23FFC300'/%3E%3Crect x='175' y='95' width='10' height='10' rx='2' fill='%23FF9500'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/nim.min.js"></script>
@@ -70,7 +71,9 @@ _HTML = r"""<!DOCTYPE html>
     --border:    #e5e7eb;
     --text:      #1f2937;
     --muted:     #6b7280;
-    --blue:      #2563eb;
+    --accent:    #D4A017;
+    --accent-light: #FFEA00;
+    --accent-deep: #FF9500;
     --green:     #059669;
     --orange:    #d97706;
     --red:       #dc2626;
@@ -88,7 +91,9 @@ _HTML = r"""<!DOCTYPE html>
     --border:    #2e3240;
     --text:      #e4e6ed;
     --muted:     #8b8fa3;
-    --blue:      #5b9cf5;
+    --accent:    #FFCE45;
+    --accent-light: #FFEA00;
+    --accent-deep: #FF9500;
     --green:     #34d399;
     --orange:    #f0a445;
     --red:       #f06060;
@@ -114,8 +119,9 @@ _HTML = r"""<!DOCTYPE html>
     top: 0;
     z-index: 100;
   }
-  .nav-logo { font-weight: 700; font-size: 18px; color: var(--text); letter-spacing: -0.5px; cursor: pointer; flex-shrink: 0; }
-  .nav-logo em { color: var(--blue); font-style: normal; }
+  .nav-logo { font-weight: 700; font-size: 18px; color: var(--text); letter-spacing: -0.5px; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
+  .nav-logo-mark { width: 34px; height: 34px; background: #1a1d27; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .nav-logo-mark svg { width: 28px; height: 28px; }
 
 
   .nav-tabs { display: flex; gap: 0; margin-left: 24px; height: 100%; }
@@ -126,7 +132,7 @@ _HTML = r"""<!DOCTYPE html>
     transition: color 0.1s;
   }
   .nav-tab:hover { color: var(--text); }
-  .nav-tab.active { color: var(--blue); border-bottom-color: var(--blue); font-weight: 500; }
+  .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
 
   .nav-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-left: auto; }
 
@@ -152,7 +158,7 @@ _HTML = r"""<!DOCTYPE html>
     padding: 1px 6px;
     border-radius: 10px;
   }
-  .nav-tab.active .tab-badge { background: #2563eb18; color: var(--blue); }
+  .nav-tab.active .tab-badge { background: #D4A01718; color: var(--accent); }
 
   /* ── Content ── */
   .content { margin: 0 auto; padding: 28px 32px; }
@@ -161,27 +167,28 @@ _HTML = r"""<!DOCTYPE html>
 
   /* ── Search view ── */
   .search-bar {
-    max-width: 520px;
+    max-width: 600px;
+    margin: 32px auto 32px;
     position: relative;
-    margin-bottom: 24px;
   }
   .search-bar input {
     width: 100%;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 12px 16px 12px 40px;
+    border-radius: 12px;
+    padding: 16px 20px 16px 48px;
     color: var(--text);
-    font-size: 16px;
+    font-size: 17px;
     outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
-    box-shadow: var(--shadow-sm);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-shadow: var(--shadow);
   }
-  .search-bar input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px #2563eb18; }
+  .search-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px #D4A01715, var(--shadow); }
   .search-bar input::placeholder { color: var(--muted); }
   .search-bar-icon {
-    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
-    color: var(--muted); font-size: 16px; pointer-events: none;
+    position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
+    color: var(--muted); pointer-events: none;
+    width: 18px; height: 18px;
   }
 
   /* ── Filter bar ── */
@@ -193,7 +200,7 @@ _HTML = r"""<!DOCTYPE html>
     padding: 7px 14px; color: var(--text); font-size: 13px; width: 220px; outline: none;
     box-shadow: var(--shadow-sm); transition: border-color 0.15s;
   }
-  .filter-bar input[type="search"]:focus { border-color: var(--blue); }
+  .filter-bar input[type="search"]:focus { border-color: var(--accent); }
 
   /* Segmented control */
   .seg-control {
@@ -207,7 +214,7 @@ _HTML = r"""<!DOCTYPE html>
   }
   .seg-btn:last-child { border-right: none; }
   .seg-btn:hover { color: var(--text); }
-  .seg-btn.active { background: var(--blue); color: #fff; }
+  .seg-btn.active { background: var(--accent); color: #fff; }
 
   /* Multi-select dropdown */
   .multi-select {
@@ -224,7 +231,7 @@ _HTML = r"""<!DOCTYPE html>
     border: 4px solid transparent; border-top: 5px solid var(--muted);
   }
   .multi-select-btn:hover { color: var(--text); border-color: #d1d5db; }
-  .multi-select-btn.has-selection { color: var(--blue); border-color: var(--blue); }
+  .multi-select-btn.has-selection { color: var(--accent); border-color: var(--accent); }
   .multi-select-menu {
     display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 50;
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -237,12 +244,12 @@ _HTML = r"""<!DOCTYPE html>
     font-size: 12px; color: var(--text); cursor: pointer; transition: background 0.1s;
   }
   .multi-select-item:hover { background: var(--surface2); }
-  .multi-select-item input[type="checkbox"] { accent-color: var(--blue); margin: 0; }
+  .multi-select-item input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
   .multi-select-clear {
     padding: 6px 12px; font-size: 11px; color: var(--muted); cursor: pointer;
     border-top: 1px solid var(--border); text-align: center;
   }
-  .multi-select-clear:hover { color: var(--blue); }
+  .multi-select-clear:hover { color: var(--accent); }
 
   /* ── Widget list ── */
   .widget-list { display: flex; flex-direction: column; gap: 2px; }
@@ -284,7 +291,7 @@ _HTML = r"""<!DOCTYPE html>
     font-size: 11px; padding: 2px 8px; border-radius: 10px;
     border: 1px solid; font-weight: 500; white-space: nowrap;
   }
-  .sync-local    { color: var(--blue);   border-color: #2563eb30; background: #2563eb0a; }
+  .sync-local    { color: var(--accent);   border-color: #D4A01730; background: #D4A0170a; }
   .sync-cloud    { color: var(--purple); border-color: #7c3aed30; background: #7c3aed0a; }
   .sync-published   { color: var(--green);  border-color: #05966930; background: #0596690a; }
   .sync-mismatch { color: var(--orange); border-color: #d9770630; background: #d977060a; }
@@ -294,13 +301,13 @@ _HTML = r"""<!DOCTYPE html>
   }
   .vis-public  { color: var(--green); background: #0596690c; }
   .vis-private { color: var(--orange); background: #d977060c; }
-  .vis-local   { color: var(--blue); background: #2563eb0c; }
+  .vis-local   { color: var(--accent); background: #D4A0170c; }
   .vis-cloud   { color: var(--purple); background: #7c3aed0c; }
   .vis-mismatch { color: var(--orange); background: #d977060c; }
 
   /* ── Detail view ── */
   .detail-back {
-    font-size: 13px; color: var(--blue); cursor: pointer; margin-bottom: 16px;
+    font-size: 13px; color: var(--accent); cursor: pointer; margin-bottom: 16px;
     display: inline-flex; align-items: center; gap: 4px;
   }
   .detail-back:hover { text-decoration: underline; }
@@ -350,7 +357,7 @@ _HTML = r"""<!DOCTYPE html>
   }
 
   .tags-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .tag { background: #2563eb10; color: var(--blue); font-size: 12px; padding: 2px 8px; border-radius: 12px; }
+  .tag { background: #D4A01710; color: var(--accent); font-size: 12px; padding: 2px 8px; border-radius: 12px; }
 
   .detail-section { margin-bottom: 24px; }
   .detail-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
@@ -364,6 +371,26 @@ _HTML = r"""<!DOCTYPE html>
     box-shadow: var(--shadow-sm);
   }
   .review-score { color: var(--orange); font-weight: 600; margin-bottom: 4px; }
+  .review-form { margin-top: 12px; }
+  .review-stars { display: flex; gap: 4px; margin-bottom: 8px; }
+  .review-stars span {
+    font-size: 22px; cursor: pointer; color: var(--border); transition: color 0.1s; user-select: none;
+  }
+  .review-stars span.active { color: var(--orange); }
+  .review-stars:hover span { color: var(--orange); }
+  .review-stars span:hover ~ span { color: var(--border); }
+  .review-form textarea {
+    width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 10px; color: var(--text); font-size: 13px; font-family: inherit; resize: none;
+    min-height: 38px; outline: none; overflow: hidden;
+  }
+  .review-form textarea:focus { border-color: var(--accent); }
+  .review-form button {
+    margin-top: 8px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius);
+    padding: 6px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  .review-form button:hover { opacity: 0.9; }
+  .review-form button:disabled { opacity: 0.5; cursor: default; }
   .review-comment { font-size: 13px; color: var(--muted); }
 
   /* ── Empty / loading ── */
@@ -371,7 +398,7 @@ _HTML = r"""<!DOCTYPE html>
   .empty-title { font-size: 16px; margin-bottom: 6px; color: var(--text); }
   .empty-sub { font-size: 13px; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 12px; }
+  .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 12px; }
 
   .results-count { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 
@@ -385,10 +412,10 @@ _HTML = r"""<!DOCTYPE html>
   .user-card:hover { background: var(--surface); border-color: var(--border); box-shadow: var(--shadow); }
   .user-card-avatar {
     width: 40px; height: 40px; border-radius: 50%;
-    background: linear-gradient(135deg, #2563eb18, #7c3aed18);
-    border: 2px solid var(--border);
+    background: linear-gradient(135deg, #FFEA0020, #FF950020);
+    border: 2px solid #FFC30040;
     display: flex; align-items: center; justify-content: center;
-    font-size: 18px; font-weight: 600; color: var(--blue); flex-shrink: 0;
+    font-size: 18px; font-weight: 600; color: var(--accent-deep); flex-shrink: 0;
   }
   .user-card-info { flex: 1; min-width: 0; }
   .user-card-handle { font-size: 15px; font-weight: 600; color: var(--text); }
@@ -440,7 +467,7 @@ _HTML = r"""<!DOCTYPE html>
     transition: background 0.1s;
   }
   .file-tree-item:hover { background: var(--border); }
-  .file-tree-item.active { background: #2563eb12; color: var(--blue); font-weight: 500; }
+  .file-tree-item.active { background: #D4A01712; color: var(--accent); font-weight: 500; }
   .file-tree-item.too-large { color: var(--muted); font-style: italic; }
 
   .file-viewer {
@@ -514,10 +541,10 @@ _HTML = r"""<!DOCTYPE html>
   .profile-avatar {
     width: 56px; height: 56px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #2563eb18, #7c3aed18);
-    border: 2px solid var(--border);
+    background: linear-gradient(135deg, #FFEA0020, #FF950020);
+    border: 2px solid #FFC30040;
     display: flex; align-items: center; justify-content: center;
-    font-size: 24px; font-weight: 600; color: var(--blue);
+    font-size: 24px; font-weight: 600; color: var(--accent-deep);
     flex-shrink: 0;
   }
   .profile-info { flex: 1; min-width: 0; }
@@ -538,13 +565,13 @@ _HTML = r"""<!DOCTYPE html>
 <body>
 
 <nav>
-  <span class="nav-logo" onclick="navigate('profile')"><em>&#9674;</em> Cartograph</span>
+  <span class="nav-logo" onclick="navigate('profile')"><span class="nav-logo-mark"><svg viewBox="0 0 200 200"><defs><linearGradient id="cg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#FFFFFF"/><stop offset="50%" stop-color="#E4E4E7"/><stop offset="100%" stop-color="#A1A1AA"/></linearGradient></defs><path d="M 125,45 A 60 60 0 1 0 125,155" fill="none" stroke="url(#cg)" stroke-width="24" stroke-linecap="round"/><rect x="88" y="88" width="24" height="24" rx="4" fill="#FFEA00"/><rect x="135" y="92" width="16" height="16" rx="3" fill="#FFC300"/><rect x="175" y="95" width="10" height="10" rx="2" fill="#FF9500"/></svg></span>Cartograph</span>
   <div class="nav-tabs">
     <button class="nav-tab active" data-view="profile">Profile <span class="tab-badge" id="badge-my">0</span></button>
     <button class="nav-tab" data-view="search">Search</button>
   </div>
   <div class="nav-right">
-    <button class="btn" id="theme-btn" title="Toggle dark mode">&#9789;</button>
+    <button class="btn" id="theme-btn" title="Toggle dark mode"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
     <button class="btn" id="refresh-btn" title="Refresh data">&#8635; Refresh</button>
   </div>
 </nav>
@@ -593,11 +620,14 @@ function navigate(view, data) {
     detailWidget = data;
     detailFiles = null;
     detailVersions = [];
+    detailChangelog = {};
+    detailCloudReviews = [];
     detailViewingVersion = '';
     const wid = data.id || data.name;
     if (wid) {
       loadDetailFiles(wid, data.owner || '');
       loadDetailVersions(wid);
+      if (data.owner) loadCloudReviews(data.owner, wid);
     }
   } else if (view === 'user') {
     // Viewing another user's profile
@@ -664,7 +694,9 @@ document.getElementById('theme-btn').addEventListener('click', () => {
   const html = document.documentElement;
   const isDark = html.getAttribute('data-theme') === 'dark';
   html.setAttribute('data-theme', isDark ? '' : 'dark');
-  document.getElementById('theme-btn').innerHTML = isDark ? '&#9789;' : '&#9788;';
+  document.getElementById('theme-btn').innerHTML = isDark
+    ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
+    : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
   // Swap highlight.js theme
   const hljsLink = document.querySelector('link[href*="highlight.js"]');
   if (hljsLink) {
@@ -680,7 +712,7 @@ document.getElementById('theme-btn').addEventListener('click', () => {
   const saved = localStorage.getItem('carto-theme');
   if (saved === 'dark') {
     document.documentElement.setAttribute('data-theme', 'dark');
-    document.getElementById('theme-btn').innerHTML = '&#9788;';
+    document.getElementById('theme-btn').innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
     const hljsLink = document.querySelector('link[href*="highlight.js"]');
     if (hljsLink) hljsLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css';
   }
@@ -717,9 +749,10 @@ async function doSearch() {
   } else {
     const params = new URLSearchParams({ q: searchQuery });
     try {
-      const [cloudRes, localRes] = await Promise.all([
+      const [cloudRes, localRes, usersRes] = await Promise.all([
         fetch('/api/search?' + params).then(r => r.json()).catch(() => ({widgets:[]})),
         fetch('/api/search-local?' + params).then(r => r.json()).catch(() => ({widgets:[]})),
+        fetch('/api/users/search?q=' + encodeURIComponent(searchQuery)).then(r => r.json()).catch(() => ({users:[]})),
       ]);
       const seen = new Set();
       const merged = [];
@@ -731,10 +764,11 @@ async function doSearch() {
         if (!seen.has(baseId)) { seen.add(baseId); merged.push({...w, id: baseId}); }
       }
       searchResults = merged;
+      userSearchResults = (usersRes.users || []).slice(0, 5);
     } catch {
       searchResults = [];
+      userSearchResults = [];
     }
-    userSearchResults = [];
   }
   isSearching = false;
   render();
@@ -771,7 +805,7 @@ function widgetCard(w, opts = {}) {
       <span><span class="lang-dot ${langClass(lang)}"></span> ${esc(lang)}</span>
       ${w.domain ? `<span class="domain-tag">${esc(w.domain)}</span>` : ''}
       ${installs ? `<span>${installs} install${installs!==1?'s':''}</span>` : ''}
-      ${w.rating ? `<span>${stars(w.rating)} ${w.rating.toFixed(1)}</span>` : ''}
+      ${w._cloudRating ? `<span title="Cloud rating">${stars(w._cloudRating)} ${w._cloudRating.toFixed(1)} <span style="color:var(--muted)">(${w._cloudReviewCount||0})</span></span>` : w._localRating ? `<span title="Local rating">${stars(w._localRating)} ${w._localRating.toFixed(1)} <span style="color:var(--muted)">(${w._localReviewCount||0})</span></span>` : ''}
     </div>
   </div>`;
 }
@@ -843,13 +877,13 @@ function renderProfile() {
 
   if (isOwnProfile && !whoamiData.authenticated) {
     html += `<div class="profile-name">Local Library</div>`;
-    html += `<div class="profile-handle">Not signed in</div>`;
+    html += `<div class="profile-handle">Not signed in - run <code style="background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:12px">cartograph login</code> to sync with cloud</div>`;
   } else if (isOwnProfile) {
     html += `<div class="profile-name">@${esc(handle)}</div>`;
     html += `<div class="profile-handle">Your widgets</div>`;
   } else {
     html += `<div class="profile-name">@${esc(handle)}</div>`;
-    html += `<div class="profile-handle" style="cursor:pointer;color:var(--blue)" onclick="navigate('profile')">&#8592; Back to your profile</div>`;
+    html += `<div class="profile-handle" style="cursor:pointer;color:var(--accent)" onclick="navigate('profile')">&#8592; Back to your profile</div>`;
   }
 
   // Stats
@@ -1035,7 +1069,7 @@ function renderSearch() {
   let html = '';
 
   html += `<div class="search-bar">
-    <span class="search-bar-icon">&#128269;</span>
+    <span class="search-bar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
     <input type="search" id="search-input" placeholder="Search widgets or @username..." value="${esc(searchQuery)}" />
   </div>`;
 
@@ -1074,11 +1108,32 @@ function renderSearch() {
     return html;
   }
 
-  html += `<div class="results-count">${searchResults.length} result${searchResults.length!==1?'s':''} for "${esc(searchQuery)}"</div>`;
+  // Users section (shown above widgets in general search)
+  if (userSearchResults.length) {
+    html += `<div style="margin-bottom:20px">
+      <h3 style="font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:0.5px;margin-bottom:10px">Users</h3>
+      <div class="widget-list">`;
+    userSearchResults.forEach(u => {
+      const handle = u.handle || u.owner || u.username || '';
+      const initial = (handle || '?')[0].toUpperCase();
+      const widgetCount = u.widget_count || u.widgets || '';
+      html += `<div class="user-card" onclick="viewUserProfile('${esc(handle)}')">
+        <div class="user-card-avatar">${esc(initial)}</div>
+        <div class="user-card-info">
+          <div class="user-card-handle">@${esc(handle)}</div>
+          ${widgetCount ? `<div class="user-card-meta">${widgetCount} widget${widgetCount!==1?'s':''}</div>` : ''}
+        </div>
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
 
-  if (!searchResults.length) {
+  const totalResults = searchResults.length + userSearchResults.length;
+  html += `<div class="results-count">${searchResults.length} widget${searchResults.length!==1?'s':''} for "${esc(searchQuery)}"</div>`;
+
+  if (!searchResults.length && !userSearchResults.length) {
     html += `<div class="empty"><div class="empty-title">No results</div><div class="empty-sub">Try different keywords or check your spelling</div></div>`;
-  } else {
+  } else if (searchResults.length) {
     // Filters on results
     const domains = [...new Set(searchResults.map(w => w.domain).filter(Boolean))].sort();
     const langs = [...new Set(searchResults.map(w => (w.language||'').toLowerCase()).filter(Boolean))].sort();
@@ -1163,6 +1218,8 @@ function bindSearchEvents() {
 // ── Detail view ──
 let detailFiles = null;
 let detailVersions = [];
+let detailChangelog = {};
+let detailCloudReviews = [];
 let detailViewingVersion = '';
 
 function renderFilesExplorer() {
@@ -1266,7 +1323,12 @@ function renderDetail(w) {
     <span>${coloredName(w.id || w.name, w.language)}</span>
     ${statusBadge}
   </div>`;
-  if (owner) html += `<div class="detail-owner">by <span style="cursor:pointer;color:var(--blue)" onclick="viewUserProfile('${esc(owner)}')">@${esc(owner)}</span></div>`;
+  if (owner) html += `<div class="detail-owner">by <span style="cursor:pointer;color:var(--accent)" onclick="viewUserProfile('${esc(owner)}')">@${esc(owner)}</span></div>`;
+
+  const ratingParts = [];
+  if (w._localRating) ratingParts.push(`${stars(w._localRating)} ${w._localRating.toFixed(1)} local (${w._localReviewCount||0})`);
+  if (w._cloudRating) ratingParts.push(`${stars(w._cloudRating)} ${w._cloudRating.toFixed(1)} cloud (${w._cloudReviewCount||0})`);
+  if (ratingParts.length) html += `<div style="font-size:14px;color:var(--muted);margin-bottom:16px">${ratingParts.join('<span style="margin:0 10px;color:var(--border)">|</span>')}</div>`;
 
   html += `<div class="detail-grid">`;
 
@@ -1283,6 +1345,18 @@ function renderDetail(w) {
     </div>
   </div>`;
 
+  // Changelog (latest 3)
+  const clEntries = Object.values(detailChangelog).sort((a,b) => b.version.localeCompare(a.version, undefined, {numeric:true})).slice(0,3);
+  if (clEntries.length) {
+    html += `<div class="detail-section">
+      <h3>Changelog</h3>
+      ${clEntries.map(e => `<div style="margin-bottom:8px">
+        <div style="font-size:12px;font-weight:600">v${esc(e.version)}</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.4">${esc(e.reason)}</div>
+      </div>`).join('')}
+    </div>`;
+  }
+
   // Tags
   if (tags.length) {
     html += `<div class="detail-section">
@@ -1291,42 +1365,60 @@ function renderDetail(w) {
     </div>`;
   }
 
-  // Reviews
-  if (reviews.length) {
+  // Cloud reviews
+  if (detailCloudReviews.length) {
     html += `<div class="detail-section">
-      <h3>Reviews (${reviews.length})</h3>
-      ${reviews.map(r => `<div class="review-card">
-        <div class="review-score">${stars(r.score)} ${r.score}/5</div>
+      <h3>Cloud Reviews (${detailCloudReviews.length})</h3>
+      ${detailCloudReviews.map(r => `<div class="review-card">
+        <div class="review-score">${stars(r.rating || r.score)} ${(r.rating || r.score)}/5 <span style="color:var(--muted);font-weight:400;font-size:12px">by ${r.author ? '@' + esc(r.author) : 'Anonymous'}${r.version ? ' on v' + esc(r.version) : ''}</span></div>
         ${r.comment ? `<div class="review-comment">${esc(r.comment)}</div>` : ''}
       </div>`).join('')}
     </div>`;
   }
+
+  // Local reviews
+  if (reviews.length) {
+    html += `<div class="detail-section">
+      <h3>Local Reviews (${reviews.length})</h3>
+      ${reviews.map((r, i) => {
+        const mine = r.author && whoamiData.owner && r.author === whoamiData.owner;
+        return `<div class="review-card">
+          <div class="review-score">${stars(r.rating)} ${r.rating}/5 <span style="color:var(--muted);font-weight:400;font-size:12px">by ${r.author ? '@' + esc(r.author) : 'Anonymous'}${r.version ? ' on v' + esc(r.version) : ''}</span>${mine ? `<span style="float:right;cursor:pointer;color:var(--muted);font-size:12px" onclick="event.stopPropagation();deleteReview('${esc(w.id||w.name)}',${i})" title="Delete review">&#10005;</span>` : ''}</div>
+          ${r.comment ? `<div class="review-comment">${esc(r.comment)}</div>` : ''}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // Review form
+  const hasAnyReviews = reviews.length || detailCloudReviews.length;
+  html += `<div class="detail-section">
+    ${!hasAnyReviews ? '<h3>Reviews</h3>' : ''}
+    <div class="review-form">
+      <div class="review-stars" id="review-stars">
+        ${[1,2,3,4,5].map(n => `<span data-score="${n}" onclick="setReviewScore(${n})">&#9733;</span>`).join('')}
+      </div>
+      <textarea id="review-comment" placeholder="Add a comment (optional)" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+      <button id="review-submit" disabled onclick="submitReview('${esc(w.id||w.name)}','${esc(owner)}')">Submit Review</button>
+    </div>
+  </div>`;
 
   html += `</div>`; // detail-main
 
   // Sidebar
   html += `<div class="detail-sidebar">
     <h3>Details</h3>
-    <div class="detail-meta-row"><span class="detail-meta-label">Version</span><span class="detail-meta-value">${esc(ver) || '—'}</span></div>
+    <div class="detail-meta-row"><span class="detail-meta-label">Version</span><span class="detail-meta-value">${detailVersions.length ? `<select id="version-select" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 4px;font-size:12px;cursor:pointer" onchange="switchVersion('${esc(w.id||w.name)}','${esc(owner)}',this.value)">
+      <option value=""${!detailViewingVersion?' selected':''}>v${esc(ver)} (latest)</option>
+      ${detailVersions.map(v=>`<option value="${esc(v)}"${detailViewingVersion===v?' selected':''}>v${esc(v)}</option>`).join('')}
+    </select>` : (esc(ver) || '—')}</span></div>
     <div class="detail-meta-row"><span class="detail-meta-label">Language</span><span class="detail-meta-value"><span class="lang-dot ${langClass(lang)}"></span> ${esc(lang)}</span></div>
     <div class="detail-meta-row"><span class="detail-meta-label">Domain</span><span class="detail-meta-value">${esc(w.domain || 'universal')}</span></div>
     <div class="detail-meta-row"><span class="detail-meta-label">Installs</span><span class="detail-meta-value">${installs}</span></div>
-    ${w.rating ? `<div class="detail-meta-row"><span class="detail-meta-label">Rating</span><span class="detail-meta-value">${stars(w.rating)} ${w.rating.toFixed(1)}</span></div>` : ''}
     <div class="detail-meta-row"><span class="detail-meta-label">Status</span><span class="detail-meta-value">${sync === 'local' ? 'Local only' : sync === 'published' ? 'Published' : sync === 'mismatch' ? 'Out of sync' : sync === 'cloud' ? 'Cloud only' : vis || 'Local only'}</span></div>
     ${owner ? `<div class="detail-meta-row"><span class="detail-meta-label">Owner</span><span class="detail-meta-value">@${esc(owner)}</span></div>` : ''}
     ${deps.length ? `<div class="detail-meta-row"><span class="detail-meta-label">Dependencies</span><span class="detail-meta-value">${deps.map(esc).join(', ')}</span></div>` : `<div class="detail-meta-row"><span class="detail-meta-label">Dependencies</span><span class="detail-meta-value">None</span></div>`}
     ${notes.general ? `<div style="margin-top:14px"><h3>Notes</h3><div style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:6px">${esc(notes.general)}</div></div>` : ''}
-    ${detailVersions.length ? `<div style="margin-top:14px">
-      <h3>Version History</h3>
-      <div style="margin-top:8px">
-        <div class="detail-meta-row" data-version-row="" style="cursor:pointer;${!detailViewingVersion ? 'font-weight:600;color:var(--blue)' : ''}" onclick="switchVersion('${esc(w.id||w.name)}','${esc(owner)}','')">
-          <span class="detail-meta-label">v${esc(ver)}</span><span class="detail-meta-value">${!detailViewingVersion ? 'current' : 'latest'}</span>
-        </div>
-        ${detailVersions.map(v => `<div class="detail-meta-row" data-version-row="${esc(v)}" style="cursor:pointer;${detailViewingVersion===v ? 'font-weight:600;color:var(--blue)' : ''}" onclick="switchVersion('${esc(w.id||w.name)}','${esc(owner)}','${esc(v)}')">
-          <span class="detail-meta-label">v${esc(v)}</span><span class="detail-meta-value">${detailViewingVersion===v ? 'viewing' : ''}</span>
-        </div>`).join('')}
-      </div>
-    </div>` : ''}
   </div>`;
 
   html += `</div>`; // detail-grid
@@ -1388,13 +1480,27 @@ async function loadDetailFiles(widgetId, owner, version) {
   }
 }
 
+async function loadCloudReviews(owner, widgetId) {
+  try {
+    const res = await fetch(`/api/cloud-reviews/${encodeURIComponent(owner)}/${encodeURIComponent(widgetId)}`);
+    const data = await res.json();
+    detailCloudReviews = data.reviews || [];
+  } catch {
+    detailCloudReviews = [];
+  }
+  render();
+}
+
 async function loadDetailVersions(widgetId) {
   try {
     const res = await fetch(`/api/versions/${encodeURIComponent(widgetId)}`);
     const data = await res.json();
     detailVersions = data.versions || [];
+    detailChangelog = {};
+    (data.changelog || []).forEach(e => { detailChangelog[e.version] = e; });
   } catch {
     detailVersions = [];
+    detailChangelog = {};
   }
   render();
 }
@@ -1417,22 +1523,75 @@ function updateFilesSection() {
   }
 }
 
-function updateVersionSidebar() {
-  if (!detailWidget) return;
-  const w = detailWidget;
-  const ver = w.version || w._localVersion || w._cloudVersion || '';
-  const owner = w.owner || '';
-  document.querySelectorAll('[data-version-row]').forEach(row => {
-    const v = row.dataset.versionRow;
-    const isActive = v === detailViewingVersion || (v === '' && !detailViewingVersion);
-    row.style.fontWeight = isActive ? '600' : '';
-    row.style.color = isActive ? 'var(--blue)' : '';
-    const val = row.querySelector('.detail-meta-value');
-    if (val) {
-      if (v === '') val.textContent = isActive ? 'current' : 'latest';
-      else val.textContent = isActive ? 'viewing' : '';
-    }
+let reviewScore = 0;
+function setReviewScore(n) {
+  reviewScore = n;
+  document.querySelectorAll('#review-stars span').forEach(s => {
+    s.classList.toggle('active', parseInt(s.dataset.score) <= n);
   });
+  const btn = document.getElementById('review-submit');
+  if (btn) btn.disabled = false;
+}
+
+async function submitReview(widgetId, owner) {
+  if (!reviewScore) return;
+  const comment = (document.getElementById('review-comment') || {}).value || '';
+  const btn = document.getElementById('review-submit');
+  if (btn) { btn.disabled = true; btn.textContent = 'Submitting...'; }
+  try {
+    const isCloud = !!owner;
+    const url = isCloud ? '/api/cloud-review' : '/api/review';
+    const payload = isCloud
+      ? { owner, widget_id: widgetId, score: reviewScore, comment }
+      : { widget_id: widgetId, score: reviewScore, comment };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.error) { if (btn) { btn.disabled = false; btn.textContent = 'Submit Review'; } alert(data.error); return; }
+    reviewScore = 0;
+    const w = detailWidget;
+    if (w) {
+      if (isCloud) {
+        detailCloudReviews.unshift({ rating: reviewScore || data.rating, comment, version: w.version, timestamp: new Date().toISOString(), author: data.author || whoamiData.owner || '' });
+        w._cloudRating = data.avg_rating || w._cloudRating;
+        w._cloudReviewCount = (w._cloudReviewCount || 0) + 1;
+      } else {
+        if (!w.reviews) w.reviews = [];
+        w.reviews.unshift({ rating: data.rating, comment, version: w.version, timestamp: new Date().toISOString(), author: data.author || '' });
+        w._localRating = data.avg_rating || w._localRating;
+        w._localReviewCount = (w._localReviewCount || 0) + 1;
+      }
+    }
+    render();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Submit Review'; }
+  }
+}
+
+async function deleteReview(widgetId, index) {
+  try {
+    const res = await fetch('/api/review', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ widget_id: widgetId, index }),
+    });
+    const data = await res.json();
+    if (data.error) return;
+    if (detailWidget) {
+      if (detailWidget.reviews) detailWidget.reviews.splice(index, 1);
+      detailWidget._localRating = data.avg_rating || 0;
+      detailWidget._localReviewCount = Math.max(0, (detailWidget._localReviewCount || 1) - 1);
+    }
+    render();
+  } catch {}
+}
+
+function updateVersionSidebar() {
+  const sel = document.getElementById('version-select');
+  if (sel) sel.value = detailViewingVersion;
 }
 
 function lineNums(content) {
@@ -1490,19 +1649,24 @@ async function loadMyWidgets() {
   // Merge local + cloud
   const map = {};
   (localRes.widgets || []).forEach(w => {
-    map[w.id] = { ...w, _sync: 'local', _localVersion: w.version };
+    map[w.id] = { ...w, _sync: 'local', _localVersion: w.version, _localRating: w.rating || 0, _localReviewCount: w.review_count || 0 };
   });
   (cloudRes.widgets || []).forEach(w => {
     const baseId = w.id || (w.namespaced_id || '').replace(/^@[^/]+\//, '');
     if (map[baseId]) {
       const lv = map[baseId]._localVersion;
       const cv = w.version;
-      map[baseId] = { ...map[baseId], ...w, id: baseId };
+      const local = map[baseId];
+      map[baseId] = { ...local, ...w, id: baseId, version: lv };
       map[baseId]._cloudVersion = cv;
       map[baseId]._localVersion = lv;
+      map[baseId]._localRating = local._localRating || 0;
+      map[baseId]._localReviewCount = local._localReviewCount || 0;
+      map[baseId]._cloudRating = w.rating || 0;
+      map[baseId]._cloudReviewCount = w.review_count || 0;
       map[baseId]._sync = lv === cv ? 'published' : 'mismatch';
     } else {
-      map[baseId] = { ...w, id: baseId, _sync: 'cloud', _cloudVersion: w.version };
+      map[baseId] = { ...w, id: baseId, _sync: 'cloud', _cloudVersion: w.version, _cloudRating: w.rating || 0, _cloudReviewCount: w.review_count || 0 };
     }
   });
 
@@ -1566,6 +1730,13 @@ def _make_handler(engine):
                 self._send_json(self._search_local(qs))
             elif path == "/api/users/search":
                 self._send_json(self._search_users(qs))
+            elif path.startswith("/api/cloud-reviews/"):
+                rest = path.removeprefix("/api/cloud-reviews/")
+                parts = rest.split("/", 1)
+                if len(parts) == 2:
+                    self._send_json(self._cloud_reviews(parts[0], parts[1]))
+                else:
+                    self._send_json({"error": "Use /api/cloud-reviews/{owner}/{widget_id}"})
             elif path.startswith("/api/versions/"):
                 widget_id = path.removeprefix("/api/versions/")
                 self._send_json(self._versions(widget_id))
@@ -1574,6 +1745,123 @@ def _make_handler(engine):
                 self._send_json(self._files(widget_id, qs.get("owner", ""), qs.get("version", "")))
             else:
                 self._send(404, "text/plain", b"Not found")
+
+        def do_POST(self):
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+
+            if path == "/api/review":
+                self._send_json(self._add_review(body))
+            elif path == "/api/cloud-review":
+                self._send_json(self._add_cloud_review(body))
+            else:
+                self._send(404, "text/plain", b"Not found")
+
+        def do_DELETE(self):
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+
+            if path == "/api/review":
+                self._send_json(self._delete_review(body))
+            else:
+                self._send(404, "text/plain", b"Not found")
+
+        def _delete_review(self, body):
+            widget_id = body.get("widget_id", "")
+            index = body.get("index", -1)
+            if not widget_id or index < 0:
+                return {"error": "widget_id and index are required"}
+            widget = next((w for w in engine.widgets if w["id"] == widget_id), None)
+            if not widget:
+                return {"error": f"Widget '{widget_id}' not found"}
+            review_path = os.path.join(widget["path"], "reviews.json")
+            if not os.path.exists(review_path):
+                return {"error": "No reviews file"}
+            try:
+                with open(review_path) as f:
+                    reviews_data = json.load(f)
+                reviews = reviews_data.get("reviews", [])
+                if index >= len(reviews):
+                    return {"error": "Invalid review index"}
+                reviews.pop(index)
+                reviews_data["reviews"] = reviews
+                with open(review_path, "w") as f:
+                    json.dump(reviews_data, f, indent=2)
+                avg = round(sum(r["rating"] for r in reviews) / len(reviews), 1) if reviews else 0
+                return {"status": "success", "avg_rating": avg}
+            except Exception as e:
+                return {"error": str(e)}
+
+        def _add_cloud_review(self, body):
+            owner = body.get("owner", "")
+            widget_id = body.get("widget_id", "")
+            score = body.get("score", 0)
+            comment = body.get("comment", "")
+            if not owner or not widget_id or not score:
+                return {"error": "owner, widget_id, and score are required"}
+            from .cloud import rate_widget
+            result = rate_widget(owner, widget_id, int(score), comment)
+            if "error" in result:
+                return result
+            result["author"] = ""
+            try:
+                from .auth import is_authenticated
+                if is_authenticated():
+                    from .cloud import whoami
+                    profile = whoami()
+                    result["author"] = profile.get("owner", "") or profile.get("username", "")
+            except Exception:
+                pass
+            return result
+
+        def _add_review(self, body):
+            import datetime as _dt
+            widget_id = body.get("widget_id", "")
+            score = body.get("score", 0)
+            comment = body.get("comment", "")
+            if not widget_id or not score:
+                return {"error": "widget_id and score are required"}
+            try:
+                score = float(score)
+                if not (1 <= score <= 5):
+                    return {"error": "Score must be between 1 and 5"}
+            except (ValueError, TypeError):
+                return {"error": "Invalid score"}
+            widget = next((w for w in engine.widgets if w["id"] == widget_id), None)
+            if not widget:
+                return {"error": f"Widget '{widget_id}' not found"}
+            author = ""
+            try:
+                from .auth import is_authenticated
+                if is_authenticated():
+                    from .cloud import whoami
+                    profile = whoami()
+                    author = profile.get("owner", "") or profile.get("username", "")
+            except Exception:
+                pass
+            entry = {"rating": score, "version": widget.get("version", "unknown"),
+                     "timestamp": _dt.datetime.now().isoformat()}
+            if author:
+                entry["author"] = author
+            if comment:
+                entry["comment"] = comment
+            review_path = os.path.join(widget["path"], "reviews.json")
+            reviews_data = {"reviews": []}
+            if os.path.exists(review_path):
+                try:
+                    with open(review_path) as f:
+                        reviews_data = json.load(f)
+                except Exception:
+                    pass
+            reviews_data["reviews"].append(entry)
+            with open(review_path, "w") as f:
+                json.dump(reviews_data, f, indent=2)
+            avg = sum(r["rating"] for r in reviews_data["reviews"]) / len(reviews_data["reviews"])
+            return {"status": "success", "rating": score, "avg_rating": round(avg, 1), "author": author}
 
         def _whoami(self):
             from .auth import is_authenticated
@@ -1587,7 +1875,7 @@ def _make_handler(engine):
 
         def _local(self):
             widgets = [
-                {k: v for k, v in w.items() if k not in ("path", "reviews", "implementation_hash")}
+                {k: v for k, v in w.items() if k not in ("path", "implementation_hash")}
                 for w in engine.widgets
             ]
             return {"widgets": widgets}
@@ -1638,6 +1926,13 @@ def _make_handler(engine):
             except Exception as e:
                 return {"users": [], "error": str(e)}
 
+        def _cloud_reviews(self, owner, widget_id):
+            from .cloud import get_reviews
+            try:
+                return get_reviews(owner, widget_id)
+            except Exception as e:
+                return {"reviews": [], "error": str(e)}
+
         def _inspect(self, owner, widget_id):
             from .cloud import _get
             try:
@@ -1646,22 +1941,30 @@ def _make_handler(engine):
                 return {"error": str(e)}
 
         def _versions(self, widget_id):
-            import os
+            import os, json as _json
             widget = None
             for w in engine.widgets:
                 if w.get("id") == widget_id or w.get("name") == widget_id:
                     widget = w
                     break
             if not widget or "path" not in widget:
-                return {"widget_id": widget_id, "versions": []}
+                return {"widget_id": widget_id, "versions": [], "changelog": []}
             history_dir = os.path.join(widget["path"], "history")
-            if not os.path.isdir(history_dir):
-                return {"widget_id": widget_id, "versions": []}
-            versions = sorted(
-                [d for d in os.listdir(history_dir) if os.path.isdir(os.path.join(history_dir, d))],
-                reverse=True,
-            )
-            return {"widget_id": widget_id, "versions": versions}
+            versions = []
+            if os.path.isdir(history_dir):
+                versions = sorted(
+                    [d for d in os.listdir(history_dir) if os.path.isdir(os.path.join(history_dir, d))],
+                    reverse=True,
+                )
+            changelog = []
+            changelog_path = os.path.join(widget["path"], "changelog.json")
+            if os.path.isfile(changelog_path):
+                try:
+                    with open(changelog_path) as f:
+                        changelog = _json.load(f)
+                except Exception:
+                    pass
+            return {"widget_id": widget_id, "versions": versions, "changelog": changelog}
 
         def _files(self, widget_id, owner="", version=""):
             import os

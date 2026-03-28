@@ -211,7 +211,7 @@ def push(widget_path: str, widget_id: str, visibility: str = "public") -> dict:
             if any(part in skip_dirs for part in rel_root.split(os.sep)):
                 continue
             for fname in files:
-                if fname == ".validation_stamp.json":
+                if fname in (".validation_stamp.json", "reviews.json", "changelog.json"):
                     continue
                 fpath = os.path.join(root, fname)
                 arcname = os.path.relpath(fpath, widget_path)
@@ -271,6 +271,90 @@ def download_widget(owner_handle: str, widget_id: str) -> dict:
 def list_widgets(top_k: int = 500) -> dict:
     """Return all cloud widgets, or {"error": ...}."""
     return _get(f"/v1/widgets?top_k={top_k}")
+
+
+def list_my_widgets() -> list[dict]:
+    """Return the authenticated user's cloud widgets, or empty list on failure."""
+    profile = whoami()
+    if "error" in profile:
+        return []
+    handle = profile.get("owner", "")
+    if not handle:
+        return []
+    all_w = list_widgets()
+    if "error" in all_w:
+        return []
+    return [w for w in all_w.get("widgets", []) if w.get("owner") == handle]
+
+
+def _delete(path: str) -> dict:
+    url = _registry_url() + path
+    req = urllib.request.Request(url, headers=_headers(), method="DELETE")
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = {}
+        try:
+            body = json.loads(e.read())
+        except Exception:
+            pass
+        return {"error": body.get("detail", str(e)), "status_code": e.code}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def delete_widget(widget_id: str) -> dict:
+    """Delete a widget from the cloud registry."""
+    return _delete(f"/v1/widgets/{urllib.parse.quote(widget_id, safe='')}")
+
+
+def get_reviews(owner_handle: str, widget_id: str) -> dict:
+    """Fetch reviews for a cloud widget.
+
+    Returns {"reviews": [...], "rating": avg, "review_count": n}
+    or {"error": ..., "reviews": []}.
+    """
+    result = _get(
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}/reviews"
+    )
+    if "error" in result:
+        return {"reviews": [], "error": result["error"]}
+    return result
+
+
+def rate_widget(owner_handle: str, widget_id: str, score: int, comment: str = "") -> dict:
+    """Rate a cloud widget."""
+    params = f"?score={score}"
+    if comment:
+        params += f"&comment={urllib.parse.quote(comment)}"
+    return _post(f"/v1/widgets/{urllib.parse.quote(owner_handle)}/{urllib.parse.quote(widget_id)}/rate{params}", {})
+
+
+def get_versions(owner_handle: str, widget_id: str) -> dict:
+    """List available versions for a cloud widget.
+
+    Returns {"versions": [...], "current_version": str}
+    or {"error": ..., "versions": []}.
+    """
+    result = _get(
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}/versions"
+    )
+    if "error" in result:
+        return {"versions": [], "error": result["error"]}
+    return result
+
+
+def rollback_widget(owner_handle: str, widget_id: str, version: str) -> dict:
+    """Roll back a cloud widget to a previous version."""
+    params = f"?version={urllib.parse.quote(version)}"
+    return _post(
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}/rollback{params}",
+        {},
+    )
 
 
 def login_with_credentials(id_token: str, refresh_token: str,
