@@ -211,7 +211,8 @@ class JavaScriptEngine(LanguageEngine):
         with tempfile.NamedTemporaryFile(suffix=".cjs", delete=False, dir=path) as f:
             bundle_path = f.name
         try:
-            esbuild = os.path.join(path, "node_modules", ".bin", "esbuild")
+            esbuild_name = "esbuild.cmd" if os.name == "nt" else "esbuild"
+            esbuild = os.path.join(path, "node_modules", ".bin", esbuild_name)
             build = self._run(
                 [esbuild, example_path,
                  "--bundle", "--platform=node", "--jsx=automatic",

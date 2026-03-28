@@ -128,10 +128,14 @@ class LanguageEngine:
 
     def _run(self, cmd: list, cwd: str, timeout: int = 60,
              env: dict = None) -> subprocess.CompletedProcess:
+        # On Windows, shell scripts like npm/npx need shell=True or the .cmd extension.
+        # Using shell=True is simpler and handles both cases.
+        use_shell = os.name == "nt"
         return subprocess.run(
             cmd, capture_output=True, text=True,
             timeout=timeout, cwd=cwd,
             env=env or os.environ.copy(),
+            shell=use_shell,
         )
 
     def _fail(self, error: str) -> dict:

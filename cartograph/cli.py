@@ -732,6 +732,13 @@ def cmd_doctor(args):
         except Exception as e:
             return False, str(e)
 
+    # --- Platform ---
+    import platform
+    plat_checks = []
+    plat_checks.append(("OS", True, f"{platform.system()} {platform.release()}", None))
+    plat_checks.append(("Arch", True, platform.machine(), None))
+    groups.append(("Platform", plat_checks))
+
     # --- Library (auto-setup if missing) ---
     from .engine import LIBRARY_PATH, _ensure_library
     lib_checks = []
