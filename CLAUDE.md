@@ -1,11 +1,12 @@
 
 ## Cartograph
 
-Cartograph is a widget library manager. Widgets are reusable, self-contained
-code modules with tests, examples, and metadata. When installed into a project
-they live under `cartograph/<widget_id>/`.
+Cartograph is a widget library manager. Widgets are reusable code modules
+with tests, examples, metadata, and declared dependencies. Third-party
+packages are fully supported - widgets just can't depend on other widgets.
+When installed into a project they live under `cartograph/<widget_id>/`.
 
-Before writing reusable, self-contained logic, search the library first.
+Before writing reusable logic, search the library first.
 
 ### Widget structure
 ```
