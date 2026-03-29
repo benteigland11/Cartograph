@@ -1,4 +1,4 @@
-"""Python language engine — uses pip + pytest + pytest-cov."""
+"""Python language engine - uses pip + pytest + pytest-cov."""
 
 import ast
 import glob
@@ -6,6 +6,38 @@ import os
 import sys
 
 from .base import LanguageEngine, log
+
+# Starter file contents for scaffold
+_SRC_INIT = "# Package marker - add explicit exports here once the public API is stable.\n"
+
+_SRC_TEMPLATE = '''\
+def {module}(value):
+    """{name}: process a value."""
+    return value
+'''
+
+_TEST_TEMPLATE = '''\
+def test_placeholder():
+    # TODO: replace with real tests
+    pass
+'''
+
+_EXAMPLE_TEMPLATE = '''\
+"""
+Example usage of {name}.
+
+This file must run and exit cleanly with no user input, no network calls,
+and no external services or API keys. Use fake/hardcoded data to demonstrate the API.
+The widget's own declared dependencies are fine - the validator installs them first.
+"""
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from src.{module} import {module}
+
+# [TODO] Replace with a realistic call using fake data
+result = {module}("hello")
+print(f"Result: {{result}}")
+'''
 
 _COVERAGE_THRESHOLD = 80
 
@@ -83,6 +115,16 @@ class PythonEngine(LanguageEngine):
             ):
                 lines.append(node.lineno)
         return lines
+
+    def scaffold(self, target_dir, module_name, display_name, **_):
+        with open(os.path.join(target_dir, "src", "__init__.py"), "w") as f:
+            f.write(_SRC_INIT)
+        with open(os.path.join(target_dir, "src", f"{module_name}.py"), "w") as f:
+            f.write(_SRC_TEMPLATE.format(module=module_name, name=display_name))
+        with open(os.path.join(target_dir, "tests", f"test_{module_name}.py"), "w") as f:
+            f.write(_TEST_TEMPLATE)
+        with open(os.path.join(target_dir, "examples", "example_usage.py"), "w") as f:
+            f.write(_EXAMPLE_TEMPLATE.format(module=module_name, name=display_name))
 
     def src_import_pattern(self) -> str | None:
         return r'from src\.|import src\.'

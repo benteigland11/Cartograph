@@ -1,32 +1,38 @@
 """
 Base class for language engines.
 
-Each engine handles:
-  - validate_widget(path, dependencies): language-specific static checks
-    before tests run. Returns {"passed": True} or {"passed": False, "error": str}.
-  - install_deps(path, dependencies): install packages needed to run tests
-  - run_tests(path): execute the test suite
-  - find_test_files(path): return list of test files in tests/
-  - example_filename(path): return expected example filename in examples/
-  - run_example(path): execute the example and return pass/fail
+To add a new language engine (simple case - no custom validation logic):
+
+  1. Create languages/<lang>.py:
+
+     class LuaEngine(LanguageEngine):
+         name = "lua"
+         file_ext = "lua"
+         toolchain = {"lua": "Install Lua - lua.org",
+                      "luarocks": "Install LuaRocks - luarocks.org"}
+         test_command = ["lua", "tests/run_tests.lua"]
+         example_command = ["lua"]
+         dep_install_command = ["luarocks", "install"]
+         scanner_runner = ["lua"]
+         import_pattern = r'require.*src%.'
+
+  2. Create a native scanner at languages/scanners/lua_scanner.lua
+     that outputs a JSON array of {kind, file, line, detail} objects.
+     Define scanner_messages on the class to map kind -> human-readable header.
+
+  3. Add a scaffold() method on the engine class to write starter files
+     for src/, tests/, and examples/. This keeps everything about the
+     language in one place.
+
+  That's it. The engine is auto-discovered - no registry edits needed.
+  Doctor picks it up automatically via check_available().
+
+  For custom behavior (compile checks, React detection, etc.), override
+  any method. See nim.py and javascript.py for examples.
 
 Return shape for run_tests / validate_widget / run_example:
   {"passed": True}
   {"passed": False, "error": "<human-readable explanation>"}
-
-To add a new language engine:
-  1. Create languages/<lang>.py with a class that subclasses LanguageEngine.
-     - Implement validate_widget(), install_deps(), run_tests()
-     - Override find_test_files() and example_filename() if the defaults
-       (test_*.py / example_usage.py) don't fit the language
-     - Set supported = True (default is True on LanguageEngine; only set
-       False if the engine exists but isn't ready yet — see TypeScriptEngine)
-  2. Register in languages/registry.py:
-     - Import the class and add it to _ENGINES under its canonical name
-     - Add any short aliases to _ALIASES if needed
-  3. Add a scaffold template in scaffolding/templates.py:
-     - Write a function that creates src/, tests/, and examples/ stubs
-     - Register it in the TEMPLATES dict at the bottom of that file
 """
 
 import glob as _glob
@@ -43,88 +49,206 @@ _DEP_SPLIT_RE = re.compile(r'[><=!~;\[]')
 _PIN_RE = re.compile(r'[><=!~]|\d')
 
 
-def _dep_bare_name(dep: str) -> str:
-    """Return the bare package name from a dep string like 'fastapi>=0.128.0'."""
+def _dep_bare_name(dep) -> str:
+    """Return the bare package name from a dep string like 'fastapi>=0.128.0' or a dict."""
+    if isinstance(dep, dict):
+        return dep.get("name", "")
     return _DEP_SPLIT_RE.split(dep)[0].strip()
 
 
 class LanguageEngine:
     name = "base"
-    supported = True  # False on _UnsupportedEngine — checked before any validation runs
+    supported = True       # set False to hide a WIP engine from users
+    aliases: list = []     # short names, e.g. ["js"] for javascript
+
+    # -- Declarative attributes (set these instead of overriding methods) ------
+    # If set, the base class provides default implementations for
+    # check_available, validate_widget, install_deps, run_tests, run_example,
+    # find_test_files, and example_filename automatically.
+
+    file_ext: str = ""               # e.g. "lua", "nim", "js" - the source file extension
+    toolchain: dict = {}             # {"binary": "install hint"} - checked by check_available()
+    test_command: list = []          # e.g. ["lua", "tests/run_tests.lua"] - run from widget root
+    example_command: list = []       # e.g. ["lua"] - example file path is appended
+    dep_install_command: list = []   # e.g. ["luarocks", "install"] - dep name is appended
+    scanner_runner: list = []        # e.g. ["lua"] - runs scanners/<name>_scanner.<ext>
+    scanner_messages: dict = {}      # {finding_kind: "human-readable header"}
+    import_pattern: str = ""         # regex for "does example import from src?"
+    manifest_patterns: list = []     # e.g. ["*.rockspec"] - added to watched_patterns
+
+    # -- Methods (override for custom behavior) --------------------------------
 
     def check_available(self) -> tuple[bool, str]:
-        """Check that all system dependencies for this engine are installed.
-        Returns (ok, message). Called before create/validate/checkin.
-        """
+        """Check that all system dependencies for this engine are installed."""
+        if not self.toolchain:
+            return True, ""
+        import shutil
+        missing = [
+            name for name in self.toolchain
+            if not shutil.which(name) and not shutil.which(name + ".cmd")
+        ]
+        if missing:
+            hints = [self.toolchain[m] for m in missing]
+            return False, (
+                f"{self.name.capitalize()} engine requires {' and '.join(missing)} - "
+                + "; ".join(hints)
+            )
         return True, ""
 
     def validate_widget(self, path: str, dependencies: list) -> dict:
-        """
-        Language-specific static checks on widget structure and source.
-        Called before install_deps / run_tests.
-        Override in subclasses to add language-specific rules.
-        """
-        return {"passed": True}
+        """Source scanning + dep pinning check. Override to add custom steps."""
+        errors = []
+
+        # Run native scanner if configured
+        if self.file_ext and self.scanner_runner:
+            src_dir = os.path.join(path, "src")
+            src_files = _glob.glob(
+                os.path.join(src_dir, "**", f"*.{self.file_ext}"), recursive=True
+            )
+            scanner = os.path.join(
+                os.path.dirname(__file__), "scanners",
+                f"{self.name}_scanner.{self.file_ext}"
+            )
+            errors.extend(self._run_native_scanner(
+                scanner_path=scanner,
+                runner=self.scanner_runner,
+                src_files=src_files,
+                cwd=path,
+                finding_messages=self.scanner_messages,
+            ))
+
+        errors.extend(self._check_dep_pinning(dependencies))
+
+        if errors:
+            return self._fail("\n".join(errors))
+        return self._ok()
 
     def install_deps(self, path: str, dependencies: list) -> None:
-        """Install dependencies required to run tests. Best-effort — never raises."""
-        pass
+        """Install dependencies required to run tests. Best-effort."""
+        if not self.dep_install_command or not dependencies:
+            return
+        for dep in dependencies:
+            bare = _dep_bare_name(dep)
+            if not bare:
+                continue
+            log.debug("Installing %s package: %s", self.name, bare)
+            self._run(self.dep_install_command + [bare], cwd=path, timeout=120)
 
     def run_tests(self, path: str) -> dict:
-        """
-        Execute the test suite for a widget at `path`.
-        Returns {"passed": True} or {"passed": False, "error": str}.
-        """
-        raise NotImplementedError
+        """Execute the test suite. Override for custom test runners."""
+        if not self.test_command:
+            raise NotImplementedError(
+                f"{self.name} engine must set test_command or override run_tests()"
+            )
+        res = self._run(self.test_command, cwd=path, timeout=120)
+        if res.returncode != 0:
+            return self._fail(res.stderr or res.stdout)
+        return self._ok()
 
     def find_test_files(self, path: str) -> list[str]:
-        """Return list of test files in tests/. Override per language."""
-        return _glob.glob(os.path.join(path, "tests", "test_*.py"))
+        """Return list of test files in tests/."""
+        ext = self.file_ext or "py"
+        return _glob.glob(os.path.join(path, "tests", f"test_*.{ext}"))
 
     def example_filename(self, path: str = "") -> str:
-        """Return expected example filename in examples/. Override per language."""
-        return "example_usage.py"
+        """Return expected example filename in examples/."""
+        ext = self.file_ext or "py"
+        return f"example_usage.{ext}"
 
     def cleanup(self, path: str) -> None:
-        """Remove any temp artifacts created during validation. Best-effort — never raises."""
+        """Remove any temp artifacts created during validation. Best-effort."""
         pass
 
     def run_example(self, path: str) -> dict:
         """Execute the example file. Called after install_deps."""
         ep = os.path.join(path, "examples", self.example_filename(path))
-        res = subprocess.run(
-            [sys.executable, ep],
-            cwd=path, capture_output=True, text=True, timeout=60,
-        )
+        if self.example_command:
+            res = self._run(self.example_command + [ep], cwd=path, timeout=60)
+        else:
+            res = subprocess.run(
+                [sys.executable, ep],
+                cwd=path, capture_output=True, text=True, timeout=60,
+            )
         if res.returncode != 0:
             return self._fail(res.stderr or res.stdout)
         return self._ok()
+
+    def scaffold(self, target_dir: str, module_name: str, display_name: str, **kwargs) -> None:
+        """Write starter src/, tests/, and examples/ files for a new widget.
+        Override this to co-locate the scaffold template with the engine.
+        Return None if this engine has no scaffold (falls back to templates.py).
+        """
+        return None
 
     def required_files(self, path: str) -> list[tuple[str, str]]:
         """Return [(relative_path, error_hint)] for files that must exist before tests run."""
         return []
 
     def src_import_pattern(self) -> str | None:
-        """Regex pattern used to verify an example imports from src/.
-        Return None to skip the check for this language."""
-        return None
+        """Regex pattern used to verify an example imports from src/."""
+        return self.import_pattern or None
 
     def watched_patterns(self, path: str) -> list[str]:
-        """
-        Glob patterns for files that feed the validation stamp fingerprint.
-        A change to any matched file invalidates the stamp and forces re-validation.
-
-        Override in subclasses to add language-specific manifest files
-        (e.g. Cargo.toml for Rust, go.mod for Go, package.json for JS).
-        """
-        return [
+        """Glob patterns for files that feed the validation stamp fingerprint."""
+        patterns = [
             os.path.join(path, "src", "**", "*"),
             os.path.join(path, "tests", "**", "*"),
             os.path.join(path, "examples", "**", "*"),
             os.path.join(path, "widget.json"),
         ]
+        for pat in self.manifest_patterns:
+            patterns.extend(_glob.glob(os.path.join(path, pat)))
+        return patterns
 
     # ------------------------------------------------------------------ helpers
+
+    def _run_native_scanner(self, scanner_path: str, runner: list,
+                            src_files: list, cwd: str,
+                            finding_messages: dict = None) -> list[str]:
+        """
+        Run a native language scanner and return a list of formatted error strings.
+
+        scanner_path: absolute path to the scanner source file
+        runner: command prefix to execute it, e.g. ["node"] or ["nim", "r", "--hints:off"]
+        src_files: list of source files to scan
+        finding_messages: dict mapping finding kind -> human-readable header
+
+        The scanner must output a JSON array of objects with keys:
+          kind, file, line, detail
+        """
+        if not src_files or not os.path.exists(scanner_path):
+            return []
+
+        res = self._run(
+            runner + [scanner_path] + src_files,
+            cwd=cwd, timeout=60,
+        )
+
+        findings = []
+        if res.returncode == 0 and res.stdout.strip():
+            import json
+            try:
+                # Scanner may emit other output before the JSON line
+                findings = json.loads(res.stdout.strip().splitlines()[-1])
+            except (json.JSONDecodeError, IndexError):
+                pass
+
+        if not findings:
+            return []
+
+        finding_messages = finding_messages or {}
+        grouped: dict[str, list[str]] = {}
+        for f in findings:
+            kind = f.get("kind", "unknown")
+            rel = os.path.relpath(f.get("file", ""), cwd)
+            loc = f"  {rel}:{f.get('line', 0)}: {f.get('detail', '')}"
+            grouped.setdefault(kind, []).append(loc)
+
+        errors = []
+        for kind, violations in grouped.items():
+            header = finding_messages.get(kind, f"{kind} found in src/:")
+            errors.append(header + "\n" + "\n".join(violations))
+        return errors
 
     def _run(self, cmd: list, cwd: str, timeout: int = 60,
              env: dict = None) -> subprocess.CompletedProcess:

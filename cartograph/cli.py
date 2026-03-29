@@ -764,72 +764,16 @@ def cmd_doctor(args):
         lib_checks.append(("Library", True, LIBRARY_PATH, None))
     groups.append(("Library", lib_checks))
 
-    # --- Python ---
-    import sys
-    py_checks = []
-    py_checks.append(("Python", True, sys.executable, None))
-
-    ok, out = run([sys.executable, "-m", "pytest", "--version"])
-    py_checks.append(("pytest", ok,
-                       out.splitlines()[0] if ok else "not found",
-                       "pip install pytest" if not ok else None))
-
-    ok, out = run([sys.executable, "-m", "coverage", "--version"])
-    py_checks.append(("coverage", ok,
-                       out.splitlines()[0] if ok else "not found",
-                       "pip install coverage" if not ok else None))
-    groups.append(("Python", py_checks))
-
-    # --- JavaScript ---
-    js_checks = []
-    node = shutil.which("node")
-    if node:
-        ok, out = run(["node", "--version"])
-        version_str = out.strip()
-        try:
-            major = int(version_str.lstrip("v").split(".")[0])
-            version_ok = major >= 18
-        except ValueError:
-            version_ok = False
-        js_checks.append(("Node.js", version_ok,
-                           version_str if version_ok else f"{version_str} (need ≥18)",
-                           "Install Node.js 18+ — nodejs.org" if not version_ok else None))
-    else:
-        js_checks.append(("Node.js", False, "not found", "Install Node.js 18+ — nodejs.org"))
-
-    npx = shutil.which("npx") or shutil.which("npx.cmd")
-    js_checks.append(("npx", npx is not None,
-                       "found" if npx else "not found",
-                       "Reinstall Node.js — npx ships with it" if not npx else None))
-
-    groups.append(("JavaScript", js_checks))
-
-    # --- Nim ---
-    nim_checks = []
-    nim = shutil.which("nim")
-    if nim:
-        ok, out = run(["nim", "--version"])
-        version_line = out.splitlines()[0] if out else ""
-        try:
-            version_str = version_line.split("Version")[1].strip().split()[0]
-            major, minor = int(version_str.split(".")[0]), int(version_str.split(".")[1])
-            version_ok = (major, minor) >= (2, 0)
-        except Exception:
-            version_str, version_ok = version_line, False
-        nim_checks.append(("nim", version_ok,
-                           version_str if version_ok else f"{version_str} (need ≥2.0)",
-                           "Install Nim 2.0+ — nim-lang.org" if not version_ok else None))
-    else:
-        nim_checks.append(("nim", False, "not found", "Install Nim 2.0+ — nim-lang.org"))
-
-    nimble = shutil.which("nimble")
-    if nimble:
-        ok, out = run(["nimble", "--version"])
-        version_str = out.splitlines()[0].strip() if out else "found"
-        nim_checks.append(("nimble", True, version_str, None))
-    else:
-        nim_checks.append(("nimble", False, "not found", "Reinstall Nim — nimble ships with it"))
-    groups.append(("Nim", nim_checks))
+    # --- Language engines (auto-discovered) ---
+    from .languages.registry import _ENGINES
+    for lang_name, engine in sorted(_ENGINES.items()):
+        available, message = engine.check_available()
+        lang_checks = []
+        if available:
+            lang_checks.append((lang_name, True, "ready", None))
+        else:
+            lang_checks.append((lang_name, False, "not ready", message))
+        groups.append((lang_name.capitalize(), lang_checks))
 
     # --- Render ---
     all_checks = [c for _, checks in groups for c in checks]

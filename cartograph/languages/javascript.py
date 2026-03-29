@@ -1,4 +1,4 @@
-"""JavaScript / TypeScript language engine — uses npm + vitest.
+"""JavaScript / TypeScript language engine - uses npm + vitest.
 
 React detection: if 'react' appears in tech_stack.dependencies, the engine
 automatically enables the JSX transform (@vitejs/plugin-react) and jsdom
@@ -16,6 +16,98 @@ import tempfile
 import uuid
 
 from .base import LanguageEngine, _dep_bare_name, log
+
+# -- Scaffold templates --------------------------------------------------------
+
+_JS_SRC = '''\
+/**
+ * {name}
+ */
+export function {component}({{ children }}) {{
+  return (
+    <div className="{css_class}">
+      {{children}}
+    </div>
+  )
+}}
+'''
+
+_JS_TEST = '''\
+import {{ render, screen }} from '@testing-library/react'
+import {{ {component} }} from '../src/{component}.jsx'
+
+test('renders children', () => {{
+  render(<{component}>Hello</{component}>)
+  expect(screen.getByText('Hello')).toBeTruthy()
+}})
+'''
+
+_JS_EXAMPLE = '''\
+/**
+ * Example usage of {name}.
+ *
+ * Renders via react-dom/server - no browser needed.
+ * Use fake/hardcoded props to demonstrate the component API.
+ */
+import {{ renderToString }} from 'react-dom/server'
+import {{ {component} }} from '../src/{component}.jsx'
+
+// [TODO] Replace with a realistic call using fake props
+const html = renderToString(
+  <{component}>Example content</{component}>
+)
+console.log(html)
+'''
+
+_JS_USAGE_HINT = '''\
+/**
+ * Usage hint for {name} - real integration code, not pipeline-validated.
+ *
+ * Show how this component fits into a real app: routing, providers, layout, etc.
+ * This file is a courtesy from the author and is not executed by Cartograph.
+ * Fill it in or delete it - it has no effect on validation or checkin.
+ */
+
+// [TODO] Show a real-world integration - e.g. inside a router, a page, a provider tree
+// import {{ {component} }} from './cartograph/{component}/src/{component}.jsx'
+//
+// export function MyPage() {{
+//   return <{component}>Hello</{component}>
+// }}
+'''
+
+_TS_SRC = '''\
+/**
+ * {name}
+ */
+export function {module}(value: string): string {{
+  return value
+}}
+'''
+
+_TS_TEST = '''\
+import {{ {module} }} from '../src/{module}'
+
+test('placeholder', () => {{
+  // TODO: replace with real tests
+  expect({module}('hello')).toBe('hello')
+}})
+'''
+
+_TS_EXAMPLE = '''\
+/**
+ * Example usage of {name}.
+ *
+ * This file must run and exit cleanly with no user input, no network calls,
+ * and no external services or API keys. Use fake/hardcoded data to demonstrate the API.
+ * The widget's own declared dependencies are fine - the validator installs them first.
+ */
+import {{ {module} }} from '../src/{module}'
+
+// [TODO] Replace with a realistic call using fake data
+const result = {module}('hello')
+console.log(`Result: ${{result}}`)
+'''
 
 _REACT_DEV_DEPS = {
     "@vitejs/plugin-react": "^4.0.0",
@@ -42,18 +134,45 @@ export default defineConfig({
 
 class JavaScriptEngine(LanguageEngine):
     name = "javascript"
+    aliases = ["js"]
+    file_ext = "js"
+    toolchain = {
+        "node": "Install Node.js 18+ - nodejs.org",
+        "npx": "Reinstall Node.js - npx ships with it",
+    }
+    scanner_runner = ["node"]
+    scanner_messages = {
+        "console_log": "console.log() found in src/ - remove debug output before checkin:",
+        "process_exit": "process.exit() found in src/ - widgets must not exit the process:",
+        "eval": "eval() found in src/ - dynamic code execution is a security risk:",
+        "risky_import": "Risky imports found in src/ - flagged for review:",
+    }
+    import_pattern = r"from\s+['\"]\.\.?/src/"
+    manifest_patterns = ["package.json"]
 
-    # ------------------------------------------------------------------ availability
+    def scaffold(self, target_dir, module_name, display_name, **kwargs):
+        component = "".join(w.capitalize() for w in module_name.split("_"))
+        css_class = module_name.replace("_", "-")
 
-    def check_available(self) -> tuple[bool, str]:
-        missing = [tool for tool in ("node", "npx")
-                   if not shutil.which(tool) and not shutil.which(tool + ".cmd")]
-        if missing:
-            return False, (
-                f"JavaScript engine requires {' and '.join(missing)} — "
-                f"run 'cartograph doctor' for setup instructions"
-            )
-        return True, ""
+        # Pre-populate React deps in widget.json
+        manifest_path = os.path.join(target_dir, "widget.json")
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        manifest["tech_stack"]["dependencies"] = [
+            "react>=18.0.0",
+            "react-dom>=18.0.0",
+        ]
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+
+        with open(os.path.join(target_dir, "src", f"{component}.jsx"), "w") as f:
+            f.write(_JS_SRC.format(name=display_name, component=component, css_class=css_class))
+        with open(os.path.join(target_dir, "tests", f"test_{component}.jsx"), "w") as f:
+            f.write(_JS_TEST.format(component=component))
+        with open(os.path.join(target_dir, "examples", "example_usage.jsx"), "w") as f:
+            f.write(_JS_EXAMPLE.format(name=display_name, component=component))
+        with open(os.path.join(target_dir, "examples", "usage_hint.jsx"), "w") as f:
+            f.write(_JS_USAGE_HINT.format(name=display_name, component=component))
 
     # ------------------------------------------------------------------ helpers
 
@@ -85,34 +204,13 @@ class JavaScriptEngine(LanguageEngine):
                 src_files.extend(_glob.glob(os.path.join(src_dir, "**", ext), recursive=True))
 
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "js_scanner.js")
-        if src_files and os.path.exists(scanner):
-            res = self._run(
-                ["node", scanner] + src_files,
-                cwd=path, timeout=60,
-            )
-            findings = []
-            if res.returncode == 0 and res.stdout.strip():
-                try:
-                    findings = json.loads(res.stdout.strip())
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-            _FINDING_MESSAGES = {
-                "console_log": "console.log() found in src/ - remove debug output before checkin:",
-                "process_exit": "process.exit() found in src/ - widgets must not exit the process:",
-                "eval": "eval() found in src/ - dynamic code execution is a security risk:",
-                "risky_import": "Risky imports found in src/ - flagged for review:",
-            }
-            grouped = {}
-            for f in findings:
-                kind = f.get("kind", "unknown")
-                rel = os.path.relpath(f.get("file", ""), path)
-                loc = f"  {rel}:{f.get('line', 0)}: {f.get('detail', '')}"
-                grouped.setdefault(kind, []).append(loc)
-
-            for kind, violations in grouped.items():
-                header = _FINDING_MESSAGES.get(kind, f"{kind} found in src/:")
-                errors.append(header + "\n" + "\n".join(violations))
+        errors.extend(self._run_native_scanner(
+            scanner_path=scanner,
+            runner=self.scanner_runner,
+            src_files=src_files,
+            cwd=path,
+            finding_messages=self.scanner_messages,
+        ))
 
         errors.extend(self._check_dep_pinning(dependencies))
 
@@ -121,9 +219,6 @@ class JavaScriptEngine(LanguageEngine):
         return self._ok()
 
     # ------------------------------------------------------------------ interface
-
-    def src_import_pattern(self) -> str | None:
-        return r"from\s+['\"]\.\.?/src/"
 
     def find_test_files(self, path: str) -> list[str]:
         files = []
@@ -135,11 +230,6 @@ class JavaScriptEngine(LanguageEngine):
         if path and self._has_react(self._read_deps(path)):
             return "example_usage.jsx"
         return "example_usage.js"
-
-    def watched_patterns(self, path: str) -> list[str]:
-        patterns = super().watched_patterns(path)
-        patterns.append(os.path.join(path, "package.json"))
-        return patterns
 
     # ------------------------------------------------------------------ install
 
@@ -220,7 +310,6 @@ class JavaScriptEngine(LanguageEngine):
             return self._ok()
 
         # React JSX: bundle with esbuild (installed as devDep), run with node
-        # .cjs forces CommonJS interpretation even when package.json has "type": "module"
         with tempfile.NamedTemporaryFile(suffix=".cjs", delete=False, dir=path) as f:
             bundle_path = f.name
         try:
@@ -246,7 +335,6 @@ class JavaScriptEngine(LanguageEngine):
     # ------------------------------------------------------------------ cleanup
 
     def cleanup(self, path: str) -> None:
-        import shutil
         nm = os.path.join(path, "node_modules")
         if os.path.exists(nm):
             shutil.rmtree(nm, ignore_errors=True)
@@ -254,6 +342,16 @@ class JavaScriptEngine(LanguageEngine):
 
 class TypeScriptEngine(JavaScriptEngine):
     name = "typescript"
+    aliases = ["ts"]
+    file_ext = "ts"
+
+    def scaffold(self, target_dir, module_name, display_name, **_):
+        with open(os.path.join(target_dir, "src", f"{module_name}.ts"), "w") as f:
+            f.write(_TS_SRC.format(name=display_name, module=module_name))
+        with open(os.path.join(target_dir, "tests", f"test_{module_name}.ts"), "w") as f:
+            f.write(_TS_TEST.format(module=module_name))
+        with open(os.path.join(target_dir, "examples", "example_usage.ts"), "w") as f:
+            f.write(_TS_EXAMPLE.format(name=display_name, module=module_name))
 
     def example_filename(self, path: str = "") -> str:
         if path and self._has_react(self._read_deps(path)):

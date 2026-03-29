@@ -1,8 +1,8 @@
-"""Nim language engine — uses nim + nimble test.
+"""Nim language engine - uses nim + nimble test.
 
 Source scanning is handled by scanners/nim_scanner.nim (native Nim) for
-string/comment-aware detection. The Python side orchestrates validation
-steps and parses the scanner's JSON output.
+string/comment-aware detection. Custom validation adds nim check and
+compile check steps on top of the base scanner pipeline.
 """
 
 import glob as _glob
@@ -13,18 +13,93 @@ import tempfile
 
 from .base import LanguageEngine, _dep_bare_name, log
 
+# Starter file contents for scaffold
+_NIMBLE_TEMPLATE = '''\
+# Package
+version = "0.1.0"
+author = "Widget Author"
+description = "{name}"
+license = "MIT"
+srcDir = "src"
+
+# Dependencies
+requires "nim >= 2.0.0"
+
+# Tasks
+task test, "run tests":
+  for f in listFiles("tests"):
+    if f.endsWith(".nim"):
+      exec "nimble c -r --path:src " & f
+'''
+
+_SRC_TEMPLATE = '''\
+## {name}
+
+func {module}*(value: string): string =
+  ## Process a value.
+  value
+'''
+
+_TEST_TEMPLATE = '''\
+import std/unittest
+import {src_module}
+
+suite "{name}":
+  test "placeholder":
+    # TODO: replace with real tests
+    check true
+'''
+
+_EXAMPLE_TEMPLATE = '''\
+## Example usage of {name}.
+##
+## This file must compile and run cleanly with no user input,
+## no network calls, and no external services. Use fake/hardcoded
+## data to demonstrate the API.
+
+import {src_module}
+
+# [TODO] Replace with a realistic call using fake data
+let result = {module}("hello")
+discard result  # replace with meaningful output or assertions
+'''
+
 
 class NimEngine(LanguageEngine):
     name = "nim"
+    file_ext = "nim"
+    toolchain = {
+        "nim": "Install Nim 2.0+ - nim-lang.org",
+        "nimble": "Reinstall Nim - nimble ships with it",
+    }
+    scanner_runner = ["nim", "r", "--hints:off", "--warnings:off"]
+    scanner_messages = {
+        "echo": "echo found in src/ - remove debug output before checkin:",
+        "quit": "quit() found in src/ - widgets must not exit the process:",
+        "ffi": "{.importc.} / {.compile.} found in src/ - C FFI makes widgets platform-dependent:",
+        "global": "{.global.} found in src/ - widgets must not use global mutable state:",
+        "main_module": "when isMainModule found in src/ - widgets are libraries, not executables:",
+        "os_specific": "OS-specific when defined() found in src/ - widgets must validate on all platforms:",
+        "risky_import": "Risky stdlib imports found in src/ - flagged for review:",
+    }
+    import_pattern = r'^import\s+\w+'
+    manifest_patterns = ["*.nimble"]
 
-    def check_available(self) -> tuple[bool, str]:
-        missing = [t for t in ("nim", "nimble") if not shutil.which(t)]
-        if missing:
-            return False, (
-                f"Nim engine requires {' and '.join(missing)} — "
-                f"run 'cartograph doctor' for setup instructions"
-            )
-        return True, ""
+    def scaffold(self, target_dir, module_name, display_name, **_):
+        # Nim stdlib modules are resolved before --path:src, so suffix with _lib
+        # to guarantee no collision with any stdlib module.
+        src_module = f"{module_name}_lib"
+
+        with open(os.path.join(target_dir, f"{module_name}.nimble"), "w") as f:
+            f.write(_NIMBLE_TEMPLATE.format(name=display_name))
+        with open(os.path.join(target_dir, "src", f"{src_module}.nim"), "w") as f:
+            f.write(_SRC_TEMPLATE.format(name=display_name, module=module_name))
+        with open(os.path.join(target_dir, "tests", f"test_{module_name}.nim"), "w") as f:
+            f.write(_TEST_TEMPLATE.format(name=display_name, src_module=src_module))
+        with open(os.path.join(target_dir, "examples", "example_usage.nim"), "w") as f:
+            f.write(_EXAMPLE_TEMPLATE.format(name=display_name, module=module_name, src_module=src_module))
+
+    # -- Custom validation (nim check + compile check on top of base scanner) --
 
     def validate_widget(self, path: str, dependencies: list) -> dict:
         errors = []
@@ -33,11 +108,9 @@ class NimEngine(LanguageEngine):
         src_dir = os.path.join(path, "src")
         src_files = _glob.glob(os.path.join(src_dir, "**", "*.nim"), recursive=True)
         if not src_files:
-            errors.append("src/ contains no .nim files — add at least one source file")
+            errors.append("src/ contains no .nim files - add at least one source file")
 
-        # 2. Semantic check — nim check catches type errors, undefined symbols, bad syntax.
-        # Runs before install_deps, so "cannot find module" errors for external packages
-        # are filtered out — those will surface as compile errors in nimble test instead.
+        # 2. Semantic check - nim check catches type errors, undefined symbols, bad syntax
         for fpath in src_files:
             rel = os.path.relpath(fpath, path)
             try:
@@ -49,8 +122,6 @@ class NimEngine(LanguageEngine):
                 if res.returncode != 0:
                     output = (res.stderr or res.stdout).strip()
                     lines = output.splitlines()
-                    # If any line is a missing-import error (external dep not yet installed),
-                    # all subsequent errors are cascades — skip this file entirely.
                     missing_import = any(
                         "cannot find module" in l.lower() or "cannot open file" in l.lower()
                         for l in lines
@@ -61,10 +132,9 @@ class NimEngine(LanguageEngine):
                     if real_errors:
                         errors.append(f"nim check failed on {rel}:\n" + "\n".join(real_errors))
             except FileNotFoundError:
-                pass  # check_available() will have already flagged this
+                pass
 
-        # 3. Compile check — verify src compiles as a library (catches linker/codegen issues
-        # that nim check misses). Uses --noMain since widgets are libraries, not executables.
+        # 3. Compile check - catches linker/codegen issues nim check misses
         for fpath in src_files:
             rel = os.path.relpath(fpath, path)
             try:
@@ -89,43 +159,17 @@ class NimEngine(LanguageEngine):
             except FileNotFoundError:
                 pass
 
-        # 4. Native source scanner — runs nim_scanner.nim for string/comment-aware checks
+        # 4. Native source scanner (uses base class helper)
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")
-        if src_files and os.path.exists(scanner):
-            res = self._run(
-                ["nim", "r", "--hints:off", "--warnings:off", scanner] + src_files,
-                cwd=path, timeout=60,
-            )
-            findings = []
-            if res.returncode == 0 and res.stdout.strip():
-                import json
-                try:
-                    findings = json.loads(res.stdout.strip().splitlines()[-1])
-                except (json.JSONDecodeError, IndexError):
-                    pass
+        errors.extend(self._run_native_scanner(
+            scanner_path=scanner,
+            runner=self.scanner_runner,
+            src_files=src_files,
+            cwd=path,
+            finding_messages=self.scanner_messages,
+        ))
 
-            # Group findings by kind for readable error messages
-            _FINDING_MESSAGES = {
-                "echo": "echo found in src/ - remove debug output before checkin:",
-                "quit": "quit() found in src/ - widgets must not exit the process:",
-                "ffi": "{.importc.} / {.compile.} found in src/ - C FFI makes widgets platform-dependent:",
-                "global": "{.global.} found in src/ - widgets must not use global mutable state:",
-                "main_module": "when isMainModule found in src/ - widgets are libraries, not executables:",
-                "os_specific": "OS-specific when defined() found in src/ - widgets must validate on all platforms:",
-                "risky_import": "Risky stdlib imports found in src/ - flagged for review:",
-            }
-            grouped: dict[str, list[str]] = {}
-            for f in findings:
-                kind = f.get("kind", "unknown")
-                rel = os.path.relpath(f.get("file", ""), path)
-                loc = f"  {rel}:{f.get('line', 0)}: {f.get('detail', '')}"
-                grouped.setdefault(kind, []).append(loc)
-
-            for kind, violations in grouped.items():
-                header = _FINDING_MESSAGES.get(kind, f"{kind} found in src/:")
-                errors.append(header + "\n" + "\n".join(violations))
-
-        # 4. Dependencies must have a version floor
+        # 5. Dependencies must have a version floor
         errors.extend(self._check_dep_pinning(dependencies))
 
         if errors:
@@ -135,20 +179,16 @@ class NimEngine(LanguageEngine):
     def required_files(self, path: str) -> list[tuple[str, str]]:
         if _glob.glob(os.path.join(path, "*.nimble")):
             return []
-        # Return a sentinel path that won't exist — triggers the check failure
-        return [("<widget>.nimble", "A .nimble file is required at the widget root — run 'cartograph create' to scaffold it")]
+        return [("<widget>.nimble", "A .nimble file is required at the widget root - run 'cartograph create' to scaffold it")]
 
-    def src_import_pattern(self) -> str | None:
-        # Examples run with --path:src, so bare `import module_name` resolves to src/
-        return r'^import\s+\w+'
+    # -- Custom install/test/example (nimble isolation) --
 
     def install_deps(self, path: str, dependencies: list) -> None:
         if not dependencies:
             self._nimble_dir = None
             return
 
-        # Isolated install — each validation gets its own NIMBLE_DIR so packages
-        # from one widget never bleed into another's compilation environment.
+        # Isolated install - each validation gets its own NIMBLE_DIR
         tmpdir = tempfile.mkdtemp(prefix="cartograph_nim_")
         self._nimble_dir = tmpdir
         env = {**os.environ, "NIMBLE_DIR": tmpdir}
@@ -163,6 +203,56 @@ class NimEngine(LanguageEngine):
 
         self._sync_nimble_requires(path, dependencies)
 
+    def run_tests(self, path: str) -> dict:
+        env = self._nimble_env()
+        try:
+            res = self._run(["nimble", "test", "-y"], cwd=path, timeout=120, env=env)
+        except FileNotFoundError:
+            return self._fail("Nim not found - install Nim toolchain.")
+        if res.returncode != 0:
+            return self._fail(res.stderr or res.stdout)
+        return self._ok()
+
+    def run_example(self, path: str) -> dict:
+        ep = os.path.join(path, "examples", self.example_filename())
+        src_path = os.path.join(path, "src")
+        env = self._nimble_env()
+        cmd = ["nim", "r", f"--path:{src_path}"]
+        nimble_dir = getattr(self, "_nimble_dir", None)
+        if nimble_dir:
+            pkgs2 = os.path.join(nimble_dir, "pkgs2")
+            if os.path.isdir(pkgs2):
+                for pkg in os.listdir(pkgs2):
+                    pkg_path = os.path.join(pkgs2, pkg)
+                    if os.path.isdir(pkg_path):
+                        cmd.append(f"--path:{pkg_path}")
+        cmd.append(ep)
+        try:
+            res = self._run(cmd, cwd=path, timeout=60, env=env)
+        except FileNotFoundError:
+            return self._fail("Nim not found - install Nim toolchain.")
+        if res.returncode != 0:
+            return self._fail(res.stderr or res.stdout)
+        return self._ok()
+
+    def cleanup(self, path: str) -> None:
+        self._cleanup_nimble_dir()
+
+    # -- Private helpers --
+
+    def _nimble_env(self) -> dict:
+        nimble_dir = getattr(self, "_nimble_dir", None)
+        if nimble_dir:
+            return {**os.environ, "NIMBLE_DIR": nimble_dir}
+        return os.environ.copy()
+
+    def _cleanup_nimble_dir(self) -> None:
+        nimble_dir = getattr(self, "_nimble_dir", None)
+        if nimble_dir and os.path.exists(nimble_dir):
+            shutil.rmtree(nimble_dir, ignore_errors=True)
+            log.debug("Removed isolated Nim env: %s", nimble_dir)
+        self._nimble_dir = None
+
     def _sync_nimble_requires(self, path: str, dependencies: list) -> None:
         """Keep .nimble requires in sync with widget.json dependencies."""
         matches = _glob.glob(os.path.join(path, "*.nimble"))
@@ -175,15 +265,12 @@ class NimEngine(LanguageEngine):
             with open(nimble_path) as f:
                 content = f.read()
 
-            # Build a map of bare_name -> full dep string from widget.json
             wanted: dict[str, str] = {}
             for dep in dependencies:
                 bare = _dep_bare_name(dep).lower()
                 if bare and bare != "nim":
                     wanted[bare] = dep
 
-            # Replace existing requires lines whose package is in wanted,
-            # then append any that are missing entirely.
             declared: set[str] = set()
             lines = content.splitlines(keepends=True)
             new_lines = []
@@ -214,65 +301,3 @@ class NimEngine(LanguageEngine):
                           os.path.basename(nimble_path))
         except Exception as e:
             log.debug("Could not sync .nimble requires: %s", e)
-
-    def run_tests(self, path: str) -> dict:
-        env = self._nimble_env()
-        try:
-            res = self._run(["nimble", "test", "-y"], cwd=path, timeout=120, env=env)
-        except FileNotFoundError:
-            return self._fail("Nim not found — install Nim toolchain.")
-        if res.returncode != 0:
-            return self._fail(res.stderr or res.stdout)
-        return self._ok()
-
-    def find_test_files(self, path: str) -> list[str]:
-        return _glob.glob(os.path.join(path, "tests", "test_*.nim"))
-
-    def example_filename(self, path: str = "") -> str:
-        return "example_usage.nim"
-
-    def run_example(self, path: str) -> dict:
-        ep = os.path.join(path, "examples", self.example_filename())
-        src_path = os.path.join(path, "src")
-        env = self._nimble_env()
-        cmd = ["nim", "r", f"--path:{src_path}"]
-        # `nim r` doesn't resolve NIMBLE_DIR on its own — add installed package
-        # dirs as explicit --path flags so external deps compile correctly.
-        nimble_dir = getattr(self, "_nimble_dir", None)
-        if nimble_dir:
-            pkgs2 = os.path.join(nimble_dir, "pkgs2")
-            if os.path.isdir(pkgs2):
-                for pkg in os.listdir(pkgs2):
-                    pkg_path = os.path.join(pkgs2, pkg)
-                    if os.path.isdir(pkg_path):
-                        cmd.append(f"--path:{pkg_path}")
-        cmd.append(ep)
-        try:
-            res = self._run(cmd, cwd=path, timeout=60, env=env)
-        except FileNotFoundError:
-            return self._fail("Nim not found — install Nim toolchain.")
-        if res.returncode != 0:
-            return self._fail(res.stderr or res.stdout)
-        return self._ok()
-
-    def cleanup(self, path: str) -> None:
-        self._cleanup_nimble_dir()
-
-    def _nimble_env(self) -> dict:
-        """Return env dict with NIMBLE_DIR set if an isolated dir was created."""
-        nimble_dir = getattr(self, "_nimble_dir", None)
-        if nimble_dir:
-            return {**os.environ, "NIMBLE_DIR": nimble_dir}
-        return os.environ.copy()
-
-    def _cleanup_nimble_dir(self) -> None:
-        nimble_dir = getattr(self, "_nimble_dir", None)
-        if nimble_dir and os.path.exists(nimble_dir):
-            shutil.rmtree(nimble_dir, ignore_errors=True)
-            log.debug("Removed isolated Nim env: %s", nimble_dir)
-        self._nimble_dir = None
-
-    def watched_patterns(self, path: str) -> list[str]:
-        patterns = super().watched_patterns(path)
-        patterns.extend(_glob.glob(os.path.join(path, "*.nimble")))
-        return patterns

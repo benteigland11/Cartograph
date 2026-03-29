@@ -3,7 +3,7 @@
 [![Tests](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml/badge.svg)](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/cartograph-cli?cacheSeconds=60)](https://pypi.org/project/cartograph-cli/)
 
-A shared widget library for AI agents. Search, install, create, validate, and check in reusable code across projects. Only requires Python. Other languages in the repo are native validation scanners for their respective widget types.
+A reusable code registry for AI agents. Search, install, create, validate, and check in reusable code across projects. Only requires Python. Other languages in the repo are native validation scanners for their respective widget types.
 
 ## Why Cartograph
 
@@ -104,13 +104,13 @@ Run `cartograph doctor` to check that all language engine dependencies (pytest, 
 
 ## Cloud registry
 
-The default registry is hosted by the Cartograph project. To point at your own registry instance, set `CARTOGRAPH_REGISTRY_URL`:
+The CLI tool is made to have a local registry on your machine. It has support for a cloud registry to be integrated alongside the local one. The default registry is hosted by the Cartograph project. To point at your own registry instance, set `CARTOGRAPH_REGISTRY_URL`:
 
 ```bash
 export CARTOGRAPH_REGISTRY_URL=https://your-registry.example.com
 ```
 
-Authenticate with `cartograph login`, which opens a browser-based OAuth flow. Once authenticated, you can publish widgets. You can still install cloud widgets when not logged in. We encourage you to use the default cloud registry to build up a network effect. Switching the Registry URL would be good use cases for enterprise systems that want this as an internal tool.
+`cartograph login` opens a browser-based authentication flow provided by whichever registry you're connected to. Once authenticated, you can publish widgets. We encourage you to use the default cloud registry to build up a network effect. Setting a custom registry URL is a good fit for enterprise systems that want this as an internal tool.
 
 ## Roadmap
 

@@ -13,7 +13,6 @@ import sys
 
 log = logging.getLogger("cartograph")
 
-from .templates import TEMPLATES
 
 DEFAULT_INSTALL_DIR = "cartograph"
 
@@ -111,9 +110,14 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
     with open(os.path.join(target_dir, "widget.json"), "w") as f:
         json.dump(manifest, f, indent=2)
 
-    # Write language-specific files
-    template_fn = TEMPLATES.get(normalized_lang, TEMPLATES["python"])
-    template_fn(target_dir, module_name, name, item_id=item_id, gpu_targets=gpu_targets)
+    # Write language-specific files from engine scaffold
+    from cartograph.languages import get_engine
+    from cartograph.languages.base import LanguageEngine as _BaseEngine
+    engine = get_engine(normalized_lang)
+    if engine and engine.__class__.scaffold is not _BaseEngine.scaffold:
+        engine.scaffold(target_dir, module_name, name, item_id=item_id, gpu_targets=gpu_targets)
+    else:
+        return {"status": "error", "message": f"No scaffold template for language '{normalized_lang}'"}
 
     log.info("Created widget: %s", target_dir)
     return {"status": "success", "path": target_dir, "item_id": item_id, "language": normalized_lang}
