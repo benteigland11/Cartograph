@@ -11,9 +11,9 @@ import logging
 
 log = logging.getLogger("cartograph")
 
-# Package directory (cartograph/) — one level up is the repo root in dev
+# Package directory (src/cartograph/) — two levels up is the repo root in dev
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_DIR = os.path.dirname(PACKAGE_DIR)
+REPO_DIR = os.path.dirname(os.path.dirname(PACKAGE_DIR))
 
 # Seed library bundled with the package
 _SEED_LIBRARY = os.path.join(PACKAGE_DIR, "seed_library")
@@ -71,7 +71,7 @@ EXTRACTION_LOG_PATH = os.path.join(CARTOGRAPH_DIR, "extraction_log.json")
 INSTALL_STATS_PATH = os.path.join(CARTOGRAPH_DIR, "stats.json")
 LIBRARY_CACHE_PATH = os.path.join(CARTOGRAPH_DIR, "library_cache.json")
 
-DEFAULT_INSTALL_DIR = "cartograph"
+DEFAULT_INSTALL_DIR = "cg"
 
 # Canonical language alias map — single source of truth.
 # search/filters.py and Cartograph._normalize_language both use this.
@@ -92,6 +92,44 @@ def normalize_language(lang):
         return "unknown"
     lang = lang.lower().strip()
     return LANGUAGE_ALIASES.get(lang, lang.replace(" ", "").replace("-", ""))
+
+
+def normalize_widget_id(widget_id: str) -> str:
+    """Normalize a widget ID to its canonical (hyphenated) form.
+
+    Users can type either hyphens or underscores - this always returns
+    the canonical hyphenated form for library lookups. The filesystem
+    path for Python widgets is handled separately by _python_dir_name().
+    """
+    if not widget_id:
+        return widget_id
+    return widget_id.replace("_", "-")
+
+
+def python_dir_name(widget_id: str) -> str:
+    """Return the filesystem directory name for a widget.
+
+    Python widgets get underscores so the directory is importable.
+    Other languages keep the canonical hyphenated ID.
+    """
+    canonical = normalize_widget_id(widget_id)
+    if canonical.endswith("-python"):
+        return canonical.replace("-", "_")
+    return canonical
+
+
+def widget_path(widget_id: str, project_root: str = None) -> str:
+    """Return the absolute path to an installed widget's directory.
+
+    Usage in consumer code:
+        import sys
+        from cartograph.engine import widget_path
+        sys.path.insert(0, widget_path("infra-agent-cli-python"))
+        from src.agent_cli import AgentCLI
+    """
+    if project_root is None:
+        project_root = REPO_DIR
+    return os.path.join(project_root, DEFAULT_INSTALL_DIR, python_dir_name(widget_id))
 
 
 def _closest_language(query, available, max_distance=3):
@@ -477,6 +515,7 @@ class Cartograph:
     def inspect(self, widget_id, show_source=False, show_all_versions=False,
                 show_reviews=False, version=None):
         from .inspector import inspect
+        widget_id = normalize_widget_id(widget_id)
         return inspect(self, widget_id, show_source=show_source,
                        show_all_versions=show_all_versions,
                        show_reviews=show_reviews, version=version)
@@ -487,6 +526,7 @@ class Cartograph:
     def create(self, item_id, language=None, name=None, domain="backend", tags=None,
                 target_dir=None, gpu_targets=None, widget_type=None):
         from .scaffolding import create_widget
+        item_id = normalize_widget_id(item_id)
         return create_widget(self, item_id, language=language, name=name, domain=domain,
                              tags=tags, target_dir=target_dir, gpu_targets=gpu_targets,
                              widget_type=widget_type)
@@ -526,19 +566,25 @@ class Cartograph:
         return restore(self, item_id, version, reason)
     def add_review(self, widget_id, target_dir, score, comment=None):
         from .checkin import add_review
+        widget_id = normalize_widget_id(widget_id)
         return add_review(self, widget_id, target_dir, score, comment=comment)
     def widget_status(self, widget_id, target_dir):
         from .checkin import widget_status
+        widget_id = normalize_widget_id(widget_id)
         return widget_status(self, widget_id, target_dir)
     def install(self, widget_id, target_dir, version=None):
         from .installer import install
+        widget_id = normalize_widget_id(widget_id)
         return install(self, widget_id, target_dir, version=version)
     def uninstall(self, widget_id, target_dir):
         from .installer import uninstall
+        widget_id = normalize_widget_id(widget_id)
         return uninstall(self, widget_id, target_dir)
     def upgrade(self, widget_id, target_dir, version=None):
         from .installer import upgrade
+        widget_id = normalize_widget_id(widget_id)
         return upgrade(self, widget_id, target_dir, version=version)
     def delete(self, widget_id, confirm=False):
         from .installer import delete_from_library
+        widget_id = normalize_widget_id(widget_id)
         return delete_from_library(self, widget_id, confirm=confirm)

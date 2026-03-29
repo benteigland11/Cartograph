@@ -17,8 +17,8 @@ def fresh_carto(fixture_library, tmp_path):
 
 
 def _widget_path(target, widget_id):
-    """Widgets now live at <project_root>/cartograph/<widget_id>."""
-    return os.path.join(target, "cartograph", widget_id)
+    """Widgets now live at <project_root>/cg/<widget_id>."""
+    return os.path.join(target, "cg", widget_id)
 
 
 def test_install_widget(fresh_carto):

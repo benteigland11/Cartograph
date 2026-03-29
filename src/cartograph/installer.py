@@ -38,8 +38,11 @@ def _copy_widget(source_path, dest_path):
 
 
 def _widget_dir(target_dir, widget_id):
-    """Return the install path: <project_root>/cartograph/<widget_id>."""
-    return os.path.join(target_dir, "cartograph", widget_id)
+    """Return the install path: <project_root>/cartograph/<dir_name>.
+    Python widgets get underscores so the directory is importable."""
+    from .engine import python_dir_name
+    from .engine import DEFAULT_INSTALL_DIR
+    return os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(widget_id))
 
 
 def _install_from_cloud(widget_id, dest_path):
@@ -88,8 +91,11 @@ def install(carto, widget_id, target_dir, version=None):
     if not os.path.isabs(target_dir):
         return {"error": f"Target must be an absolute path, got: '{target_dir}'"}
 
-    if target_dir == os.path.abspath(carto.library_path) or target_dir == REPO_DIR:
-        return {"error": "Cannot install into the library or engine directory."}
+    from .engine import PACKAGE_DIR
+    if target_dir == os.path.abspath(carto.library_path):
+        return {"error": f"Cannot install into the widget library ({carto.library_path})."}
+    if os.path.abspath(target_dir) == os.path.dirname(PACKAGE_DIR):
+        return {"error": f"Cannot install into the engine source directory ({os.path.dirname(PACKAGE_DIR)})."}
 
     dest_path = _widget_dir(target_dir, widget_id)
 

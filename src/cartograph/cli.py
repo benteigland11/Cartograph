@@ -5,7 +5,6 @@ Every command that takes a path defaults to the current directory (.).
 Output is always JSON so both humans and AI agents can consume it.
 """
 
-import argparse
 import json
 import os
 import shutil
@@ -14,14 +13,7 @@ import urllib.parse
 import zipfile
 from io import BytesIO
 
-
-def _out(result: dict) -> None:
-    print(json.dumps(result, indent=2))
-
-
-def _err(result: dict) -> None:
-    _out(result)
-    sys.exit(1)
+from cg.infra_agent_cli_python.src.agent_cli import AgentCLI, out, err
 
 
 def _check_and_prompt_tos():
@@ -64,15 +56,16 @@ def _resolve_widget(path: str) -> str:
     """Resolve a widget directory.
 
     Accepts a full path, a relative path, or just a widget_id.
-    If the path doesn't exist or lacks widget.json, tries cartograph/<path>/
+    If the path doesn't exist or lacks widget.json, tries cg/<path>/
     from the current directory.
     """
     resolved = os.path.abspath(path)
     if os.path.isfile(os.path.join(resolved, "widget.json")):
         return resolved
 
-    # Try cartograph/<path>/ from cwd (handles bare widget_id like "logic-test-python")
-    candidate = os.path.join(os.getcwd(), "cartograph", path)
+    # Try cg/<path>/ from cwd (handles bare widget_id like "logic-test-python")
+    from .engine import DEFAULT_INSTALL_DIR
+    candidate = os.path.join(os.getcwd(), DEFAULT_INSTALL_DIR, path)
     if os.path.isfile(os.path.join(candidate, "widget.json")):
         return os.path.abspath(candidate)
 
@@ -156,7 +149,7 @@ def cmd_search(args):
     }
     if cloud.get("error"):
         merged["cloud_error"] = cloud["error"]
-    _out(merged)
+    out(merged)
 
 
 def cmd_inspect(args):
@@ -167,7 +160,7 @@ def cmd_inspect(args):
         show_reviews=args.reviews,
         version=getattr(args, "version", None),
     )
-    _out(result)
+    out(result)
 
 
 def _cloud_install_note(result):
@@ -187,8 +180,8 @@ def cmd_install(args):
         version=args.version,
     )
     if result.get("status") == "error":
-        _err(result)
-    _out(result)
+        err(result)
+    out(result)
     _cloud_install_note(result)
 
 
@@ -198,8 +191,8 @@ def cmd_uninstall(args):
         target_dir=_resolve(args.target),
     )
     if result.get("status") == "error":
-        _err(result)
-    _out(result)
+        err(result)
+    out(result)
 
 
 def cmd_upgrade(args):
@@ -209,8 +202,8 @@ def cmd_upgrade(args):
         version=args.version,
     )
     if result.get("status") == "error":
-        _err(result)
-    _out(result)
+        err(result)
+    out(result)
     _cloud_install_note(result)
 
 
@@ -220,7 +213,7 @@ def cmd_delete(args):
         confirm=args.confirm,
     )
     if result.get("status") == "error":
-        _err(result)
+        err(result)
 
     # Also remove from cloud if published
     if result.get("status") == "success":
@@ -231,7 +224,7 @@ def cmd_delete(args):
                 result["cloud"] = "deleted"
             # Silently skip if not on cloud (404)
 
-    _out(result)
+    out(result)
 
 
 def cmd_create(args):
@@ -244,8 +237,8 @@ def cmd_create(args):
         target_dir=_resolve(args.target),
     )
     if result.get("status") == "error":
-        _err(result)
-    _out(result)
+        err(result)
+    out(result)
 
 
 def _resolve_widget_path(args) -> str:
@@ -254,7 +247,7 @@ def _resolve_widget_path(args) -> str:
         carto = _carto()
         widget = next((w for w in carto.widgets if w["id"] == args.path), None)
         if not widget:
-            _err({"error": f"Widget '{args.path}' not found in library. Use 'cartograph search' to browse."})
+            err({"error": f"Widget '{args.path}' not found in library. Use 'cartograph search' to browse."})
         return widget["path"]
     return _resolve_widget(args.path)
 
@@ -264,8 +257,8 @@ def cmd_validate(args):
     _preflight_from_path(path)
     result = _carto().validate_item(path=path)
     if result.get("status") == "error":
-        _err(result)
-    _out(result)
+        err(result)
+    out(result)
 
 
 def _force_push(checkin_result: dict) -> None:
@@ -321,8 +314,8 @@ def cmd_checkin(args):
         override_reason=args.override_reason or "",
     )
     if result.get("status") == "error":
-        _err(result)
-    _out(result)
+        err(result)
+    out(result)
 
     # Push to cloud: always if --publish, otherwise only if already published
     if result.get("action") in ("updated", "registered"):
@@ -338,14 +331,15 @@ def cmd_status(args):
     if args.widget_id:
         result = _carto().widget_status(widget_id=args.widget_id, target_dir=target)
         if result.get("error"):
-            _err(result)
-        _out(result)
+            err(result)
+        out(result)
         return
 
     # No widget_id — scan all installed widgets
-    install_dir = os.path.join(target, "cartograph")
+    from .engine import DEFAULT_INSTALL_DIR
+    install_dir = os.path.join(target, DEFAULT_INSTALL_DIR)
     if not os.path.isdir(install_dir):
-        _err({"error": f"No cartograph/ directory found at {target}"})
+        err({"error": f"No cartograph/ directory found at {target}"})
 
     widget_ids = [
         d for d in os.listdir(install_dir)
@@ -353,7 +347,7 @@ def cmd_status(args):
     ]
 
     if not widget_ids:
-        _out({"installed": 0, "widgets": []})
+        out({"installed": 0, "widgets": []})
         return
 
     carto = _carto()
@@ -362,7 +356,7 @@ def cmd_status(args):
         r = carto.widget_status(widget_id=wid, target_dir=target)
         widgets.append(r)
 
-    _out({
+    out({
         "installed": len(widgets),
         "outdated": sum(1 for w in widgets if w.get("outdated")),
         "modified": sum(1 for w in widgets if w.get("modified")),
@@ -378,13 +372,13 @@ def cmd_login(args):
         from .cloud import login_with_credentials
         result = login_with_credentials(token, "", "")
         if "error" in result:
-            _err(result)
-        _out(result)
+            err(result)
+        out(result)
         return
 
     # No token given — use browser-based OAuth flow
     if not sys.stdin.isatty():
-        _err({"error": "Provide a token with --token or set CARTOGRAPH_TOKEN"})
+        err({"error": "Provide a token with --token or set CARTOGRAPH_TOKEN"})
 
     import http.server
     import webbrowser
@@ -443,7 +437,7 @@ def cmd_login(args):
     id_token = received.get("id_token", "")
     handle = received.get("handle", "")
     if not id_token:
-        _err({"error": "Authentication timed out or was cancelled."})
+        err({"error": "Authentication timed out or was cancelled."})
 
     save_credentials(
         id_token,
@@ -457,19 +451,19 @@ def cmd_login(args):
     # --- TOS check ---
     _check_and_prompt_tos()
 
-    _out({"status": "success", "owner": handle})
+    out({"status": "success", "owner": handle})
 
 
 def cmd_whoami(args):
     from .auth import is_authenticated
     if not is_authenticated():
-        _out({"authenticated": False})
+        out({"authenticated": False})
         return
     from .cloud import whoami
     result = whoami()
     if "error" in result:
-        _err(result)
-    _out({"authenticated": True, **result})
+        err(result)
+    out({"authenticated": True, **result})
 
 
 def cmd_dashboard(args):
@@ -492,26 +486,26 @@ def cmd_dashboard(args):
 def cmd_logout(args):
     from .auth import clear_token, is_authenticated
     if not is_authenticated():
-        _out({"status": "already_logged_out"})
+        out({"status": "already_logged_out"})
         return
     clear_token()
-    _out({"status": "success", "message": "Logged out."})
+    out({"status": "success", "message": "Logged out."})
 
 
 def cmd_cloud_publish(args):
     from .auth import is_authenticated
     if not is_authenticated():
-        _err({"error": "Not authenticated. Run: cartograph login"})
+        err({"error": "Not authenticated. Run: cartograph login"})
 
     if getattr(args, "lib", False):
         # Resolve path from library by widget_id
         widget_id = args.widget_id
         if not widget_id:
-            _err({"error": "Provide a widget_id when using --lib"})
+            err({"error": "Provide a widget_id when using --lib"})
         carto = _carto()
         widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
         if not widget:
-            _err({"error": f"Widget '{widget_id}' not found in library."})
+            err({"error": f"Widget '{widget_id}' not found in library."})
         path = widget["path"]
     else:
         path = _resolve_widget(args.path)
@@ -524,7 +518,7 @@ def cmd_cloud_publish(args):
             except Exception:
                 pass
         if not widget_id:
-            _err({"error": "Could not determine widget_id. Pass it explicitly or use --lib."})
+            err({"error": "Could not determine widget_id. Pass it explicitly or use --lib."})
 
     _preflight_from_path(path)
 
@@ -545,20 +539,20 @@ def cmd_cloud_publish(args):
         print("  No valid stamp — running validation first...\n", file=sys.stderr)
         validate_result = _carto().validate_item(path=path)
         if validate_result.get("status") == "error":
-            _err(validate_result)
+            err(validate_result)
 
     # Contamination scan — same gate as checkin
     from .checkin import _scan_contamination
     scan = _scan_contamination(path, tech_stack)
 
     if scan["blocks"]:
-        _err({
+        err({
             "error": "Push blocked: project-specific content detected.",
             "blocks": scan["blocks"],
         })
 
     if scan["warnings"] and not getattr(args, "override_warnings", False):
-        _err({
+        err({
             "status": "warnings",
             "message": "Push paused: potential contamination found. "
                        "Review warnings and re-run with --override-warnings and --override-reason.",
@@ -566,12 +560,12 @@ def cmd_cloud_publish(args):
         })
 
     if getattr(args, "override_warnings", False) and not getattr(args, "override_reason", None):
-        _err({"error": "Push with --override-warnings requires --override-reason."})
+        err({"error": "Push with --override-warnings requires --override-reason."})
 
     from .cloud import push
     result = push(path, widget_id, visibility=args.visibility)
     if "error" in result:
-        _err(result)
+        err(result)
 
     nid      = result.get("namespaced_id", widget_id)
     version  = result.get("version", "?")
@@ -588,20 +582,20 @@ def cmd_rate(args):
         comment=args.comment,
     )
     if result.get("error"):
-        _err(result)
-    _out(result)
+        err(result)
+    out(result)
 
 
 def cmd_cloud_unpublish(args):
     """Remove a widget from the cloud registry (keeps local copy)."""
     from . import cloud, auth
     if not auth.is_authenticated():
-        _err({"error": "Not authenticated. Run: cartograph login"})
+        err({"error": "Not authenticated. Run: cartograph login"})
     if not args.confirm:
-        _err({"error": f"This will remove '{args.widget_id}' from the cloud registry. Add --confirm to proceed."})
+        err({"error": f"This will remove '{args.widget_id}' from the cloud registry. Add --confirm to proceed."})
     result = cloud.delete_widget(args.widget_id)
     if "error" in result:
-        _err(result)
+        err(result)
     print(f"\n  Unpublished {args.widget_id} from cloud. Local copy unchanged.\n")
 
 
@@ -609,14 +603,14 @@ def cmd_cloud_rate(args):
     """Rate a cloud widget."""
     from . import cloud, auth
     if not auth.is_authenticated():
-        _err({"error": "Not authenticated. Run: cartograph login"})
+        err({"error": "Not authenticated. Run: cartograph login"})
 
     # Parse @handle/widget_id or plain widget_id
     widget_id = args.widget_id
     if widget_id.startswith("@"):
         parts = widget_id[1:].split("/", 1)
         if len(parts) != 2:
-            _err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
+            err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
         owner, widget_id = parts
     else:
         # Look up owner from cloud search
@@ -624,12 +618,12 @@ def cmd_cloud_rate(args):
         widgets = results.get("widgets", [])
         match = next((w for w in widgets if w.get("id") == widget_id), None)
         if not match:
-            _err({"error": f"Widget '{widget_id}' not found on cloud."})
+            err({"error": f"Widget '{widget_id}' not found on cloud."})
         owner = match.get("owner", "")
 
     result = cloud.rate_widget(owner, widget_id, args.score, args.comment)
     if "error" in result:
-        _err(result)
+        err(result)
     print(f"\n  Rated {args.widget_id}: {args.score}/5\n")
 
 
@@ -647,7 +641,7 @@ def cmd_rollback(args):
     if widget_id.startswith("@"):
         parts = widget_id[1:].split("/", 1)
         if len(parts) != 2:
-            _err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
+            err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
         owner_handle, base_id = parts
 
     carto = _carto()
@@ -658,11 +652,11 @@ def cmd_rollback(args):
             # Cloud: list versions from GCS
             result = cloud.get_versions(owner_handle, base_id)
             if "error" in result:
-                _err(result)
+                err(result)
             versions = result.get("versions", [])
             current = result.get("current_version", "?")
             if not versions:
-                _err({"error": f"No versions found for {widget_id}"})
+                err({"error": f"No versions found for {widget_id}"})
             print(f"\n  Versions for {widget_id} (current: {current}):\n")
             for v in versions:
                 marker = " ← current" if v == current else ""
@@ -672,15 +666,15 @@ def cmd_rollback(args):
             # Local: list from history/
             item = next((w for w in carto.widgets if w["id"] == base_id), None)
             if not item:
-                _err({"error": f"Widget '{base_id}' not found in library"})
+                err({"error": f"Widget '{base_id}' not found in library"})
             import os
             history_dir = os.path.join(item["path"], "history")
             if not os.path.isdir(history_dir):
-                _err({"error": f"No version history for '{base_id}'"})
+                err({"error": f"No version history for '{base_id}'"})
             versions = sorted(os.listdir(history_dir), reverse=True)
             current = item.get("version", "?")
             if not versions:
-                _err({"error": f"No version history for '{base_id}'"})
+                err({"error": f"No version history for '{base_id}'"})
             print(f"\n  Versions for {base_id} (current: {current}):\n")
             for v in versions:
                 marker = " ← current" if v == current else ""
@@ -726,7 +720,7 @@ def cmd_rollback(args):
                 print(f"  ✓ Cloud: restored v{version} as v{nv} (was v{result.get('previous_version', '?')})")
 
     if not rolled_local and not rolled_cloud:
-        _err({"error": f"Could not rollback '{widget_id}' — not found locally or on cloud"})
+        err({"error": f"Could not rollback '{widget_id}' — not found locally or on cloud"})
 
     print()
 
@@ -804,13 +798,13 @@ _SETUP_INSTRUCTIONS = """\
 
 Cartograph is a widget library manager. Widgets are reusable, self-contained
 code modules with tests, examples, and metadata. When installed into a project
-they live under `cartograph/<widget_id>/`.
+they live under `cg/<widget_id>/`.
 
 Before writing reusable, self-contained logic, search the library first.
 
 ### Widget structure
 ```
-cartograph/<widget_id>/
+cg/<widget_id>/
   widget.json          metadata, version, dependencies
   src/                 source code
   tests/               test files (80%+ coverage required)
@@ -955,9 +949,9 @@ def cmd_sync(args):
     from packaging.version import Version, InvalidVersion
 
     if not auth.is_authenticated():
-        _err({"error": "Not authenticated. Run: cartograph login"})
+        err({"error": "Not authenticated. Run: cartograph login"})
     if not cloud.is_available():
-        _err({"error": "Cloud registry is unreachable."})
+        err({"error": "Cloud registry is unreachable."})
 
     dry_run = args.dry_run
     carto = _carto()
@@ -965,7 +959,7 @@ def cmd_sync(args):
 
     profile = cloud.whoami()
     if "error" in profile:
-        _err(profile)
+        err(profile)
     handle = profile.get("owner", "")
 
     cloud_widgets_list = cloud.list_my_widgets()
@@ -1120,239 +1114,263 @@ def cmd_setup(args):
 
 
 # ---------------------------------------------------------------------------
-# Parser
+# CLI definition (declarative via infra-agent-cli-python widget)
 # ---------------------------------------------------------------------------
 
-_COMMAND_GROUPS = [
-    ("Use widgets", [
-        ("search",    "Search the widget library"),
-        ("inspect",   "Show widget details"),
-        ("install",   "Install a widget into your project"),
-        ("uninstall", "Remove a widget from your project"),
-        ("upgrade",   "Upgrade an installed widget to the latest version"),
-        ("status",    "Check installed widget(s) - omit widget_id to scan all"),
-        ("rate",      "Rate an installed widget"),
-    ]),
-    ("Build widgets", [
-        ("create",   "Scaffold a new widget"),
-        ("validate", "Run the validation pipeline on a widget"),
-        ("checkin",  "Check a widget into the library (--publish to also publish)"),
-        ("rollback", "Roll back a widget to a previous version (local + cloud)"),
-        ("delete",   "Remove a widget from the library (and cloud if published)"),
-    ]),
-    ("Cloud registry", [
-        ("cloud publish",   "Publish a widget to the cloud registry"),
-        ("cloud unpublish", "Remove a widget from the cloud (keeps local)"),
-        ("cloud sync",      "Reconcile local library with cloud"),
-        ("cloud rate",      "Rate a cloud widget"),
-    ]),
-    ("Config", [
-        ("setup",     "Generate and write agent instructions"),
-        ("login",     "Authenticate with the Cartograph cloud registry"),
-        ("logout",    "Remove stored cloud credentials"),
-        ("whoami",    "Show current authenticated user"),
-        ("dashboard", "Open local widget dashboard in browser"),
-        ("stats",     "Show library statistics"),
-        ("doctor",    "Check language engine dependencies"),
-    ]),
-]
-
-
-def _grouped_help():
-    use_color = sys.stdout.isatty()
-    if use_color:
-        g, r = "\033[32m", "\033[0m"  # green, reset
-    else:
-        g, r = "", ""
-    lines = ["", "usage: cartograph <command> [options]", ""]
-    for group_name, commands in _COMMAND_GROUPS:
-        lines.append(f"  {group_name}:")
-        for cmd, desc in commands:
-            lines.append(f"    {g}{cmd:<12s}{r} {desc}")
-        lines.append("")
-    lines.append(f"  Run '{g}cartograph <command> -h{r}' for command-specific help.")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def build_parser() -> argparse.ArgumentParser:
+def _build_cli() -> AgentCLI:
     from . import __version__
-    parser = argparse.ArgumentParser(
+    from .languages.registry import supported_languages
+
+    cli = AgentCLI(
         prog="cartograph",
         description="Cartograph widget library manager",
-        usage=argparse.SUPPRESS,
-        add_help=False,
+        version=__version__,
     )
-    parser.add_argument("-h", "--help", action="store_true", default=False)
-    parser.add_argument("-v", "--version", action="version",
-                        version=f"cartograph {__version__}")
-    sub = parser.add_subparsers(dest="command", metavar="<command>")
 
-    # --- Use widgets ---
+    cli.add_commands("Use widgets", [
+        {
+            "name": "search",
+            "help": "Search the widget library",
+            "handler": cmd_search,
+            "args": [
+                {"name": "query", "help": "Search query"},
+                {"name": "--domain", "default": None, "help": "Filter by domain"},
+                {"name": "--language", "default": None, "help": "Filter by language"},
+                {"name": "--top-k", "type": int, "default": 10, "dest": "top_k"},
+            ],
+        },
+        {
+            "name": "inspect",
+            "help": "Show widget details",
+            "handler": cmd_inspect,
+            "args": [
+                {"name": "widget_id"},
+                {"name": "--source", "action": "store_true", "default": False, "help": "Include source files"},
+                {"name": "--all-versions", "action": "store_true", "default": False, "dest": "all_versions"},
+                {"name": "--reviews", "action": "store_true", "default": False},
+                {"name": "--version", "default": None, "help": "Inspect a specific historical version"},
+            ],
+        },
+        {
+            "name": "install",
+            "help": "Install a widget into your project",
+            "handler": cmd_install,
+            "args": [
+                {"name": "widget_id"},
+                {"name": "--target", "default": ".", "help": "Project root (default: .)"},
+                {"name": "--version", "default": None},
+            ],
+        },
+        {
+            "name": "uninstall",
+            "help": "Remove a widget from your project",
+            "handler": cmd_uninstall,
+            "args": [
+                {"name": "widget_id"},
+                {"name": "--target", "default": ".", "help": "Project root (default: .)"},
+            ],
+        },
+        {
+            "name": "upgrade",
+            "help": "Upgrade an installed widget to the latest version",
+            "handler": cmd_upgrade,
+            "args": [
+                {"name": "widget_id"},
+                {"name": "--target", "default": ".", "help": "Project root (default: .)"},
+                {"name": "--version", "default": None},
+            ],
+        },
+        {
+            "name": "status",
+            "help": "Check installed widget(s) - omit widget_id to scan all",
+            "handler": cmd_status,
+            "args": [
+                {"name": "widget_id", "nargs": "?", "default": None},
+                {"name": "--target", "default": ".", "help": "Project root (default: .)"},
+            ],
+        },
+        {
+            "name": "rate",
+            "help": "Rate an installed widget",
+            "handler": cmd_rate,
+            "args": [
+                {"name": "widget_id"},
+                {"name": "score", "type": float, "help": "Score from 1.0 to 5.0"},
+                {"name": "--comment", "default": None},
+                {"name": "--target", "default": ".", "help": "Project root (default: .)"},
+            ],
+        },
+    ])
 
-    p = sub.add_parser("search", help="Search the widget library")
-    p.add_argument("query", help="Search query")
-    p.add_argument("--domain", default=None, help="Filter by domain")
-    p.add_argument("--language", default=None, help="Filter by language")
-    p.add_argument("--top-k", type=int, default=10, dest="top_k")
-    p.set_defaults(func=cmd_search)
+    cli.add_commands("Build widgets", [
+        {
+            "name": "create",
+            "help": "Scaffold a new widget",
+            "handler": cmd_create,
+            "args": [
+                {"name": "widget_id"},
+                {"name": "--language", "required": True, "choices": supported_languages()},
+                {"name": "--domain", "required": True,
+                 "choices": ["backend", "data", "ml", "security", "infra", "frontend", "universal"]},
+                {"name": "--name", "default": None, "help": "Human-readable display name"},
+                {"name": "--target", "default": ".", "help": "Where to create the widget (default: .)"},
+            ],
+        },
+        {
+            "name": "validate",
+            "help": "Run the validation pipeline on a widget",
+            "handler": cmd_validate,
+            "args": [
+                {"name": "path", "nargs": "?", "default": ".", "help": "Widget directory or widget_id with --lib"},
+                {"name": "--lib", "action": "store_true", "default": False, "help": "Treat path as a library widget_id"},
+            ],
+        },
+        {
+            "name": "checkin",
+            "help": "Check a widget into the library (--publish to also publish)",
+            "handler": cmd_checkin,
+            "args": [
+                {"name": "path", "nargs": "?", "default": ".", "help": "Widget directory (default: .)"},
+                {"name": "--reason", "required": True, "help": "What changed and why"},
+                {"name": "--bump", "default": "minor", "choices": ["major", "minor", "patch"],
+                 "help": "Version bump type (default: minor)"},
+                {"name": "--publish", "action": "store_true", "default": False,
+                 "help": "Publish to cloud after checkin"},
+                {"name": "--override-warnings", "action": "store_true", "default": False, "dest": "override_warnings"},
+                {"name": "--override-reason", "default": None, "dest": "override_reason"},
+            ],
+        },
+        {
+            "name": "rollback",
+            "help": "Roll back a widget to a previous version (local + cloud)",
+            "handler": cmd_rollback,
+            "args": [
+                {"name": "widget_id", "help": "Widget ID (local) or @handle/widget_id (cloud)"},
+                {"name": "--version", "default": None, "help": "Version to roll back to (omit to list)"},
+                {"name": "--reason", "default": "", "help": "Reason for rollback"},
+            ],
+        },
+        {
+            "name": "delete",
+            "help": "Remove a widget from the library (and cloud if published)",
+            "handler": cmd_delete,
+            "args": [
+                {"name": "widget_id"},
+                {"name": "--confirm", "action": "store_true", "default": False,
+                 "help": "Actually delete (irreversible)"},
+            ],
+        },
+    ])
 
-    p = sub.add_parser("inspect", help="Show widget details")
-    p.add_argument("widget_id")
-    p.add_argument("--source", action="store_true", help="Include source files")
-    p.add_argument("--all-versions", action="store_true", dest="all_versions")
-    p.add_argument("--reviews", action="store_true")
-    p.add_argument("--version", default=None, help="Inspect a specific historical version (e.g. 1.2.0)")
-    p.set_defaults(func=cmd_inspect)
+    cli.add_commands("Cloud registry", [
+        {
+            "name": "cloud publish",
+            "help": "Publish a widget to the cloud registry",
+            "handler": cmd_cloud_publish,
+            "args": [
+                {"name": "widget_id", "nargs": "?", "default": None,
+                 "help": "Widget ID (required with --lib, inferred otherwise)"},
+                {"name": "path", "nargs": "?", "default": ".", "help": "Widget directory (default: .)"},
+                {"name": "--lib", "action": "store_true", "default": False},
+                {"name": "--visibility", "default": "public", "choices": ["public", "private"]},
+                {"name": "--override-warnings", "action": "store_true", "default": False, "dest": "override_warnings"},
+                {"name": "--override-reason", "default": None, "dest": "override_reason"},
+            ],
+        },
+        {
+            "name": "cloud unpublish",
+            "help": "Remove a widget from the cloud (keeps local)",
+            "handler": cmd_cloud_unpublish,
+            "args": [
+                {"name": "widget_id"},
+                {"name": "--confirm", "action": "store_true", "default": False, "help": "Required to proceed"},
+            ],
+        },
+        {
+            "name": "cloud sync",
+            "help": "Reconcile local library with cloud",
+            "handler": cmd_sync,
+            "args": [
+                {"name": "--dry-run", "action": "store_true", "default": False, "dest": "dry_run"},
+            ],
+        },
+        {
+            "name": "cloud rate",
+            "help": "Rate a cloud widget",
+            "handler": cmd_cloud_rate,
+            "args": [
+                {"name": "widget_id", "help": "Widget ID (e.g. @handle/widget-id)"},
+                {"name": "score", "type": int, "help": "Score from 1 to 5"},
+                {"name": "--comment", "default": "", "help": "Optional review comment"},
+            ],
+        },
+    ])
 
-    p = sub.add_parser("install", help="Install a widget into your project")
-    p.add_argument("widget_id")
-    p.add_argument("--target", default=".", help="Project root (default: .)")
-    p.add_argument("--version", default=None)
-    p.set_defaults(func=cmd_install)
+    cli.add_commands("Config", [
+        {
+            "name": "setup",
+            "help": "Generate and write agent instructions",
+            "handler": cmd_setup,
+            "args": [
+                {"name": "--agent", "default": None,
+                 "choices": ["claude", "codex", "gemini", "antigravity", "cursor"]},
+                {"name": "--write", "action": "store_true", "default": False},
+            ],
+        },
+        {
+            "name": "login",
+            "help": "Authenticate with the Cartograph cloud registry",
+            "handler": cmd_login,
+            "args": [
+                {"name": "--token", "default": None, "help": "API token"},
+            ],
+        },
+        {
+            "name": "logout",
+            "help": "Remove stored cloud credentials",
+            "handler": cmd_logout,
+            "args": [],
+        },
+        {
+            "name": "whoami",
+            "help": "Show current authenticated user",
+            "handler": cmd_whoami,
+            "args": [],
+        },
+        {
+            "name": "dashboard",
+            "help": "Open local widget dashboard in browser",
+            "handler": cmd_dashboard,
+            "args": [
+                {"name": "--port", "type": int, "default": 0, "help": "Override port"},
+                {"name": "--set-port", "type": int, "default": None, "dest": "set_port"},
+                {"name": "--stop", "action": "store_true", "default": False},
+            ],
+        },
+        {
+            "name": "stats",
+            "help": "Show library statistics",
+            "handler": cmd_stats,
+            "args": [],
+        },
+        {
+            "name": "doctor",
+            "help": "Check language engine dependencies",
+            "handler": cmd_doctor,
+            "args": [],
+        },
+    ])
 
-    p = sub.add_parser("uninstall", help="Remove a widget from your project")
-    p.add_argument("widget_id")
-    p.add_argument("--target", default=".", help="Project root (default: .)")
-    p.set_defaults(func=cmd_uninstall)
+    return cli
 
-    p = sub.add_parser("upgrade", help="Upgrade an installed widget to the latest version")
-    p.add_argument("widget_id")
-    p.add_argument("--target", default=".", help="Project root (default: .)")
-    p.add_argument("--version", default=None)
-    p.set_defaults(func=cmd_upgrade)
 
-    p = sub.add_parser("status", help="Check installed widget(s) - omit widget_id to scan all")
-    p.add_argument("widget_id", nargs="?", default=None)
-    p.add_argument("--target", default=".", help="Project root (default: .)")
-    p.set_defaults(func=cmd_status)
-
-    p = sub.add_parser("rate", help="Rate an installed widget")
-    p.add_argument("widget_id")
-    p.add_argument("score", type=float, help="Score from 1.0 to 5.0")
-    p.add_argument("--comment", default=None)
-    p.add_argument("--target", default=".", help="Project root (default: .)")
-    p.set_defaults(func=cmd_rate)
-
-    # --- Build widgets ---
-
-    p = sub.add_parser("create", help="Scaffold a new widget")
-    p.add_argument("widget_id")
-    from .languages.registry import supported_languages
-    p.add_argument("--language", required=True, choices=supported_languages())
-    p.add_argument("--domain", required=True,
-                   choices=["backend", "data", "ml", "security", "infra", "frontend", "universal"])
-    p.add_argument("--name", default=None, help="Human-readable display name")
-    p.add_argument("--target", default=".", help="Where to create the widget (default: .)")
-    p.set_defaults(func=cmd_create)
-
-    p = sub.add_parser("validate", help="Run the validation pipeline on a widget")
-    p.add_argument("path", nargs="?", default=".", help="Widget directory or widget_id with --lib (default: .)")
-    p.add_argument("--lib", action="store_true", help="Treat path as a library widget_id")
-    p.set_defaults(func=cmd_validate)
-
-    p = sub.add_parser("checkin", help="Check a widget into the library")
-    p.add_argument("path", nargs="?", default=".", help="Widget directory (default: .)")
-    p.add_argument("--reason", required=True, help="What changed and why")
-    p.add_argument("--bump", default="minor", choices=["major", "minor", "patch"],
-                   help="Version bump type (default: minor)")
-    p.add_argument("--publish", action="store_true",
-                   help="Publish to cloud after checkin (even if not previously published)")
-    p.add_argument("--override-warnings", action="store_true", dest="override_warnings")
-    p.add_argument("--override-reason", default=None, dest="override_reason")
-    p.set_defaults(func=cmd_checkin)
-
-    p = sub.add_parser("delete", help="Remove a widget from the library")
-    p.add_argument("widget_id")
-    p.add_argument("--confirm", action="store_true",
-                   help="Actually delete the widget from the library (irreversible)")
-    p.set_defaults(func=cmd_delete)
-
-    p = sub.add_parser("rollback", help="Roll back a widget to a previous version")
-    p.add_argument("widget_id", help="Widget ID (local) or @handle/widget_id (cloud)")
-    p.add_argument("--version", default=None, help="Version to roll back to (omit to list available)")
-    p.add_argument("--reason", default="", help="Reason for rollback")
-    p.set_defaults(func=cmd_rollback)
-
-    # --- Cloud subcommands ---
-
-    cloud_parser = sub.add_parser("cloud", help="Cloud registry operations")
-    cloud_sub = cloud_parser.add_subparsers(dest="cloud_command")
-
-    p = cloud_sub.add_parser("publish", help="Publish a validated widget to the cloud registry")
-    p.add_argument("widget_id", nargs="?", default=None,
-                   help="Widget ID (required with --lib, inferred from widget.json otherwise)")
-    p.add_argument("path", nargs="?", default=".",
-                   help="Widget directory (default: .)")
-    p.add_argument("--lib", action="store_true", help="Publish a widget from the library by ID")
-    p.add_argument("--visibility", default="public", choices=["public", "private"],
-                   help="Registry visibility (default: public)")
-    p.add_argument("--override-warnings", action="store_true", dest="override_warnings")
-    p.add_argument("--override-reason", default=None, dest="override_reason")
-    p.set_defaults(func=cmd_cloud_publish)
-
-    p = cloud_sub.add_parser("unpublish", help="Remove a widget from the cloud registry (keeps local)")
-    p.add_argument("widget_id")
-    p.add_argument("--confirm", action="store_true",
-                   help="Actually remove from cloud (required)")
-    p.set_defaults(func=cmd_cloud_unpublish)
-
-    p = cloud_sub.add_parser("sync", help="Reconcile local library with cloud (publish newer, download newer)")
-    p.add_argument("--dry-run", action="store_true", dest="dry_run",
-                   help="Show what would happen without making changes")
-    p.set_defaults(func=cmd_sync)
-
-    p = cloud_sub.add_parser("rate", help="Rate a cloud widget")
-    p.add_argument("widget_id", help="Widget ID (e.g. @handle/widget-id or just widget-id)")
-    p.add_argument("score", type=int, help="Score from 1 to 5")
-    p.add_argument("--comment", default="", help="Optional review comment")
-    p.set_defaults(func=cmd_cloud_rate)
-
-    cloud_parser.set_defaults(func=lambda args: cloud_parser.print_help())
-
-    # --- Config ---
-
-    p = sub.add_parser("setup", help="Generate and write agent instructions")
-    p.add_argument("--agent", default=None,
-                   choices=["claude", "codex", "gemini", "antigravity", "cursor"],
-                   help="Target agent: claude=CLAUDE.md, codex=AGENTS.md, gemini/antigravity=GEMINI.md, cursor=.cursor/rules/cartograph.mdc")
-    p.add_argument("--write", action="store_true",
-                   help="Write to the project's agent config file")
-    p.set_defaults(func=cmd_setup)
-
-    p = sub.add_parser("login", help="Authenticate with the Cartograph cloud registry")
-    p.add_argument("--token", default=None,
-                   help="API token (prompted interactively if omitted in a terminal)")
-    p.set_defaults(func=cmd_login)
-
-    p = sub.add_parser("logout", help="Remove stored cloud credentials")
-    p.set_defaults(func=cmd_logout)
-
-    p = sub.add_parser("whoami", help="Show current authenticated user")
-    p.set_defaults(func=cmd_whoami)
-
-    p = sub.add_parser("dashboard", help="Open local widget dashboard in browser")
-    p.add_argument("--port", type=int, default=0, help="Override port for this session")
-    p.add_argument("--set-port", type=int, metavar="PORT", help="Permanently set the dashboard port")
-    p.add_argument("--stop", action="store_true", help="Stop a running dashboard")
-    p.set_defaults(func=cmd_dashboard)
-
-    p = sub.add_parser("stats", help="Show library statistics")
-    p.set_defaults(func=cmd_stats)
-
-    p = sub.add_parser("doctor", help="Check language engine dependencies")
-    p.set_defaults(func=cmd_doctor)
-
-    return parser
+def build_parser():
+    """Build argparse parser (for backward compat with tests)."""
+    return _build_cli().build_parser()
 
 
 def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    if args.help or not args.command:
-        print(_grouped_help())
-        sys.exit(0)
-    args.func(args)
+    _build_cli().run()
 
 
 if __name__ == "__main__":

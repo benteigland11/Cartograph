@@ -4,13 +4,13 @@
 Cartograph is a widget library manager. Widgets are reusable code modules
 with tests, examples, metadata, and declared dependencies. Third-party
 packages are fully supported - widgets just can't depend on other widgets.
-When installed into a project they live under `cartograph/<widget_id>/`.
+When installed into a project they live under `cg/<widget_id>/`.
 
-Before writing reusable logic, search the library first.
+Before writing reusable logic, search the library first. For any Cartograph actions, always use the CLI.
 
 ### Widget structure
 ```
-cartograph/<widget_id>/
+cg/<widget_id>/
   widget.json          metadata, version, dependencies
   src/                 source code
   tests/               test files (80%+ coverage required)

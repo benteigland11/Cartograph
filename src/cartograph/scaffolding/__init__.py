@@ -14,7 +14,7 @@ import sys
 log = logging.getLogger("cartograph")
 
 
-DEFAULT_INSTALL_DIR = "cartograph"
+from cartograph.engine import DEFAULT_INSTALL_DIR
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "library_config.json")
 

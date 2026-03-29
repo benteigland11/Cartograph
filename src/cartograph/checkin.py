@@ -121,7 +121,7 @@ def _scan_contamination(path: str, widget: dict) -> dict:
     dep_names = {_dep_bare_name(d).lower() for d in deps if isinstance(d, str)}
 
     # Widget's own module names (Python only)
-    own_modules = set()
+    own_modules = {"src"}  # src/ is always the widget's own package
     src_dir = os.path.join(path, "src")
     if os.path.isdir(src_dir) and not is_js:
         for f in os.listdir(src_dir):
@@ -175,15 +175,27 @@ def _scan_contamination(path: str, widget: dict) -> dict:
             line_no = code[:m.start()].count("\n") + 1
             warnings.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
 
-        # Python-only: unlisted import check
+        # Python-only: unlisted import check (AST-based to skip docstrings)
         if not is_js and fpath in src_files:
-            for m in _IMPORT_RE.finditer(code):
-                top = m.group(1).split(".")[0].lower()
-                if top and top not in _STDLIB and top not in dep_names and top not in own_modules:
-                    line_no = code[:m.start()].count("\n") + 1
-                    warnings.append(
-                        f"Unlisted import '{top}' in {rel}:{line_no} — add to dependencies or remove"
-                    )
+            try:
+                import ast
+                tree = ast.parse(code)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            top = alias.name.split(".")[0].lower()
+                            if top and top not in _STDLIB and top not in dep_names and top not in own_modules:
+                                warnings.append(
+                                    f"Unlisted import '{top}' in {rel}:{node.lineno} — add to dependencies or remove"
+                                )
+                    elif isinstance(node, ast.ImportFrom) and node.module:
+                        top = node.module.split(".")[0].lower()
+                        if top and top not in _STDLIB and top not in dep_names and top not in own_modules:
+                            warnings.append(
+                                f"Unlisted import '{top}' in {rel}:{node.lineno} — add to dependencies or remove"
+                            )
+            except SyntaxError:
+                pass
 
     return {"blocks": blocks, "warnings": warnings}
 
@@ -437,7 +449,8 @@ def restore(carto, item_id, version, reason):
 
 def add_review(carto, widget_id, target_dir, score, comment=None):
     """Add a review to a widget. Must be installed at target_dir/widget_id/."""
-    installed_path = os.path.join(target_dir, "cartograph", widget_id)
+    from .engine import python_dir_name, DEFAULT_INSTALL_DIR
+    installed_path = os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(widget_id))
     if not os.path.exists(installed_path):
         return {"error": f"'{widget_id}' not found at {installed_path}. Install it first."}
 
@@ -495,7 +508,8 @@ def widget_status(carto, widget_id, target_dir):
     if not widget:
         return {"error": f"'{widget_id}' not found in library."}
 
-    installed_path = os.path.join(target_dir, "cartograph", widget_id)
+    from .engine import python_dir_name, DEFAULT_INSTALL_DIR
+    installed_path = os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(widget_id))
     if not os.path.exists(installed_path):
         return {"error": f"'{widget_id}' not found at {installed_path}."}
 
