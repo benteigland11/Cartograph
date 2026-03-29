@@ -54,9 +54,9 @@ jobs:
 
       - name: Verify widget structure
         run: |
-          test -f cartograph/backend-ci-test-python/widget.json
-          test -d cartograph/backend-ci-test-python/src
-          test -d cartograph/backend-ci-test-python/tests
+          test -f cg/backend-ci-test-python/widget.json
+          test -d cg/backend-ci-test-python/src
+          test -d cg/backend-ci-test-python/tests
 
       - name: cartograph stats
         run: cartograph stats
