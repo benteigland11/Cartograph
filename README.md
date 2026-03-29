@@ -1,7 +1,7 @@
 # Cartograph
 
 [![Tests](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml/badge.svg)](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml)
-[![PyPI](https://img.shields.io/pypi/v/cartograph-cli?cache=bust)](https://pypi.org/project/cartograph-cli/)
+[![PyPI](https://img.shields.io/pypi/v/cartograph-cli?cacheSeconds=60)](https://pypi.org/project/cartograph-cli/)
 
 A shared widget library for AI agents. Search, install, create, validate, and check in reusable code across projects. Only requires Python. Other languages in the repo are native validation scanners for their respective widget types.
 
