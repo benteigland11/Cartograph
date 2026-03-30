@@ -13,11 +13,7 @@ import urllib.parse
 import zipfile
 from io import BytesIO
 
-try:
-    from cg.infra_agent_cli_python.src.agent_cli import AgentCLI, out, err
-except ImportError:
-    # Fallback for pip installs where cg/ isn't available
-    from cartograph._vendor.agent_cli import AgentCLI, out, err
+from cg.infra_agent_cli_python.src.agent_cli import AgentCLI, out, err
 
 
 def _check_and_prompt_tos():
