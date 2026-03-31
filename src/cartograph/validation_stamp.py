@@ -20,7 +20,7 @@ from cg.infra_file_stamp_python.src.file_stamp import (
     collect_files as _collect_files,
     fingerprint as _fingerprint,
     write_stamp as _write_stamp,
-    read_stamp,
+    read_stamp as _read_stamp,
     is_stamp_valid as _is_stamp_valid,
 )
 
@@ -45,10 +45,12 @@ def write_stamp(widget_path: str, language: str, engine,
                 test_results: dict | None = None) -> None:
     """Write a fresh validation stamp. Called after successful validate_item()."""
     patterns = _engine_patterns(widget_path, engine)
+    from datetime import datetime, timezone
     metadata = {
         "language": language,
         "cartograph_version": _cartograph_version(),
         "test_results": test_results or {},
+        "validated_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
         _write_stamp(widget_path, metadata=metadata, stamp_name=STAMP_FILE,
@@ -56,6 +58,11 @@ def write_stamp(widget_path: str, language: str, engine,
         log.debug("Validation stamp written to %s", widget_path)
     except OSError as e:
         log.debug("Could not write validation stamp: %s", e)
+
+
+def read_stamp(widget_path: str) -> dict | None:
+    """Read the validation stamp if it exists, else None."""
+    return _read_stamp(widget_path, stamp_name=STAMP_FILE)
 
 
 def is_stamp_valid(widget_path: str, language: str, engine) -> bool:
