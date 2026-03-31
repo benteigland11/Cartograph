@@ -254,22 +254,25 @@ def download_widget(owner_handle: str, widget_id: str) -> dict:
     Returns {"zip_bytes": bytes, "version": str} on success,
     or {"error": ...} on failure.
     """
-    # Get the signed download URL
-    result = _get(
-        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+    url = (
+        _registry_url()
+        + f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
         f"/{urllib.parse.quote(widget_id)}/download"
     )
-    if "error" in result:
-        return result
-
-    download_url = result.get("download_url")
-    if not download_url:
-        return {"error": "No download URL returned"}
-
+    headers = _headers()
+    headers["Accept"] = "application/zip"
+    req = urllib.request.Request(url, headers=headers)
     try:
-        req = urllib.request.Request(download_url)
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return {"zip_bytes": resp.read(), "version": result.get("version", "0.0.0")}
+            version = resp.headers.get("X-Widget-Version", "0.0.0")
+            return {"zip_bytes": resp.read(), "version": version}
+    except urllib.error.HTTPError as e:
+        body = {}
+        try:
+            body = json.loads(e.read())
+        except Exception:
+            pass
+        return {"error": body.get("detail", str(e)), "status_code": e.code}
     except Exception as e:
         return {"error": f"Download failed: {e}"}
 

@@ -52,7 +52,13 @@ def _install_from_cloud(widget_id, dest_path):
     # Search cloud to find the widget and its owner
     results = cloud_search(widget_id, top_k=5)
     widgets = results.get("widgets", [])
-    match = next((w for w in widgets if w.get("id") == widget_id), None)
+    # Search results may return namespaced IDs (@owner/widget-id) or bare IDs
+    match = next(
+        (w for w in widgets
+         if w.get("id") == widget_id
+         or w.get("id", "").endswith(f"/{widget_id}")),
+        None,
+    )
     if not match:
         return {"error": f"Widget '{widget_id}' not found locally or in the cloud registry."}
 
