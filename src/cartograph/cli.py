@@ -153,8 +153,23 @@ def cmd_search(args):
 
 
 def cmd_inspect(args):
+    widget_id = args.widget_id
+
+    # Cloud widget: @handle/widget_id
+    if widget_id.startswith("@"):
+        parts = widget_id[1:].split("/", 1)
+        if len(parts) != 2:
+            err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
+        owner, wid = parts
+        from .cloud import inspect as cloud_inspect
+        result = cloud_inspect(owner, wid)
+        if "error" in result:
+            err(result)
+        out(result)
+        return
+
     result = _carto().inspect(
-        widget_id=args.widget_id,
+        widget_id=widget_id,
         show_source=args.source,
         show_all_versions=args.all_versions,
         show_reviews=args.reviews,
@@ -317,9 +332,12 @@ def cmd_checkin(args):
         err(result)
     out(result)
 
-    # Push to cloud: always if --publish, otherwise only if already published
+    # Push to cloud: always if --publish or auto_publish config, otherwise only if already published
     if result.get("action") in ("updated", "registered"):
-        if getattr(args, "publish", False):
+        from .config import load_config
+        cfg = load_config()
+        publish = getattr(args, "publish", False) or cfg["publish"]["auto_publish"]
+        if publish:
             _force_push(result)
         else:
             _auto_push_if_published(result)
@@ -563,7 +581,11 @@ def cmd_cloud_publish(args):
         err({"error": "Push with --override-warnings requires --override-reason."})
 
     from .cloud import push
-    result = push(path, widget_id, visibility=args.visibility)
+    from .config import load_config
+    cfg = load_config()
+    visibility = args.visibility or cfg["publish"]["visibility"]
+    governance = getattr(args, "governance", None)
+    result = push(path, widget_id, visibility=visibility, governance=governance)
     if "error" in result:
         err(result)
 
@@ -725,6 +747,156 @@ def cmd_rollback(args):
     print()
 
 
+def _parse_cloud_id(widget_id: str):
+    """Parse @handle/widget_id into (owner, widget_id). Calls err() on bad format."""
+    if not widget_id.startswith("@"):
+        err({"error": f"Expected @owner/widget_id format, got '{widget_id}'"})
+    parts = widget_id[1:].split("/", 1)
+    if len(parts) != 2:
+        err({"error": f"Invalid format: '{widget_id}'. Use @owner/widget_id."})
+    return parts[0], parts[1]
+
+
+def cmd_cloud_update(args):
+    """Update a cloud widget's settings."""
+    from . import cloud, auth
+    if not auth.is_authenticated():
+        err({"error": "Not authenticated. Run: cartograph login"})
+
+    owner, wid = _parse_cloud_id(args.widget_id)
+    kwargs = {}
+    if args.governance:
+        kwargs["governance"] = args.governance
+    if not kwargs:
+        err({"error": "Nothing to update. Use --governance open|protected."})
+
+    result = cloud.update_widget(owner, wid, **kwargs)
+    if "error" in result:
+        err(result)
+    out(result)
+
+
+def cmd_propose(args):
+    """Propose a contribution to someone else's widget."""
+    from . import cloud, auth
+    from .checkin import _scan_contamination
+
+    if not auth.is_authenticated():
+        err({"error": "Not authenticated. Run: cartograph login"})
+
+    owner, wid = _parse_cloud_id(args.target)
+    path = _resolve_widget(args.path)
+    _preflight_from_path(path)
+
+    # Read widget.json for language + contamination scan
+    try:
+        with open(os.path.join(path, "widget.json")) as f:
+            widget_data = json.load(f)
+    except Exception:
+        widget_data = {}
+    tech_stack = widget_data.get("tech_stack", {})
+    language = tech_stack.get("language", "python")
+
+    # Ensure valid stamp
+    from .validation_stamp import is_stamp_valid
+    from .languages import get_engine
+    engine = get_engine(language)
+    if engine is None or not is_stamp_valid(path, language, engine):
+        print("  No valid stamp - running validation first...\n", file=sys.stderr)
+        validate_result = _carto().validate_item(path=path)
+        if validate_result.get("status") == "error":
+            err(validate_result)
+
+    # Contamination scan
+    scan = _scan_contamination(path, tech_stack)
+    if scan["blocks"]:
+        err({"error": "Proposal blocked: project-specific content detected.", "blocks": scan["blocks"]})
+    if scan["warnings"]:
+        err({
+            "status": "warnings",
+            "message": "Proposal paused: potential contamination found. Clean up before proposing.",
+            "warnings": scan["warnings"],
+        })
+
+    result = cloud.propose(path, owner, wid, reason=args.reason)
+    if "error" in result:
+        err(result)
+
+    status = result.get("status", "unknown")
+    if status == "published":
+        print(f"\n  Auto-merged into @{owner}/{wid}\n")
+    elif status == "escalated":
+        print(f"\n  Proposal queued (safeguards tripped)")
+        for v in result.get("violations", []):
+            print(f"    - {v}")
+        print()
+    else:
+        print(f"\n  Proposal submitted to @{owner}/{wid} for review\n")
+    out(result)
+
+
+def cmd_proposals(args):
+    """List my proposals."""
+    from . import cloud, auth
+    if not auth.is_authenticated():
+        err({"error": "Not authenticated. Run: cartograph login"})
+    result = cloud.my_proposals()
+    if "error" in result:
+        err(result)
+    out(result)
+
+
+def cmd_proposals_view(args):
+    """View proposals for a widget or a specific proposal."""
+    from . import cloud, auth
+    if not auth.is_authenticated():
+        err({"error": "Not authenticated. Run: cartograph login"})
+
+    owner, wid = _parse_cloud_id(args.widget_id)
+    result = cloud.list_proposals(owner, wid)
+    if "error" in result:
+        err(result)
+
+    # Filter to specific proposal if ID given
+    proposal_id = getattr(args, "proposal_id", None)
+    if proposal_id:
+        proposals = result.get("proposals", [])
+        match = next((p for p in proposals if str(p.get("id")) == str(proposal_id)), None)
+        if not match:
+            err({"error": f"Proposal '{proposal_id}' not found."})
+        out(match)
+        return
+    out(result)
+
+
+def cmd_proposals_accept(args):
+    """Accept a proposal."""
+    from . import cloud, auth
+    if not auth.is_authenticated():
+        err({"error": "Not authenticated. Run: cartograph login"})
+
+    owner, wid = _parse_cloud_id(args.widget_id)
+    result = cloud.accept_proposal(owner, wid, args.proposal_id)
+    if "error" in result:
+        err(result)
+    print(f"\n  Proposal {args.proposal_id} accepted\n")
+    out(result)
+
+
+def cmd_proposals_reject(args):
+    """Reject a proposal."""
+    from . import cloud, auth
+    if not auth.is_authenticated():
+        err({"error": "Not authenticated. Run: cartograph login"})
+
+    owner, wid = _parse_cloud_id(args.widget_id)
+    result = cloud.reject_proposal(owner, wid, args.proposal_id, reason=args.reason)
+    if "error" in result:
+        err(result)
+    print(f"\n  Proposal {args.proposal_id} rejected\n")
+    out(result)
+
+
 def cmd_doctor(args):
     import shutil
     import subprocess
@@ -856,11 +1028,19 @@ update. Wrap or extend in your own code instead.
 
     cartograph cloud publish [widget_id] [path]
         [--lib]                          publish from library by ID
-        [--visibility public|private]    defaults to public
-
+        [--visibility public|private]    defaults to public (or cartograph.toml)
+        [--governance open|protected]    contribution governance model
+    cartograph cloud update <@handle/widget_id>
+        [--governance open|protected]    update governance model
     cartograph cloud unpublish <widget_id> --confirm
     cartograph cloud sync [--dry-run]
     cartograph cloud rate <@handle/widget_id> <score 1-5> [--comment "..."]
+    cartograph cloud propose <@owner/widget_id> [path]
+        --reason "what changed and why"  REQUIRED
+    cartograph cloud proposals list            list my proposals
+    cartograph cloud proposals view <@owner/widget_id> [proposal_id]
+    cartograph cloud proposals accept <@owner/widget_id> <proposal_id>
+    cartograph cloud proposals reject <@owner/widget_id> <proposal_id> [--reason "..."]
 
 **Library and account**
 
@@ -1272,9 +1452,22 @@ def _build_cli() -> AgentCLI:
                  "help": "Widget ID (required with --lib, inferred otherwise)"},
                 {"name": "path", "nargs": "?", "default": ".", "help": "Widget directory (default: .)"},
                 {"name": "--lib", "action": "store_true", "default": False},
-                {"name": "--visibility", "default": "public", "choices": ["public", "private"]},
+                {"name": "--visibility", "default": None, "choices": ["public", "private"],
+                 "help": "Visibility (default from cartograph.toml or public)"},
+                {"name": "--governance", "default": None, "choices": ["open", "protected"],
+                 "help": "Contribution governance model"},
                 {"name": "--override-warnings", "action": "store_true", "default": False, "dest": "override_warnings"},
                 {"name": "--override-reason", "default": None, "dest": "override_reason"},
+            ],
+        },
+        {
+            "name": "cloud update",
+            "help": "Update a cloud widget's settings",
+            "handler": cmd_cloud_update,
+            "args": [
+                {"name": "widget_id", "help": "Widget ID (@handle/widget-id)"},
+                {"name": "--governance", "default": None, "choices": ["open", "protected"],
+                 "help": "Contribution governance model"},
             ],
         },
         {
@@ -1302,6 +1495,50 @@ def _build_cli() -> AgentCLI:
                 {"name": "widget_id", "help": "Widget ID (e.g. @handle/widget-id)"},
                 {"name": "score", "type": int, "help": "Score from 1 to 5"},
                 {"name": "--comment", "default": "", "help": "Optional review comment"},
+            ],
+        },
+        {
+            "name": "cloud propose",
+            "help": "Propose a contribution to a cloud widget",
+            "handler": cmd_propose,
+            "args": [
+                {"name": "target", "help": "Target widget (@owner/widget-id)"},
+                {"name": "path", "nargs": "?", "default": ".", "help": "Local widget directory (default: .)"},
+                {"name": "--reason", "required": True, "help": "What changed and why"},
+            ],
+        },
+        {
+            "name": "cloud proposals list",
+            "help": "List my proposals",
+            "handler": cmd_proposals,
+            "args": [],
+        },
+        {
+            "name": "cloud proposals view",
+            "help": "View proposals for a widget",
+            "handler": cmd_proposals_view,
+            "args": [
+                {"name": "widget_id", "help": "Widget ID (@owner/widget-id)"},
+                {"name": "proposal_id", "nargs": "?", "default": None, "help": "Specific proposal ID"},
+            ],
+        },
+        {
+            "name": "cloud proposals accept",
+            "help": "Accept a proposal",
+            "handler": cmd_proposals_accept,
+            "args": [
+                {"name": "widget_id", "help": "Widget ID (@owner/widget-id)"},
+                {"name": "proposal_id", "help": "Proposal ID to accept"},
+            ],
+        },
+        {
+            "name": "cloud proposals reject",
+            "help": "Reject a proposal",
+            "handler": cmd_proposals_reject,
+            "args": [
+                {"name": "widget_id", "help": "Widget ID (@owner/widget-id)"},
+                {"name": "proposal_id", "help": "Proposal ID to reject"},
+                {"name": "--reason", "default": "", "help": "Reason for rejection"},
             ],
         },
     ])

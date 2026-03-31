@@ -14,7 +14,7 @@ import sys
 log = logging.getLogger("cartograph")
 
 
-from cartograph.engine import DEFAULT_INSTALL_DIR
+from cartograph.engine import DEFAULT_INSTALL_DIR, python_dir_name
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "library_config.json")
 
@@ -78,7 +78,7 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
         target_dir = os.getcwd()
 
     # Always place under <project_root>/cartograph/<widget_id>
-    target_dir = os.path.join(target_dir, DEFAULT_INSTALL_DIR, item_id)
+    target_dir = os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(item_id))
 
     if os.path.exists(target_dir):
         return {"status": "error", "message": f"Directory already exists: {target_dir}"}

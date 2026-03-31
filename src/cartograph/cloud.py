@@ -82,6 +82,24 @@ def _post(path: str, data: dict) -> dict:
         return {"error": str(e)}
 
 
+def _patch(path: str, data: dict) -> dict:
+    url = _registry_url() + path
+    payload = json.dumps(data).encode()
+    req = urllib.request.Request(url, data=payload, headers=_headers(), method="PATCH")
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = {}
+        try:
+            body = json.loads(e.read())
+        except Exception:
+            pass
+        return {"error": body.get("detail", str(e)), "status_code": e.code}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _post_multipart(path: str, fields: dict, file_data: bytes, filename: str) -> dict:
     """POST multipart/form-data with a single file attachment."""
     boundary = b"cartograph_boundary_" + os.urandom(8).hex().encode()
@@ -172,7 +190,8 @@ def search_users(query: str, top_k: int = 20) -> dict:
     return {"users": result.get("users", [])}
 
 
-def push(widget_path: str, widget_id: str, visibility: str = "public") -> dict:
+def push(widget_path: str, widget_id: str, visibility: str = "public",
+         governance: str | None = None) -> dict:
     """
     Push a validated widget to the cloud registry.
 
@@ -201,28 +220,15 @@ def push(widget_path: str, widget_id: str, visibility: str = "public") -> dict:
     signature = sign_stamp(stamp)
     signed_stamp = {**stamp, "signature": signature}
 
-    # Bundle widget files into a zip in memory
-    buf = BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _dirs, files in os.walk(widget_path):
-            # Skip generated dirs and stamp itself
-            rel_root = os.path.relpath(root, widget_path)
-            skip_dirs = {"__pycache__", ".pytest_cache", "history", ".git", "node_modules"}
-            if any(part in skip_dirs for part in rel_root.split(os.sep)):
-                continue
-            for fname in files:
-                if fname in (".validation_stamp.json", "reviews.json", "changelog.json"):
-                    continue
-                fpath = os.path.join(root, fname)
-                arcname = os.path.relpath(fpath, widget_path)
-                zf.write(fpath, arcname)
-    zip_bytes = buf.getvalue()
+    zip_bytes = _zip_widget(widget_path)
 
     fields = {
         "widget_id": widget_id,
         "visibility": visibility,
         "stamp": json.dumps(signed_stamp),
     }
+    if governance:
+        fields["governance"] = governance
 
     return _post_multipart(
         f"/v1/widgets/{urllib.parse.quote(widget_id, safe='')}/publish",
@@ -425,3 +431,111 @@ def login_with_credentials(id_token: str, refresh_token: str,
 
     save_credentials(id_token, refresh_token, signing_key)
     return {"status": "success", "owner": data.get("owner") or data.get("username", "unknown")}
+
+
+# ---------------------------------------------------------------------------
+# Governance & Proposals
+# ---------------------------------------------------------------------------
+
+def update_widget(owner_handle: str, widget_id: str, **kwargs) -> dict:
+    """PATCH a cloud widget's settings (e.g. governance)."""
+    return _patch(
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}",
+        kwargs,
+    )
+
+
+def _zip_widget(widget_path: str) -> bytes:
+    """Bundle widget files into a zip in memory (shared by push and propose)."""
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(widget_path):
+            rel_root = os.path.relpath(root, widget_path)
+            skip_dirs = {"__pycache__", ".pytest_cache", "history", ".git", "node_modules"}
+            if any(part in skip_dirs for part in rel_root.split(os.sep)):
+                continue
+            for fname in files:
+                if fname in (".validation_stamp.json", ".file_stamp.json",
+                             "reviews.json", "changelog.json"):
+                    continue
+                fpath = os.path.join(root, fname)
+                arcname = os.path.relpath(fpath, widget_path)
+                zf.write(fpath, arcname)
+    return buf.getvalue()
+
+
+def propose(widget_path: str, owner_handle: str, widget_id: str,
+            reason: str) -> dict:
+    """Propose a contribution to someone else's widget.
+
+    Validates locally, zips the widget, and POSTs to the contribute endpoint.
+    Returns the registry response which can be:
+    - published (auto-merged for open governance)
+    - proposed (queued for review)
+    - escalated (safeguards tripped, queued with violations)
+    """
+    from .auth import is_authenticated
+    from .validation_stamp import read_stamp
+    from .trust import sign_stamp
+
+    if not is_authenticated():
+        return {"error": "Not authenticated. Run: cartograph login"}
+
+    stamp = read_stamp(widget_path)
+    if stamp is None:
+        return {"error": f"No validation stamp at {widget_path}. Run 'cartograph validate' first."}
+
+    signature = sign_stamp(stamp)
+    signed_stamp = {**stamp, "signature": signature}
+
+    zip_bytes = _zip_widget(widget_path)
+
+    fields = {
+        "reason": reason,
+        "stamp": json.dumps(signed_stamp),
+    }
+
+    return _post_multipart(
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}/contribute",
+        fields=fields,
+        file_data=zip_bytes,
+        filename=f"{widget_id}.zip",
+    )
+
+
+def my_proposals() -> dict:
+    """List the authenticated user's proposals."""
+    return _get("/v1/auth/my-proposals")
+
+
+def list_proposals(owner_handle: str, widget_id: str) -> dict:
+    """List proposals for a widget (owner view)."""
+    return _get(
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}/proposals"
+    )
+
+
+def accept_proposal(owner_handle: str, widget_id: str,
+                    proposal_id: str) -> dict:
+    """Accept a proposal."""
+    return _post(
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}"
+        f"/proposals/{urllib.parse.quote(proposal_id)}/accept",
+        {},
+    )
+
+
+def reject_proposal(owner_handle: str, widget_id: str,
+                    proposal_id: str, reason: str = "") -> dict:
+    """Reject a proposal."""
+    params = f"?reason={urllib.parse.quote(reason)}" if reason else ""
+    return _post(
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}"
+        f"/proposals/{urllib.parse.quote(proposal_id)}/reject{params}",
+        {},
+    )

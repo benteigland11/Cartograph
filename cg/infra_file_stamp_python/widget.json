@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "id": "infra-file-stamp-python",
+    "name": "File Stamp",
+    "version": "1.0.0",
+    "domain": "infra",
+    "tags": [
+      "fingerprint",
+      "cache-invalidation",
+      "file-hash",
+      "change-detection",
+      "build-tools"
+    ]
+  },
+  "description": "Fingerprint-based change detection for file sets. Computes SHA-256 over watched files, writes a JSON stamp, and checks validity on subsequent runs. Useful for build cache invalidation, validation short-circuiting, and incremental processing pipelines.",
+  "tech_stack": {
+    "language": "python",
+    "dependencies": []
+  },
+  "library_notes": {
+    "general": "Single responsibility - one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. Expose variation points as constructor parameters or function arguments - no hardcoded thresholds, colors, sizes, or behavior flags. All dependencies must be declared in widget.json tech_stack.dependencies. Widgets cannot depend on other widgets - they must be fully self-contained. If you need logic from another widget, copy it into src/ directly. Examples must run and exit cleanly with no user input, no network calls, and no external services or API keys - use fake/hardcoded data. The widget's own declared dependencies are fine and will be installed by the validator before the example runs. Do not modify library_notes - it is managed by Cartograph and will be restored on checkin.",
+    "language": "Use pytest for all tests - no unittest. Type hints required on all public functions. No __init__.py in tests/. No if __name__ == '__main__' blocks in src/ files. Imports ordered: stdlib, third-party, local."
+  }
+}

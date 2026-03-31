@@ -63,10 +63,19 @@ update. Wrap or extend in your own code instead.
 
     cartograph cloud publish [widget_id] [path]
         [--lib]                          publish from library by ID
-        [--visibility public|private]    defaults to public
+        [--visibility public|private]    defaults to public (or cartograph.toml)
+        [--governance open|protected]    contribution governance model
+    cartograph cloud update <@handle/widget_id>
+        [--governance open|protected]    update governance model
     cartograph cloud unpublish <widget_id> [--confirm]
     cartograph cloud sync                reconcile local with cloud
     cartograph cloud rate <widget_id> <score 1-5> [--comment "..."]
+    cartograph cloud propose <@owner/widget_id> [path]
+        --reason "what changed and why"  REQUIRED
+    cartograph cloud proposals list            list my proposals
+    cartograph cloud proposals view <@owner/widget_id> [proposal_id]
+    cartograph cloud proposals accept <@owner/widget_id> <proposal_id>
+    cartograph cloud proposals reject <@owner/widget_id> <proposal_id> [--reason "..."]
 
 **Library and account**
 

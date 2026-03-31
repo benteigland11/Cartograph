@@ -248,6 +248,74 @@ class TestRun:
         assert "Basic:" in captured.out
 
 
+class TestDeepNesting:
+    def test_three_level_nesting(self):
+        def cmd_leaf(args):
+            return {"id": args.id}
+
+        cli = AgentCLI(prog="t", version="0.1.0")
+        cli.add_commands("Cloud", [
+            {
+                "name": "cloud proposals list",
+                "help": "List proposals",
+                "handler": lambda a: {"items": []},
+                "args": [],
+            },
+            {
+                "name": "cloud proposals view",
+                "help": "View a proposal",
+                "handler": cmd_leaf,
+                "args": [{"name": "id"}],
+            },
+            {
+                "name": "cloud push",
+                "help": "Push to cloud",
+                "handler": lambda a: {"pushed": True},
+                "args": [],
+            },
+        ])
+        parser = cli.build_parser()
+
+        # Three-level command works
+        args = parser.parse_args(["cloud", "proposals", "view", "42"])
+        assert args.id == "42"
+        assert hasattr(args, "func")
+
+        # Two-level sibling still works
+        args2 = parser.parse_args(["cloud", "push"])
+        assert hasattr(args2, "func")
+
+    def test_four_level_nesting(self):
+        cli = AgentCLI(prog="t", version="0.1.0")
+        cli.add_commands("Deep", [
+            {
+                "name": "a b c d",
+                "help": "Four levels deep",
+                "handler": lambda a: {"deep": True},
+                "args": [{"name": "val"}],
+            },
+        ])
+        parser = cli.build_parser()
+        args = parser.parse_args(["a", "b", "c", "d", "hello"])
+        assert args.val == "hello"
+
+    def test_parent_shows_help(self, capsys):
+        cli = AgentCLI(prog="t", version="0.1.0")
+        cli.add_commands("Cloud", [
+            {
+                "name": "cloud proposals list",
+                "help": "List proposals",
+                "handler": lambda a: {},
+                "args": [],
+            },
+        ])
+        parser = cli.build_parser()
+        # "cloud proposals" with no subcommand should print help
+        args = parser.parse_args(["cloud", "proposals"])
+        func = getattr(args, "func", None)
+        assert func is not None  # should have the help-printing default
+
+
 class TestMultipleGroups:
     def test_three_groups(self):
         cli = AgentCLI(prog="t", version="0.1.0")

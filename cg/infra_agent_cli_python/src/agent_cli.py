@@ -95,6 +95,9 @@ class AgentCLI:
             )
 
         sub = parser.add_subparsers(dest="command", metavar="<command>")
+        # Maps a tuple of parent parts to (parser, subparsers) for nested commands.
+        # e.g. ("cloud",) -> (cloud_parser, cloud_subparsers)
+        #      ("cloud", "proposals") -> (proposals_parser, proposals_subparsers)
         self._nested_parsers = {}
 
         for _group_name, commands in self._groups:
@@ -103,16 +106,23 @@ class AgentCLI:
                 parts = name.split()
                 handler = cmd.get("handler")
 
-                if len(parts) == 2:
-                    parent, child = parts
-                    if parent not in self._nested_parsers:
-                        parent_parser = sub.add_parser(parent, help=f"{parent} operations")
-                        parent_sub = parent_parser.add_subparsers(dest=f"{parent}_command")
-                        self._nested_parsers[parent] = (parent_parser, parent_sub)
-                    _, parent_sub = self._nested_parsers[parent]
-                    p = parent_sub.add_parser(child, help=cmd.get("help", ""))
-                else:
+                if len(parts) == 1:
                     p = sub.add_parser(name, help=cmd.get("help", ""))
+                else:
+                    # Walk the parent chain, creating subparsers at each level
+                    current_sub = sub
+                    for depth in range(len(parts) - 1):
+                        key = tuple(parts[: depth + 1])
+                        if key not in self._nested_parsers:
+                            parent_name = parts[depth]
+                            dest = "_".join(key) + "_command"
+                            parent_parser = current_sub.add_parser(
+                                parent_name, help=f"{parent_name} operations",
+                            )
+                            parent_sub = parent_parser.add_subparsers(dest=dest)
+                            self._nested_parsers[key] = (parent_parser, parent_sub)
+                        _, current_sub = self._nested_parsers[key]
+                    p = current_sub.add_parser(parts[-1], help=cmd.get("help", ""))
 
                 for arg_spec in cmd.get("args", []):
                     self._add_arg(p, arg_spec)
@@ -120,7 +130,7 @@ class AgentCLI:
                 if handler:
                     p.set_defaults(func=handler)
 
-        for parent, (parent_parser, _) in self._nested_parsers.items():
+        for key, (parent_parser, _) in self._nested_parsers.items():
             parent_parser.set_defaults(func=lambda args, pp=parent_parser: pp.print_help())
 
         return parser
