@@ -12,7 +12,11 @@ Example cartograph.toml:
 """
 
 import os
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    tomllib = None
 
 _DEFAULTS = {
     "publish": {
@@ -30,7 +34,7 @@ def load_config(project_root: str | None = None) -> dict:
     config = {section: dict(values) for section, values in _DEFAULTS.items()}
 
     path = os.path.join(project_root, "cartograph.toml")
-    if not os.path.isfile(path):
+    if not os.path.isfile(path) or tomllib is None:
         return config
 
     try:
