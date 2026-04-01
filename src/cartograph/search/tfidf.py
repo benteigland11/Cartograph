@@ -50,9 +50,9 @@ _FUZZY_CORRECTION_WEIGHT = 0.7
 _SUFFIXES = (
     "ation", "tion", "sion", "ment", "ness", "ible", "able",
     "ying", "ing", "ies", "ers", "ous", "ive", "ful",
-    "ed", "ly", "er", "or", "es", "al", "ty", "ry", "ts", "s",
+    "ed", "ly", "er", "or", "es", "al",
 )
-_MIN_STEM_LENGTH = 3
+_MIN_STEM_LENGTH = 5
 
 
 def _stem(token: str) -> str:
