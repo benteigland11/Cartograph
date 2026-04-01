@@ -237,6 +237,7 @@ class NimEngine(LanguageEngine):
 
     def cleanup(self, path: str) -> None:
         self._cleanup_nimble_dir()
+        self._cleanup_compiled_binaries(path)
 
     # -- Private helpers --
 
@@ -252,6 +253,26 @@ class NimEngine(LanguageEngine):
             shutil.rmtree(nimble_dir, ignore_errors=True)
             log.debug("Removed isolated Nim env: %s", nimble_dir)
         self._nimble_dir = None
+
+    def _cleanup_compiled_binaries(self, path: str) -> None:
+        """Remove compiled test/example binaries left by nimble c -r."""
+        for subdir in ("tests", "examples"):
+            dirpath = os.path.join(path, subdir)
+            if not os.path.isdir(dirpath):
+                continue
+            for fname in os.listdir(dirpath):
+                fpath = os.path.join(dirpath, fname)
+                if os.path.isfile(fpath) and not os.path.splitext(fname)[1]:
+                    # No extension = likely compiled binary
+                    try:
+                        with open(fpath, "rb") as f:
+                            header = f.read(4)
+                        # ELF binary or Mach-O or PE
+                        if header[:4] in (b"\x7fELF", b"\xcf\xfa\xed\xfe", b"MZ\x90\x00"):
+                            os.remove(fpath)
+                            log.debug("Removed compiled binary: %s", fpath)
+                    except Exception:
+                        pass
 
     def _sync_nimble_requires(self, path: str, dependencies: list) -> None:
         """Keep .nimble requires in sync with widget.json dependencies."""

@@ -149,6 +149,14 @@ def cmd_search(args):
     }
     if cloud.get("error"):
         merged["cloud_error"] = cloud["error"]
+
+    if not combined:
+        print(f"\n  No widgets found for '{args.query}'.")
+        if args.domain or args.language:
+            print("  Try broadening your search by removing --domain or --language filters.")
+        print("  Run 'cartograph doctor' to check available language engines.\n")
+        return
+
     out(merged)
 
 
