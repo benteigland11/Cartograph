@@ -54,9 +54,12 @@ jobs:
 
       - name: Verify widget structure
         run: |
-          test -f cg/backend_ci_test_python/widget.json
-          test -d cg/backend_ci_test_python/src
-          test -d cg/backend_ci_test_python/tests
+          # Find the created widget dir dynamically instead of hardcoding
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "widget.json" -printf "%h" -quit)
+          echo "Widget created at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/widget.json"
+          test -d "$WIDGET_DIR/src"
+          test -d "$WIDGET_DIR/tests"
 
       - name: cartograph stats
         run: cartograph stats

@@ -53,14 +53,14 @@ check "cartograph create" cartograph create backend-hello-python \
     --language python --domain backend --name "Hello World"
 
 # 6. Check the widget structure exists
-check "widget structure" test -f cartograph/backend-hello-python/widget.json
-check "widget src exists" test -d cartograph/backend-hello-python/src
-check "widget tests exist" test -d cartograph/backend-hello-python/tests
+check "widget structure" test -f cg/backend_hello_python/widget.json
+check "widget src exists" test -d cg/backend_hello_python/src
+check "widget tests exist" test -d cg/backend_hello_python/tests
 
 # 7. Validate the widget (should fail on template TODOs)
 echo ""
 echo "=== validate (expect failure on TODOs) ==="
-if cartograph validate cartograph/backend-hello-python 2>&1; then
+if cartograph validate cg/backend_hello_python 2>&1; then
     echo "  NOTE: validate passed (unexpected but ok)"
 else
     echo "  Expected failure on template TODOs - PASS"
