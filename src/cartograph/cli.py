@@ -1022,7 +1022,7 @@ creates `backend-retry-backoff-python`.
     cartograph validate [path] [--lib]
     cartograph checkin [path] --reason "..." [--bump patch|minor|major] [--publish]
     cartograph rollback <widget_id> [--version X] [--reason "..."]
-    cartograph delete <widget_id> [--confirm]
+    cartograph delete <widget_id> [--confirm]       also unpublishes from cloud
 
     cartograph cloud publish [widget_id] [path] [--visibility ...] [--governance ...]
     cartograph cloud unpublish <widget_id> [--confirm]

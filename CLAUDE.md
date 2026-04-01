@@ -57,7 +57,7 @@ update. Wrap or extend in your own code instead.
         [--publish]                      also publish to cloud
 
     cartograph rollback <widget_id> [--version X] [--reason "..."]
-    cartograph delete <widget_id> [--confirm]
+    cartograph delete <widget_id> [--confirm]       also unpublishes from cloud
 
 **Cloud registry**
 
