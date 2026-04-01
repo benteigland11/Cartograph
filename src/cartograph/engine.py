@@ -532,7 +532,7 @@ class Cartograph:
                              widget_type=widget_type)
 
     def search(self, query, domain_filter=None, language_filter=None, top_k=10):
-        """Search the widget library using hybrid BM25 + n-gram fuzzy matching."""
+        """Search the widget library using hybrid TF-IDF + n-gram fuzzy matching."""
         if language_filter:
             normalized = normalize_language(language_filter)
             available = {normalize_language(w.get("language", "")) for w in self.widgets}

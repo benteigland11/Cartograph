@@ -1,11 +1,11 @@
 """
-Hybrid BM25 + n-gram search backend.
+Hybrid TF-IDF + n-gram search backend.
 
 Combines two complementary signals:
-  - BM25    : whole-token matching, good for natural-language queries and descriptions
+  - TF-IDF  : field-weighted term matching, good for natural-language queries
   - N-gram  : character-level fuzzy matching, good for typos, partial IDs, prefix queries
 
-Final score = α * norm(bm25) + β * norm(ngram)
+Final score = alpha * norm(tfidf) + beta * norm(ngram)
 
 Both score vectors are normalised to [0, 1] before combining so neither
 dominates by accident of scale. We weight n-gram slightly higher because
@@ -19,18 +19,18 @@ statistics.
 from __future__ import annotations
 
 from .base import SearchBackend
-from .bm25 import BM25Backend
 from .filters import apply_filters, format_results
 from .ngram import NgramIndex
+from .tfidf import TFIDFBackend
 
-# Mix weights — must sum to 1.0
-_ALPHA = 0.40   # BM25 contribution
+# Mix weights - must sum to 1.0
+_ALPHA = 0.40   # TF-IDF contribution
 _BETA  = 0.60   # N-gram contribution
 
 # Score boost for exact substring match in name or id (added after normalisation)
 _EXACT_BOOST = 0.30
 
-# Minimum combined score to appear in results — filters out weak/tangential matches
+# Minimum combined score to appear in results - filters out weak/tangential matches
 _MIN_SCORE = 0.10
 
 
@@ -42,7 +42,7 @@ def _normalise(scores: list[float]) -> list[float]:
     """
     lo, hi = min(scores), max(scores)
     if hi == lo:
-        # Preserve the signal: non-zero scores → 1.0, true zeros stay 0.0
+        # Preserve the signal: non-zero scores -> 1.0, true zeros stay 0.0
         return [1.0 if s > 0 else 0.0 for s in scores]
     span = hi - lo
     return [(s - lo) / span for s in scores]
@@ -50,13 +50,13 @@ def _normalise(scores: list[float]) -> list[float]:
 
 class HybridBackend(SearchBackend):
     def __init__(self):
-        self._bm25 = BM25Backend()
+        self._tfidf = TFIDFBackend()
         self._ngram = NgramIndex()
         self._widgets: list[dict] = []
 
     def build(self, widgets: list[dict]) -> None:
         self._widgets = widgets
-        self._bm25.build(widgets)
+        self._tfidf.build(widgets)
         self._ngram.build(widgets)
 
     def query(self, query: str, domain_filter: str | None = None,
@@ -64,16 +64,16 @@ class HybridBackend(SearchBackend):
         if not self._widgets:
             return {"results": []}
 
-        bm25_raw  = self._bm25.score(query)
+        tfidf_raw = self._tfidf.score(query)
         ngram_raw = self._ngram.score(query)
 
-        bm25_norm  = _normalise(bm25_raw)
+        tfidf_norm = _normalise(tfidf_raw)
         ngram_norm = _normalise(ngram_raw)
 
         query_lower = query.lower()
         scored = []
         for idx, widget in enumerate(self._widgets):
-            combined = _ALPHA * bm25_norm[idx] + _BETA * ngram_norm[idx]
+            combined = _ALPHA * tfidf_norm[idx] + _BETA * ngram_norm[idx]
 
             # Hard boost for exact substring in name or id (per query term)
             name_lower = widget.get("name", "").lower()

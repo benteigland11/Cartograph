@@ -37,16 +37,11 @@ _EXACT_BOOST_THRESHOLD = 1.0
 _LOW_CONFIDENCE_LIMIT = 3
 
 # --- Small-corpus bypass ---
-# BM25 uses IDF: log((N - n + 0.5) / (n + 0.5)).  When the library has
-# fewer than ~10 widgets, most terms appear in a large fraction of docs and
-# IDF collapses toward 0.  This zeros out the BM25 component, capping the
-# max combined score at ~0.9 (n-gram + exact boost) — below the 1.0
-# threshold above.  Net effect: search returns nothing even for exact
-# matches.
-#
-# Below this size we skip the strict threshold and return anything that
-# passed the backend's own _MIN_SCORE (0.10).  Once the library grows past
-# this point, the full threshold kicks in automatically.
+# With very small libraries (< 10 widgets), IDF-based scoring can behave
+# oddly since most terms appear in a large fraction of docs. Below this
+# size we skip the strict threshold and return anything that passed the
+# backend's own _MIN_SCORE (0.10). Once the library grows past this point,
+# the full threshold kicks in automatically.
 _SMALL_CORPUS_THRESHOLD = 10
 
 

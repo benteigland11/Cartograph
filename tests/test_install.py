@@ -11,7 +11,6 @@ def fresh_carto(fixture_library, tmp_path):
     from cartograph import Cartograph
     c = Cartograph(
         library_path=fixture_library,
-        search_backend="bm25",
     )
     return c, str(tmp_path)
 

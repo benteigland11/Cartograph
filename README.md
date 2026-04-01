@@ -3,7 +3,7 @@
 [![Tests](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml/badge.svg)](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/cartograph-cli?cacheSeconds=60)](https://pypi.org/project/cartograph-cli/)
 
-A reusable code registry for AI agents. Search, install, create, validate, and check in reusable code across projects. Only requires Python. Other languages in the repo are native validation scanners for their respective widget types.
+A reusable local code registry for AI agents with optional cloud integration. Search, install, create, validate, and check in reusable code across projects. Only requires Python. Other languages in the repo are native validation scanners for their respective widget types.
 
 ## Why Cartograph
 
@@ -68,8 +68,10 @@ cartograph checkin [path]
     [--publish]                           also publish to cloud
 
 cartograph rate <widget_id> <score 1-5>  [--comment "..."]
+    also works with @handle/widget-id for cloud widgets
 cartograph setup  [--agent claude|codex|gemini|antigravity|cursor]
-                  [--write]
+                  [--write] [--workflow [name]]
+cartograph config [key] [value]
 cartograph stats
 cartograph doctor
 cartograph dashboard
@@ -78,9 +80,12 @@ cartograph login   [--token TOKEN]
 cartograph logout
 cartograph whoami
 cartograph cloud publish [widget_id] [path]  [--visibility public|private]
+                                             [--governance open|protected]
 cartograph cloud unpublish <widget_id> [--confirm]
-cartograph cloud sync
-cartograph cloud rate <widget_id> <score 1-5> [--comment "..."]
+cartograph cloud settings <@handle/widget-id> [--governance open|protected]
+cartograph cloud sync [--dry-run]
+cartograph cloud proposals [widget_id] [proposal_id]
+                           [--accept] [--reject] [--reason "..."]
 ```
 
 ## Development
@@ -99,7 +104,7 @@ Run `cartograph doctor` to check that all language engine dependencies (pytest, 
 - Python: fully supported (create, validate, test, checkin)
 - JavaScript: fully supported (React components, plain JS, vitest)
 - Nim: fully supported (testament)
-- Search: hybrid BM25 + n-gram (local and cloud)
+- Search: hybrid inverted index + n-gram with fuzzy resolution (local and cloud)
 - Dashboard: `cartograph dashboard` opens a local web UI for browsing and managing widgets
 
 ## Cloud registry

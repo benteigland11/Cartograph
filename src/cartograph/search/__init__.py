@@ -1,8 +1,8 @@
 """
 Search package for Cartograph.
 
-Default backend: hybrid (BM25 + n-gram).
-All backends are pure Python, zero external service dependencies.
+Default backend: hybrid (TF-IDF + n-gram).
+All backends are pure Python, zero external dependencies.
 
 To add a new backend:
   1. Create search/<name>.py with a SearchBackend subclass
@@ -11,11 +11,11 @@ To add a new backend:
 
 from .base import SearchBackend
 from .hybrid import HybridBackend
-from .bm25 import BM25Backend
+from .tfidf import TFIDFBackend
 
 _BACKENDS: dict[str, type[SearchBackend]] = {
     "hybrid": HybridBackend,
-    "bm25":   BM25Backend,
+    "tfidf":  TFIDFBackend,
 }
 
 
