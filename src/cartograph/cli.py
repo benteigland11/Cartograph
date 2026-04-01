@@ -370,7 +370,9 @@ def cmd_status(args):
     from .engine import DEFAULT_INSTALL_DIR
     install_dir = os.path.join(target, DEFAULT_INSTALL_DIR)
     if not os.path.isdir(install_dir):
-        err({"error": f"No cartograph/ directory found at {target}"})
+        print(f"\n  No widgets installed at {target}.")
+        print(f"  Run 'cartograph install <widget_id>' to install one.\n")
+        return
 
     widget_ids = [
         d for d in os.listdir(install_dir)
@@ -378,7 +380,8 @@ def cmd_status(args):
     ]
 
     if not widget_ids:
-        out({"installed": 0, "widgets": []})
+        print(f"\n  No widgets installed at {target}.")
+        print(f"  Run 'cartograph install <widget_id>' to install one.\n")
         return
 
     carto = _carto()
