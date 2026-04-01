@@ -2,7 +2,7 @@
   "meta": {
     "id": "infra-file-stamp-python",
     "name": "File Stamp",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "domain": "infra",
     "tags": [
       "fingerprint",

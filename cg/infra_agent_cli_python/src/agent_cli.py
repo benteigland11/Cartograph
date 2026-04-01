@@ -62,11 +62,16 @@ def fail(message: str, **extra) -> dict:
 class AgentCLI:
     """Declarative CLI builder that produces agent-friendly JSON output."""
 
-    def __init__(self, prog: str, description: str = "", version: str = ""):
+    def __init__(self, prog: str, description: str = "", version: str = "",
+                 colors: dict | None = None):
         self.prog = prog
         self.description = description
         self.version = version
         self._groups: list[tuple[str, list[dict]]] = []
+        self.colors = colors or {}
+        # colors dict:
+        #   heading:  ANSI code for all group headers (consistent)
+        #   groups:   list of ANSI codes, one per group (cycles if fewer than groups)
 
     def add_commands(self, group_name: str, commands: list[dict]) -> None:
         """Register a group of commands.
@@ -136,22 +141,29 @@ class AgentCLI:
         return parser
 
     def grouped_help(self) -> str:
-        """Render grouped help text with optional color."""
-        use_color = sys.stdout.isatty()
-        if use_color:
-            g, r = "\033[32m", "\033[0m"
-        else:
-            g, r = "", ""
+        """Render grouped help text with optional color.
+
+        Colors are configured via the `colors` dict passed to __init__:
+            heading:  ANSI code for all group headers (same color)
+            groups:   list of ANSI codes, one per group for command names
+        Automatically disabled when stdout is not a tty.
+        """
+        use_color = self.colors and sys.stdout.isatty()
+        r = "\033[0m" if use_color else ""
+        h = self.colors.get("heading", "") if use_color else ""
+        group_colors = self.colors.get("groups", []) if use_color else []
 
         lines = ["", f"usage: {self.prog} <command> [options]", ""]
-        for group_name, commands in self._groups:
-            lines.append(f"  {group_name}:")
+        for i, (group_name, commands) in enumerate(self._groups):
+            c = group_colors[i % len(group_colors)] if group_colors else ""
+            lines.append(f"  {h}{group_name}:{r}")
             for cmd in commands:
                 name = cmd["name"]
                 desc = cmd.get("help", "")
-                lines.append(f"    {g}{name:<16s}{r} {desc}")
+                lines.append(f"    {c}{name:<16s}{r} {desc}")
             lines.append("")
-        lines.append(f"  Run '{g}{self.prog} <command> -h{r}' for command-specific help.")
+        hint_c = group_colors[0] if group_colors else ""
+        lines.append(f"  Run '{hint_c}{self.prog} <command> -h{r}' for command-specific help.")
         lines.append("")
         return "\n".join(lines)
 
@@ -194,7 +206,7 @@ class AgentCLI:
         """
         name = spec["name"]
         kwargs = {}
-        for key in ("help", "required", "default", "type", "choices", "action", "nargs", "dest"):
+        for key in ("help", "required", "default", "type", "choices", "action", "nargs", "const", "dest"):
             if key in spec:
                 kwargs[key] = spec[key]
 

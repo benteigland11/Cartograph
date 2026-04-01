@@ -391,11 +391,23 @@ def cmd_login(args):
     token = args.token
 
     if token:
-        # Manual token login (legacy compat — treat as id_token with no refresh)
+        # Manual token login (legacy compat - treat as id_token with no refresh)
         from .cloud import login_with_credentials
         result = login_with_credentials(token, "", "")
         if "error" in result:
             err(result)
+
+        from .config import list_values
+        items = list_values()
+        max_key = max(len(i["key"]) for i in items)
+        max_val = max(len(str(i["value"] if i["value"] is not None else "-")) for i in items)
+        print("\n  Your current settings:")
+        for item in items:
+            val = item["value"]
+            display = str(val) if val is not None else "-"
+            print(f"    {item['key']:<{max_key}}   {display:<{max_val}}   {item['description']}")
+        print(f"\n  Run 'cartograph config <key> <value>' to change defaults.\n")
+
         out(result)
         return
 
@@ -469,10 +481,22 @@ def cmd_login(args):
         client_id=received.get("client_id", ""),
         client_secret=received.get("client_secret", ""),
     )
-    print(f"  Logged in as @{handle}")
+    print(f"  Logged in as @{handle}\n")
 
     # --- TOS check ---
     _check_and_prompt_tos()
+
+    # Show current config so user knows their defaults
+    from .config import list_values
+    items = list_values()
+    max_key = max(len(i["key"]) for i in items)
+    max_val = max(len(str(i["value"] if i["value"] is not None else "-")) for i in items)
+    print("  Your current settings:")
+    for item in items:
+        val = item["value"]
+        display = str(val) if val is not None else "-"
+        print(f"    {item['key']:<{max_key}}   {display:<{max_val}}   {item['description']}")
+    print(f"\n  Run 'cartograph config <key> <value>' to change defaults.\n")
 
     out({"status": "success", "owner": handle})
 
@@ -589,7 +613,7 @@ def cmd_cloud_publish(args):
     from .config import load_config
     cfg = load_config()
     visibility = args.visibility or cfg["publish"]["visibility"]
-    governance = getattr(args, "governance", None)
+    governance = getattr(args, "governance", None) or cfg["publish"]["governance"]
     result = push(path, widget_id, visibility=visibility, governance=governance)
     if "error" in result:
         err(result)
@@ -602,8 +626,26 @@ def cmd_cloud_publish(args):
 
 
 def cmd_rate(args):
+    widget_id = args.widget_id
+
+    # Cloud widget (@handle/widget_id)
+    if widget_id.startswith("@"):
+        from . import cloud, auth
+        if not auth.is_authenticated():
+            err({"error": "Not authenticated. Run: cartograph login"})
+        parts = widget_id[1:].split("/", 1)
+        if len(parts) != 2:
+            err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
+        owner, wid = parts
+        result = cloud.rate_widget(owner, wid, args.score, args.comment)
+        if "error" in result:
+            err(result)
+        print(f"\n  Rated {widget_id}: {args.score}/5\n")
+        return
+
+    # Local widget
     result = _carto().add_review(
-        widget_id=args.widget_id,
+        widget_id=widget_id,
         target_dir=_resolve(args.target),
         score=args.score,
         comment=args.comment,
@@ -625,33 +667,6 @@ def cmd_cloud_unpublish(args):
         err(result)
     print(f"\n  Unpublished {args.widget_id} from cloud. Local copy unchanged.\n")
 
-
-def cmd_cloud_rate(args):
-    """Rate a cloud widget."""
-    from . import cloud, auth
-    if not auth.is_authenticated():
-        err({"error": "Not authenticated. Run: cartograph login"})
-
-    # Parse @handle/widget_id or plain widget_id
-    widget_id = args.widget_id
-    if widget_id.startswith("@"):
-        parts = widget_id[1:].split("/", 1)
-        if len(parts) != 2:
-            err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
-        owner, widget_id = parts
-    else:
-        # Look up owner from cloud search
-        results = cloud.search(widget_id, top_k=1)
-        widgets = results.get("widgets", [])
-        match = next((w for w in widgets if w.get("id") == widget_id), None)
-        if not match:
-            err({"error": f"Widget '{widget_id}' not found on cloud."})
-        owner = match.get("owner", "")
-
-    result = cloud.rate_widget(owner, widget_id, args.score, args.comment)
-    if "error" in result:
-        err(result)
-    print(f"\n  Rated {args.widget_id}: {args.score}/5\n")
 
 
 def cmd_rollback(args):
@@ -762,144 +777,128 @@ def _parse_cloud_id(widget_id: str):
     return parts[0], parts[1]
 
 
-def cmd_cloud_update(args):
-    """Update a cloud widget's settings."""
+def cmd_cloud_settings(args):
+    """View or update a cloud widget's settings."""
     from . import cloud, auth
     if not auth.is_authenticated():
         err({"error": "Not authenticated. Run: cartograph login"})
 
     owner, wid = _parse_cloud_id(args.widget_id)
-    kwargs = {}
-    if args.governance:
-        kwargs["governance"] = args.governance
-    if not kwargs:
-        err({"error": "Nothing to update. Use --governance open|protected."})
 
-    result = cloud.update_widget(owner, wid, **kwargs)
+    # If no flags, show current settings
+    if not args.governance:
+        result = cloud.inspect(owner, wid)
+        if "error" in result:
+            err(result)
+        gov = result.get("governance", "-")
+        vis = result.get("visibility", "-")
+        print(f"\n  @{owner}/{wid}")
+        print(f"    governance   {gov}")
+        print(f"    visibility   {vis}")
+        print(f"\n  Use --governance open|protected to change.\n")
+        return
+
+    result = cloud.update_widget(owner, wid, governance=args.governance)
     if "error" in result:
         err(result)
-    out(result)
+    print(f"\n  Updated @{owner}/{wid}: governance = {args.governance}\n")
 
 
-def cmd_propose(args):
-    """Propose a contribution to someone else's widget."""
-    from . import cloud, auth
-    from .checkin import _scan_contamination
-
-    if not auth.is_authenticated():
-        err({"error": "Not authenticated. Run: cartograph login"})
-
-    owner, wid = _parse_cloud_id(args.target)
-    path = _resolve_widget(args.path)
-    _preflight_from_path(path)
-
-    # Read widget.json for language + contamination scan
-    try:
-        with open(os.path.join(path, "widget.json")) as f:
-            widget_data = json.load(f)
-    except Exception:
-        widget_data = {}
-    tech_stack = widget_data.get("tech_stack", {})
-    language = tech_stack.get("language", "python")
-
-    # Ensure valid stamp
-    from .validation_stamp import is_stamp_valid
-    from .languages import get_engine
-    engine = get_engine(language)
-    if engine is None or not is_stamp_valid(path, language, engine):
-        print("  No valid stamp - running validation first...\n", file=sys.stderr)
-        validate_result = _carto().validate_item(path=path)
-        if validate_result.get("status") == "error":
-            err(validate_result)
-
-    # Contamination scan
-    scan = _scan_contamination(path, tech_stack)
-    if scan["blocks"]:
-        err({"error": "Proposal blocked: project-specific content detected.", "blocks": scan["blocks"]})
-    if scan["warnings"]:
-        err({
-            "status": "warnings",
-            "message": "Proposal paused: potential contamination found. Clean up before proposing.",
-            "warnings": scan["warnings"],
-        })
-
-    result = cloud.propose(path, owner, wid, reason=args.reason)
-    if "error" in result:
-        err(result)
-
-    status = result.get("status", "unknown")
-    if status == "published":
-        print(f"\n  Auto-merged into @{owner}/{wid}\n")
-    elif status == "escalated":
-        print(f"\n  Proposal queued (safeguards tripped)")
-        for v in result.get("violations", []):
-            print(f"    - {v}")
-        print()
-    else:
-        print(f"\n  Proposal submitted to @{owner}/{wid} for review\n")
-    out(result)
-
-
-def cmd_proposals(args):
-    """List my proposals."""
-    from . import cloud, auth
-    if not auth.is_authenticated():
-        err({"error": "Not authenticated. Run: cartograph login"})
-    result = cloud.my_proposals()
-    if "error" in result:
-        err(result)
-    out(result)
-
-
-def cmd_proposals_view(args):
-    """View proposals for a widget or a specific proposal."""
+def cmd_cloud_proposals(args):
+    """List, accept, or reject proposals."""
     from . import cloud, auth
     if not auth.is_authenticated():
         err({"error": "Not authenticated. Run: cartograph login"})
 
-    owner, wid = _parse_cloud_id(args.widget_id)
-    result = cloud.list_proposals(owner, wid)
-    if "error" in result:
-        err(result)
-
-    # Filter to specific proposal if ID given
     proposal_id = getattr(args, "proposal_id", None)
-    if proposal_id:
+
+    # No ID -> list my proposals
+    if not proposal_id:
+        result = cloud.my_proposals()
+        if "error" in result:
+            err(result)
+        proposals = result.get("proposals", [])
+        if not proposals:
+            print("\n  No proposals.\n")
+            return
+        print()
+        for p in proposals:
+            status = p.get("status", "pending")
+            widget = p.get("widget_id", "?")
+            owner = p.get("owner", "?")
+            pid = p.get("id", "?")
+            print(f"  [{status}]  @{owner}/{widget}  #{pid}")
+        print(f"\n  Use --accept <id> or --reject <id> to act on a proposal.\n")
+        return
+
+    # Accept or reject
+    owner, wid = _parse_cloud_id(args.widget_id)
+    if getattr(args, "accept", False):
+        result = cloud.accept_proposal(owner, wid, proposal_id)
+        if "error" in result:
+            err(result)
+        print(f"\n  Proposal #{proposal_id} accepted.\n")
+    elif getattr(args, "reject", False):
+        reason = getattr(args, "reason", "")
+        result = cloud.reject_proposal(owner, wid, proposal_id, reason=reason)
+        if "error" in result:
+            err(result)
+        print(f"\n  Proposal #{proposal_id} rejected.\n")
+    else:
+        # Just viewing a specific proposal
+        result = cloud.list_proposals(owner, wid)
+        if "error" in result:
+            err(result)
         proposals = result.get("proposals", [])
         match = next((p for p in proposals if str(p.get("id")) == str(proposal_id)), None)
         if not match:
-            err({"error": f"Proposal '{proposal_id}' not found."})
+            err({"error": f"Proposal #{proposal_id} not found."})
         out(match)
+
+
+def cmd_workflow(args):
+    """List or create workflows."""
+    name = getattr(args, "name", None)
+    source = getattr(args, "source", None)
+
+    from .engine import _user_data_dir
+    workflows_dir = os.path.join(_user_data_dir(), "workflows")
+
+    if not name:
+        # List available workflows
+        print("\n  Available workflows:")
+        print(f"    default        (built-in)")
+        if os.path.isdir(workflows_dir):
+            for f in sorted(os.listdir(workflows_dir)):
+                if f.endswith(".md"):
+                    print(f"    {f[:-3]}")
+        print(f"\n  Use with: cartograph setup --workflow <name>\n")
         return
-    out(result)
 
+    if name == "create":
+        # workflow create <actual_name> <source_file>
+        actual_name = source
+        source_file = getattr(args, "extra", None)
+        if not actual_name or not source_file:
+            err({"error": "Usage: cartograph workflow create <name> <file.md>"})
+        source_file = os.path.abspath(source_file)
+        if not os.path.isfile(source_file):
+            err({"error": f"File not found: {source_file}"})
+        os.makedirs(workflows_dir, exist_ok=True)
+        dest = os.path.join(workflows_dir, f"{actual_name}.md")
+        shutil.copy2(source_file, dest)
+        print(f"\n  Saved workflow '{actual_name}' to {dest}\n")
+        return
 
-def cmd_proposals_accept(args):
-    """Accept a proposal."""
-    from . import cloud, auth
-    if not auth.is_authenticated():
-        err({"error": "Not authenticated. Run: cartograph login"})
-
-    owner, wid = _parse_cloud_id(args.widget_id)
-    result = cloud.accept_proposal(owner, wid, args.proposal_id)
-    if "error" in result:
-        err(result)
-    print(f"\n  Proposal {args.proposal_id} accepted\n")
-    out(result)
-
-
-def cmd_proposals_reject(args):
-    """Reject a proposal."""
-    from . import cloud, auth
-    if not auth.is_authenticated():
-        err({"error": "Not authenticated. Run: cartograph login"})
-
-    owner, wid = _parse_cloud_id(args.widget_id)
-    result = cloud.reject_proposal(owner, wid, args.proposal_id, reason=args.reason)
-    if "error" in result:
-        err(result)
-    print(f"\n  Proposal {args.proposal_id} rejected\n")
-    out(result)
+    # Show a specific workflow
+    if name == "default":
+        print(_WORKFLOW_SECTION)
+        return
+    path = os.path.join(workflows_dir, f"{name}.md")
+    if not os.path.isfile(path):
+        err({"error": f"Workflow '{name}' not found. Run 'cartograph workflow' to list."})
+    with open(path) as f:
+        print(f"\n{f.read()}")
 
 
 def cmd_doctor(args):
@@ -947,6 +946,11 @@ def cmd_doctor(args):
         groups.append((lang_name.capitalize(), lang_checks))
 
     # --- Render ---
+    use_color = sys.stdout.isatty()
+    green = "\033[32m" if use_color else ""
+    red = "\033[31m" if use_color else ""
+    reset = "\033[0m" if use_color else ""
+
     all_checks = [c for _, checks in groups for c in checks]
     passed = sum(1 for c in all_checks if c[1])
     total = len(all_checks)
@@ -954,107 +958,70 @@ def cmd_doctor(args):
 
     print()
     for group_name, checks in groups:
-        print(f"  {group_name}")
+        all_group_ok = all(c[1] for c in checks)
+        gc = green if all_group_ok else red
+        print(f"  {gc}{group_name}{reset}")
         for label, ok, detail, fix in checks:
+            c = green if ok else red
             mark = "✓" if ok else "✗"
-            print(f"    [{mark}] {label:<12}  {detail}")
+            print(f"    {c}[{mark}]{reset} {label:<12}  {detail}")
             if not ok and fix:
-                print(f"          → {fix}")
+                print(f"          {red}-> {fix}{reset}")
         print()
 
     if all_ok:
-        print(f"  No issues found.\n")
+        print(f"  {green}No issues found.{reset}\n")
     else:
         issues = total - passed
-        print(f"  {issues} issue{'s' if issues > 1 else ''} found.\n")
+        print(f"  {red}{issues} issue{'s' if issues > 1 else ''} found.{reset}\n")
         sys.exit(1)
 
 
 _SETUP_INSTRUCTIONS = """\
 ## Cartograph
 
-Cartograph is a widget library manager. Widgets are reusable, self-contained
-code modules with tests, examples, and metadata. When installed into a project
-they live under `cg/<widget_id>/`.
+Widget library manager. Widgets are reusable code modules with tests,
+examples, and metadata. Installed widgets live under `cg/<widget_id>/`.
 
-Before writing reusable, self-contained logic, search the library first.
-
-### Widget structure
-```
-cg/<widget_id>/
-  widget.json          metadata, version, dependencies
-  src/                 source code
-  tests/               test files (80%+ coverage required)
-  examples/            example_usage.* (must run), usage_hint.* (optional)
-```
-
-widget_id format: `<domain>-<name>-<language>` e.g. `backend-retry-backoff-python`
-
-Do not edit installed widget files directly - local edits are overwritten on
-update. Wrap or extend in your own code instead.
+widget_id format: `<domain>-<name>-<language>` (e.g. `backend-retry-backoff-python`)
 
 ### Commands
-`<arg>` = required  `[arg]` = optional  defaults shown where relevant
 
-**Find and use widgets**
-
-    cartograph search <query>
-        [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language python|javascript|typescript|nim]
-
-    cartograph inspect <widget_id>
-        [--source]         include source files
-        [--reviews]        include review comments
-        [--all-versions]   list full version history
-        [--version X]      inspect a specific version
-
+    cartograph search <query> [--domain ...] [--language ...]
+    cartograph inspect <widget_id> [--source] [--reviews] [--version X]
     cartograph install <widget_id> [--target .] [--version X]
     cartograph uninstall <widget_id> [--target .]
     cartograph upgrade <widget_id> [--target .] [--version X]
     cartograph status [widget_id] [--target .]
-    cartograph rate <widget_id> <score 1-5> [--comment "..."] [--target .]
+    cartograph rate <widget_id> <score 1-5> [--comment "..."]
 
-**Create and publish widgets**
-
-    cartograph create <widget_id>
-        --language python|javascript|typescript|nim    REQUIRED
-        --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
-        [--name "Display Name"] [--target .]
-
-    cartograph validate [path] [--lib]   path defaults to .
-    cartograph checkin [path]            path defaults to .
-        --reason "what changed and why"  REQUIRED
-        [--bump patch|minor|major]       defaults to minor
-        [--publish]                      also publish to cloud
-
+    cartograph create <widget_id> --language <lang> --domain <domain>
+    cartograph validate [path] [--lib]
+    cartograph checkin [path] --reason "..." [--bump patch|minor|major] [--publish]
+    cartograph rollback <widget_id> [--version X] [--reason "..."]
     cartograph delete <widget_id> [--confirm]
 
-**Cloud registry**
-
-    cartograph cloud publish [widget_id] [path]
-        [--lib]                          publish from library by ID
-        [--visibility public|private]    defaults to public (or cartograph.toml)
-        [--governance open|protected]    contribution governance model
-    cartograph cloud update <@handle/widget_id>
-        [--governance open|protected]    update governance model
-    cartograph cloud unpublish <widget_id> --confirm
+    cartograph cloud publish [widget_id] [path] [--visibility ...] [--governance ...]
+    cartograph cloud unpublish <widget_id> [--confirm]
+    cartograph cloud settings <@handle/widget_id> [--governance open|protected]
     cartograph cloud sync [--dry-run]
-    cartograph cloud rate <@handle/widget_id> <score 1-5> [--comment "..."]
-    cartograph cloud propose <@owner/widget_id> [path]
-        --reason "what changed and why"  REQUIRED
-    cartograph cloud proposals list            list my proposals
-    cartograph cloud proposals view <@owner/widget_id> [proposal_id]
-    cartograph cloud proposals accept <@owner/widget_id> <proposal_id>
-    cartograph cloud proposals reject <@owner/widget_id> <proposal_id> [--reason "..."]
+    cartograph cloud proposals [widget_id] [proposal_id] [--accept] [--reject]
 
-**Library and account**
-
-    cartograph stats
-    cartograph doctor
+    cartograph config [key] [value]
     cartograph login [--token X]
-    cartograph logout
-    cartograph whoami
-    cartograph dashboard
+    cartograph setup [--agent claude|codex|gemini|cursor] [--write]
+    cartograph doctor
+    cartograph stats
+"""
+
+_WORKFLOW_SECTION = """
+### Suggested workflow
+
+1. Plan what components you need before building
+2. Search the library before writing new logic
+3. Install widgets, then write glue code to connect them - don't edit widget source directly
+4. If you do edit a widget, only do so if you intend to check it back in as an improvement
+5. Validate before checking in, check in before publishing
 """
 
 _AGENT_FILENAMES = {
@@ -1255,6 +1222,35 @@ def _cursor_mdc(content):
     ) + content
 
 
+def _resolve_workflow(workflow_arg):
+    """Resolve --workflow flag to markdown content.
+
+    None          -> no workflow
+    "default"/""  -> built-in _WORKFLOW_SECTION
+    "<name>"      -> load from <data_dir>/workflows/<name>.md
+    """
+    if workflow_arg is None:
+        return ""
+    if not workflow_arg or workflow_arg == "default":
+        return _WORKFLOW_SECTION
+
+    from .engine import _user_data_dir
+    path = os.path.join(_user_data_dir(), "workflows", f"{workflow_arg}.md")
+    if not os.path.isfile(path):
+        workflows_dir = os.path.join(_user_data_dir(), "workflows")
+        available = []
+        if os.path.isdir(workflows_dir):
+            available = [f[:-3] for f in os.listdir(workflows_dir) if f.endswith(".md")]
+        msg = f"Workflow '{workflow_arg}' not found at {path}."
+        if available:
+            msg += f" Available: {', '.join(sorted(available))}"
+        else:
+            msg += f" Create it at: {workflows_dir}/{workflow_arg}.md"
+        err({"error": msg})
+    with open(path) as f:
+        return "\n" + f.read()
+
+
 def cmd_setup(args):
     agent = args.agent
     write = args.write
@@ -1266,11 +1262,14 @@ def cmd_setup(args):
         sys.exit(1)
 
     if not agent:
-        print(_SETUP_INSTRUCTIONS)
+        content = _SETUP_INSTRUCTIONS
+        content += _resolve_workflow(getattr(args, "workflow", None))
+        print(content)
         print("  # To write to a file, run: cartograph setup --write --agent <agent>")
         return
 
-    content  = _SETUP_INSTRUCTIONS
+    content = _SETUP_INSTRUCTIONS
+    content += _resolve_workflow(getattr(args, "workflow", None))
     filename = _AGENT_FILENAMES[agent]
 
     if agent == "cursor":
@@ -1299,6 +1298,45 @@ def cmd_setup(args):
 
 
 # ---------------------------------------------------------------------------
+# Config commands
+# ---------------------------------------------------------------------------
+
+def cmd_config(args):
+    """View or change settings. No args = list all, key = get, key value = set."""
+    key = getattr(args, "key", None)
+    value = getattr(args, "value", None)
+
+    if not key:
+        # List all
+        from .config import list_values
+        items = list_values()
+        max_key = max(len(i["key"]) for i in items)
+        max_val = max(len(str(i["value"] if i["value"] is not None else "-")) for i in items)
+        print()
+        for item in items:
+            val = item["value"]
+            display = str(val) if val is not None else "-"
+            choices = f"  {' | '.join(item['choices'])}" if item["choices"] else ""
+            print(f"  {item['key']:<{max_key}}   {display:<{max_val}}   {item['description']}{choices}")
+        print()
+    elif value is None:
+        # Get
+        from .config import get_value
+        val, error = get_value(key)
+        if error:
+            err({"error": error})
+        display = val if val is not None else "(not set)"
+        print(f"\n  {key} = {display}\n")
+    else:
+        # Set
+        from .config import set_value
+        error = set_value(key, value)
+        if error:
+            err({"error": error})
+        print(f"\n  Set {key} = {value}\n")
+
+
+# ---------------------------------------------------------------------------
 # CLI definition (declarative via infra-agent-cli-python widget)
 # ---------------------------------------------------------------------------
 
@@ -1310,6 +1348,15 @@ def _build_cli() -> AgentCLI:
         prog="cartograph",
         description="Cartograph widget library manager",
         version=__version__,
+        colors={
+            "heading": "\033[33m",   # yellow (--accent #D4A017)
+            "groups": [
+                "\033[36m",  # cyan    - Use widgets
+                "\033[32m",  # green   - Build widgets
+                "\033[35m",  # magenta - Cloud registry
+                "\033[34m",  # blue    - Config
+            ],
+        },
     )
 
     cli.add_commands("Use widgets", [
@@ -1376,10 +1423,10 @@ def _build_cli() -> AgentCLI:
         },
         {
             "name": "rate",
-            "help": "Rate an installed widget",
+            "help": "Rate a widget (local or @handle/widget-id for cloud)",
             "handler": cmd_rate,
             "args": [
-                {"name": "widget_id"},
+                {"name": "widget_id", "help": "Widget ID or @handle/widget-id"},
                 {"name": "score", "type": float, "help": "Score from 1.0 to 5.0"},
                 {"name": "--comment", "default": None},
                 {"name": "--target", "default": ".", "help": "Project root (default: .)"},
@@ -1458,21 +1505,11 @@ def _build_cli() -> AgentCLI:
                 {"name": "path", "nargs": "?", "default": ".", "help": "Widget directory (default: .)"},
                 {"name": "--lib", "action": "store_true", "default": False},
                 {"name": "--visibility", "default": None, "choices": ["public", "private"],
-                 "help": "Visibility (default from cartograph.toml or public)"},
+                 "help": "Override default visibility"},
                 {"name": "--governance", "default": None, "choices": ["open", "protected"],
-                 "help": "Contribution governance model"},
+                 "help": "Override default governance model"},
                 {"name": "--override-warnings", "action": "store_true", "default": False, "dest": "override_warnings"},
                 {"name": "--override-reason", "default": None, "dest": "override_reason"},
-            ],
-        },
-        {
-            "name": "cloud update",
-            "help": "Update a cloud widget's settings",
-            "handler": cmd_cloud_update,
-            "args": [
-                {"name": "widget_id", "help": "Widget ID (@handle/widget-id)"},
-                {"name": "--governance", "default": None, "choices": ["open", "protected"],
-                 "help": "Contribution governance model"},
             ],
         },
         {
@@ -1485,70 +1522,66 @@ def _build_cli() -> AgentCLI:
             ],
         },
         {
+            "name": "cloud settings",
+            "help": "View or change a cloud widget's settings",
+            "handler": cmd_cloud_settings,
+            "args": [
+                {"name": "widget_id", "help": "Widget ID (@handle/widget-id)"},
+                {"name": "--governance", "default": None, "choices": ["open", "protected"],
+                 "help": "Set governance model"},
+            ],
+        },
+        {
             "name": "cloud sync",
-            "help": "Reconcile local library with cloud",
+            "help": "Sync library with cloud (higher version wins, both directions)",
             "handler": cmd_sync,
             "args": [
                 {"name": "--dry-run", "action": "store_true", "default": False, "dest": "dry_run"},
             ],
         },
         {
-            "name": "cloud rate",
-            "help": "Rate a cloud widget",
-            "handler": cmd_cloud_rate,
+            "name": "cloud proposals",
+            "help": "List, accept, or reject proposals",
+            "handler": cmd_cloud_proposals,
             "args": [
-                {"name": "widget_id", "help": "Widget ID (e.g. @handle/widget-id)"},
-                {"name": "score", "type": int, "help": "Score from 1 to 5"},
-                {"name": "--comment", "default": "", "help": "Optional review comment"},
-            ],
-        },
-        {
-            "name": "cloud propose",
-            "help": "Propose a contribution to a cloud widget",
-            "handler": cmd_propose,
-            "args": [
-                {"name": "target", "help": "Target widget (@owner/widget-id)"},
-                {"name": "path", "nargs": "?", "default": ".", "help": "Local widget directory (default: .)"},
-                {"name": "--reason", "required": True, "help": "What changed and why"},
-            ],
-        },
-        {
-            "name": "cloud proposals list",
-            "help": "List my proposals",
-            "handler": cmd_proposals,
-            "args": [],
-        },
-        {
-            "name": "cloud proposals view",
-            "help": "View proposals for a widget",
-            "handler": cmd_proposals_view,
-            "args": [
-                {"name": "widget_id", "help": "Widget ID (@owner/widget-id)"},
-                {"name": "proposal_id", "nargs": "?", "default": None, "help": "Specific proposal ID"},
-            ],
-        },
-        {
-            "name": "cloud proposals accept",
-            "help": "Accept a proposal",
-            "handler": cmd_proposals_accept,
-            "args": [
-                {"name": "widget_id", "help": "Widget ID (@owner/widget-id)"},
-                {"name": "proposal_id", "help": "Proposal ID to accept"},
-            ],
-        },
-        {
-            "name": "cloud proposals reject",
-            "help": "Reject a proposal",
-            "handler": cmd_proposals_reject,
-            "args": [
-                {"name": "widget_id", "help": "Widget ID (@owner/widget-id)"},
-                {"name": "proposal_id", "help": "Proposal ID to reject"},
+                {"name": "widget_id", "nargs": "?", "default": None,
+                 "help": "Widget ID (@owner/widget-id) - required for accept/reject"},
+                {"name": "proposal_id", "nargs": "?", "default": None,
+                 "help": "Proposal ID to view/act on"},
+                {"name": "--accept", "action": "store_true", "default": False,
+                 "help": "Accept the proposal"},
+                {"name": "--reject", "action": "store_true", "default": False,
+                 "help": "Reject the proposal"},
                 {"name": "--reason", "default": "", "help": "Reason for rejection"},
             ],
         },
     ])
 
     cli.add_commands("Config", [
+        {
+            "name": "config",
+            "help": "View or change settings (config [key] [value])",
+            "handler": cmd_config,
+            "args": [
+                {"name": "key", "nargs": "?", "default": None,
+                 "help": "Setting name (e.g. auto-publish)"},
+                {"name": "value", "nargs": "?", "default": None,
+                 "help": "Value to set (omit to read)"},
+            ],
+        },
+        {
+            "name": "workflow",
+            "help": "List, view, or create workflows",
+            "handler": cmd_workflow,
+            "args": [
+                {"name": "name", "nargs": "?", "default": None,
+                 "help": "Workflow name (or 'create')"},
+                {"name": "source", "nargs": "?", "default": None,
+                 "help": "For create: workflow name. For view: unused"},
+                {"name": "extra", "nargs": "?", "default": None,
+                 "help": "For create: source .md file path"},
+            ],
+        },
         {
             "name": "setup",
             "help": "Generate and write agent instructions",
@@ -1557,6 +1590,8 @@ def _build_cli() -> AgentCLI:
                 {"name": "--agent", "default": None,
                  "choices": ["claude", "codex", "gemini", "antigravity", "cursor"]},
                 {"name": "--write", "action": "store_true", "default": False},
+                {"name": "--workflow", "nargs": "?", "default": None, "const": "default",
+                 "help": "Include workflow (default or custom name from workflows/)"},
             ],
         },
         {
