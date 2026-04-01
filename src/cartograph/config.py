@@ -22,6 +22,7 @@ _DEFAULTS = {
     "publish": {
         "auto_publish": False,
         "visibility": "public",
+        "governance": None,
     },
 }
 

@@ -279,6 +279,7 @@ def cmd_validate(args):
 def _force_push(checkin_result: dict) -> None:
     """Push to cloud regardless of whether the widget was previously published."""
     from . import cloud, auth
+    from .config import load_config
     if not auth.is_authenticated():
         print("  → Cannot push: not authenticated. Run: cartograph login", file=sys.stderr)
         return
@@ -286,8 +287,12 @@ def _force_push(checkin_result: dict) -> None:
     widget_path = checkin_result.get("path", "")
     if not widget_id or not widget_path:
         return
+    cfg = load_config()
+    visibility = cfg["publish"]["visibility"]
+    governance = cfg["publish"].get("governance")
     print(f"  → Pushing {widget_id} v{checkin_result.get('version', '?')} to cloud...")
-    push_result = cloud.push(widget_path, widget_id)
+    push_result = cloud.push(widget_path, widget_id, visibility=visibility,
+                             governance=governance)
     if push_result.get("error"):
         print(f"  → Push failed: {push_result['error']}")
     else:
