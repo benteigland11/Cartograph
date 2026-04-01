@@ -985,9 +985,10 @@ examples, and metadata. Installed widgets live under `cg/<widget_id>/`.
 
 widget_id format: `<domain>-<name>-<language>` (e.g. `backend-retry-backoff-python`)
 
-When using `cartograph create`, do not include the language in the widget_id.
-The `--language` flag appends it automatically.
-Example: `cartograph create backend-retry-backoff --language python` creates `backend-retry-backoff-python`.
+When using `cartograph create`, only provide the name. The `--domain` and
+`--language` flags are prepended and appended automatically.
+Example: `cartograph create retry-backoff --domain backend --language python`
+creates `backend-retry-backoff-python`.
 
 ### Domains
 
