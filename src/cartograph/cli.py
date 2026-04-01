@@ -985,6 +985,16 @@ examples, and metadata. Installed widgets live under `cg/<widget_id>/`.
 
 widget_id format: `<domain>-<name>-<language>` (e.g. `backend-retry-backoff-python`)
 
+### Domains
+
+    backend    server-side logic, APIs, networking
+    frontend   UI components, browser utilities
+    data       parsing, transformation, pipelines
+    ml         machine learning utilities (must be framework-free)
+    security   auth, encryption, scanning
+    infra      CLI tools, file ops, system utilities
+    universal  language-agnostic, cross-domain
+
 ### Commands
 
     cartograph search <query> [--domain ...] [--language ...]
