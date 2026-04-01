@@ -12,7 +12,7 @@ Cloud is additive to local:
 - is_available() does a cheap health check before trying anything
 
 Widget IDs in cloud results are namespaced as @owner/widget-id.
-Install paths remain cartograph/<widget-id>/ regardless of source.
+Install paths remain cg/<widget-id>/ regardless of source.
 """
 
 import json

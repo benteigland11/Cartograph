@@ -69,7 +69,7 @@ _JS_USAGE_HINT = '''\
  */
 
 // [TODO] Show a real-world integration - e.g. inside a router, a page, a provider tree
-// import {{ {component} }} from './cartograph/{component}/src/{component}.jsx'
+// import {{ {component} }} from './cg/{component}/src/{component}.jsx'
 //
 // export function MyPage() {{
 //   return <{component}>Hello</{component}>

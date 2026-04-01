@@ -38,7 +38,7 @@ def _copy_widget(source_path, dest_path):
 
 
 def _widget_dir(target_dir, widget_id):
-    """Return the install path: <project_root>/cartograph/<dir_name>.
+    """Return the install path: <project_root>/cg/<dir_name>.
     Python widgets get underscores so the directory is importable."""
     from .engine import python_dir_name
     from .engine import DEFAULT_INSTALL_DIR
@@ -212,7 +212,7 @@ def delete_from_library(carto, widget_id, confirm=False):
 
 
 def uninstall(carto, widget_id, target_dir):
-    """Remove an installed widget from target_dir/cartograph/widget_id."""
+    """Remove an installed widget from target_dir/cg/widget_id."""
     if not os.path.isabs(target_dir):
         return {"error": f"Target must be an absolute path, got: '{target_dir}'"}
 
