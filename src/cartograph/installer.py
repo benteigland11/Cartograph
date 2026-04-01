@@ -45,26 +45,29 @@ def _widget_dir(target_dir, widget_id):
     return os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(widget_id))
 
 
-def _install_from_cloud(widget_id, dest_path):
+def _install_from_cloud(widget_id, dest_path, owner_hint=None):
     """Search cloud for a widget and install it by downloading the zip."""
-    from .cloud import search as cloud_search, download_widget
+    from .cloud import download_widget
 
-    # Search cloud to find the widget and its owner
-    results = cloud_search(widget_id, top_k=5)
-    widgets = results.get("widgets", [])
-    # Search results may return namespaced IDs (@owner/widget-id) or bare IDs
-    match = next(
-        (w for w in widgets
-         if w.get("id") == widget_id
-         or w.get("id", "").endswith(f"/{widget_id}")),
-        None,
-    )
-    if not match:
-        return {"error": f"Widget '{widget_id}' not found locally or in the cloud registry."}
-
-    owner = match.get("owner", "")
-    if not owner:
-        return {"error": f"Widget '{widget_id}' found in cloud but missing owner info."}
+    if owner_hint:
+        # Already know the owner from @owner/widget_id format
+        owner = owner_hint
+    else:
+        # Search cloud to find the widget and its owner
+        from .cloud import search as cloud_search
+        results = cloud_search(widget_id, top_k=5)
+        widgets = results.get("widgets", [])
+        match = next(
+            (w for w in widgets
+             if w.get("id") == widget_id
+             or w.get("id", "").endswith(f"/{widget_id}")),
+            None,
+        )
+        if not match:
+            return {"error": f"Widget '{widget_id}' not found locally or in the cloud registry."}
+        owner = match.get("owner", "")
+        if not owner:
+            return {"error": f"Widget '{widget_id}' found in cloud but missing owner info."}
 
     result = download_widget(owner, widget_id)
     if "error" in result:
@@ -91,8 +94,15 @@ def _install_from_cloud(widget_id, dest_path):
 
 
 def install(carto, widget_id, target_dir, version=None):
-    """Install a widget into target_dir/cartograph/widget_id."""
+    """Install a widget into target_dir/cg/widget_id."""
     from .engine import REPO_DIR
+
+    # Strip @owner/ prefix if present (cloud widget IDs are namespaced)
+    owner_hint = None
+    if widget_id.startswith("@"):
+        parts = widget_id[1:].split("/", 1)
+        if len(parts) == 2:
+            owner_hint, widget_id = parts
 
     if not os.path.isabs(target_dir):
         return {"error": f"Target must be an absolute path, got: '{target_dir}'"}
@@ -134,7 +144,7 @@ def install(carto, widget_id, target_dir, version=None):
             return {"error": str(e)}
 
     # Fall back to cloud registry
-    return _install_from_cloud(widget_id, dest_path)
+    return _install_from_cloud(widget_id, dest_path, owner_hint=owner_hint)
 
 
 def upgrade(carto, widget_id, target_dir, version=None):
