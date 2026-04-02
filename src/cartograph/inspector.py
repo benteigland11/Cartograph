@@ -2,11 +2,9 @@
 Widget inspection and popularity queries.
 """
 
-import datetime
 import glob
 import json
 import os
-import sys
 
 
 def list_popular(carto, limit=10):
@@ -99,27 +97,3 @@ def inspect(carto, widget_id, show_source=False, show_all_versions=False,
         result["reviews"] = review_data["reviews"]
 
     return result
-
-
-def log_registration(carto, widget_id, widget_name, similar_widgets, differentiation, needs_review, widget_path):
-    from .engine import CARTOGRAPH_DIR, EXTRACTION_LOG_PATH
-    os.makedirs(CARTOGRAPH_DIR, exist_ok=True)
-    log = {"extractions": []}
-    if os.path.exists(EXTRACTION_LOG_PATH):
-        try:
-            with open(EXTRACTION_LOG_PATH) as f:
-                log = json.load(f)
-        except Exception:
-            pass
-    log["extractions"].append({
-        "widget_id": widget_id,
-        "widget_name": widget_name,
-        "timestamp": datetime.datetime.now().isoformat(),
-        "needs_review": needs_review,
-        "similar_widgets_found": [{"id": w["id"], "relevance_score": w["relevance_score"]}
-                                   for w in similar_widgets],
-        "differentiation": differentiation or None,
-        "widget_path": widget_path,
-    })
-    with open(EXTRACTION_LOG_PATH, "w") as f:
-        json.dump(log, f, indent=2)

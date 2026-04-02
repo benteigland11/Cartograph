@@ -350,18 +350,17 @@ class JavaScriptEngine(LanguageEngine):
 
     # ------------------------------------------------------------------ example
 
-    def run_example(self, path: str) -> dict:
-        deps = self._read_deps(path)
-        example_file = self.example_filename(path)
-        example_path = os.path.join(path, "examples", example_file)
+    def _run_example_with_runner(self, path: str, runner_cmd: list) -> dict:
+        """Run an example file, using esbuild for React projects."""
+        example_path = os.path.join(path, "examples", self.example_filename(path))
 
-        if not self._has_react(deps):
-            res = self._run(["node", example_path], cwd=path, timeout=30)
+        if not self._has_react(self._read_deps(path)):
+            res = self._run(runner_cmd + [example_path], cwd=path, timeout=30)
             if res.returncode != 0:
                 return self._fail(res.stderr or res.stdout)
             return self._ok()
 
-        # React JSX: bundle with esbuild (installed as devDep), run with node
+        # React: bundle with esbuild, run with node
         with tempfile.NamedTemporaryFile(suffix=".cjs", delete=False, dir=path) as f:
             bundle_path = f.name
         try:
@@ -383,6 +382,9 @@ class JavaScriptEngine(LanguageEngine):
         finally:
             if os.path.exists(bundle_path):
                 os.remove(bundle_path)
+
+    def run_example(self, path: str) -> dict:
+        return self._run_example_with_runner(path, ["node"])
 
     # ------------------------------------------------------------------ cleanup
 
@@ -411,35 +413,4 @@ class TypeScriptEngine(JavaScriptEngine):
         return "example_usage.ts"
 
     def run_example(self, path: str) -> dict:
-        deps = self._read_deps(path)
-        example_file = self.example_filename(path)
-        example_path = os.path.join(path, "examples", example_file)
-
-        if not self._has_react(deps):
-            res = self._run(["npx", "tsx", example_path], cwd=path, timeout=30)
-            if res.returncode != 0:
-                return self._fail(res.stderr or res.stdout)
-            return self._ok()
-
-        # React TSX: bundle with esbuild, run with node
-        with tempfile.NamedTemporaryFile(suffix=".cjs", delete=False, dir=path) as f:
-            bundle_path = f.name
-        try:
-            esbuild_name = "esbuild.cmd" if os.name == "nt" else "esbuild"
-            esbuild = os.path.join(path, "node_modules", ".bin", esbuild_name)
-            build = self._run(
-                [esbuild, example_path,
-                 "--bundle", "--platform=node", "--jsx=automatic",
-                 f"--outfile={bundle_path}"],
-                cwd=path, timeout=30,
-            )
-            if build.returncode != 0:
-                return self._fail(f"esbuild failed:\n{build.stderr or build.stdout}")
-
-            run = self._run(["node", bundle_path], cwd=path, timeout=30)
-            if run.returncode != 0:
-                return self._fail(run.stderr or run.stdout)
-            return self._ok()
-        finally:
-            if os.path.exists(bundle_path):
-                os.remove(bundle_path)
+        return self._run_example_with_runner(path, ["npx", "tsx"])

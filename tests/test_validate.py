@@ -1,7 +1,7 @@
 """
-Tests for validate_item — both passing and failing cases.
+Tests for validate_item - both passing and failing cases.
 validate_item returns {"status": "error", "message": ...} on failure
-and {"status": "passed", ...} on success.
+and {"status": "success", ...} on success.
 """
 import os
 import json
@@ -14,8 +14,7 @@ def test_validate_valid_widget(carto, fixture_library):
     """A well-formed fixture widget should pass validation."""
     path = os.path.join(fixture_library, "http-client")
     result = carto.validate_item(path)
-    assert isinstance(result, dict)
-    assert result.get("status") != "error", f"Unexpected error: {result.get('message')}"
+    assert result.get("status") == "success", f"Expected success, got: {result}"
 
 
 def test_validate_missing_path(carto):
@@ -44,8 +43,8 @@ def test_validate_minimal_widget(carto, tmp_path):
     }
     (widget_dir / "widget.json").write_text(json.dumps(manifest))
     result = carto.validate_item(str(widget_dir))
-    assert isinstance(result, dict)
     assert result.get("status") == "error"
+    assert result.get("message"), "Error should include a message"
 
 
 def test_validate_invalid_domain(carto, tmp_path):
@@ -109,16 +108,6 @@ def test_stamp_invalidates_on_engine_version_bump(carto, fixture_library, tmp_pa
     # Restore
     engine.validation_version = original_version
 
-
-def test_validate_fails_if_library_dependency_index_unavailable(carto, fixture_library, tmp_path):
-    widget_path = tmp_path / "http-client"
-    shutil.copytree(os.path.join(fixture_library, "http-client"), widget_path)
-
-    with patch("cartograph.engine.Cartograph", side_effect=RuntimeError("library load failed")):
-        result = carto.validate_item(str(widget_path))
-
-    assert result["status"] == "error"
-    assert "dependency index" in result["message"].lower()
 
 
 def test_validate_fails_if_stamp_write_fails(carto, fixture_library, tmp_path):

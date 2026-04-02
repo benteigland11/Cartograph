@@ -582,6 +582,63 @@ class TestNimSpecific:
         assert any("top-level mutable state" in w.lower() or "top-level" in w.lower()
                    for w in result["warnings"])
 
+    def test_nim_stdlib_list_complete(self):
+        """Verify the scanner's nimStdlib covers all modules shipped with nim."""
+        import subprocess, re as _re
+
+        # Ask the compiler for its own lib directory (works with choosenim,
+        # system installs, and any other layout).
+        script = 'import std/os; echo getCurrentCompilerExe().parentDir.parentDir / "lib"'
+        res = subprocess.run(
+            ["nim", "e", "--hints:off", "-"],
+            input=script, capture_output=True, text=True, timeout=15,
+        )
+        if res.returncode != 0:
+            pytest.skip(f"nim e failed: {res.stderr.strip()}")
+        lib_root = res.stdout.strip()
+        if not os.path.isdir(lib_root):
+            pytest.skip(f"Could not find nim lib dir at {lib_root}")
+
+        # Collect all .nim module names from stdlib directories
+        stdlib_dirs = [
+            "pure", "pure/collections", "std", "impure", "pure/concurrency",
+        ]
+        actual_modules = set()
+        for subdir in stdlib_dirs:
+            full = os.path.join(lib_root, subdir)
+            if not os.path.isdir(full):
+                continue
+            for fname in os.listdir(full):
+                if fname.endswith(".nim"):
+                    actual_modules.add(fname[:-4])
+
+        # Extract the scanner's hardcoded list
+        scanner_path = os.path.join(
+            os.path.dirname(__file__), "..", "src", "cartograph",
+            "languages", "scanners", "nim_scanner.nim",
+        )
+        scanner_src = open(scanner_path).read()
+        # Pull all quoted strings from the nimStdlib block
+        start = scanner_src.index("const nimStdlib = [")
+        end = scanner_src.index("].toHashSet()", start)
+        block = scanner_src[start:end]
+        scanner_modules = set()
+        for m in _re.findall(r'"([^"]+)"', block):
+            # Strip std/ prefix to get the bare module name
+            bare = m.split("/")[-1]
+            scanner_modules.add(bare)
+
+        # Internal/private modules that aren't meant for user import
+        internal = {"hashcommon", "tableimpl", "setimpl", "rtarrays"}
+        actual_public = actual_modules - internal
+
+        missing = actual_public - scanner_modules
+        assert not missing, (
+            f"Nim stdlib modules missing from nim_scanner.nim nimStdlib list: "
+            f"{sorted(missing)}\n"
+            f"Update the hardcoded list in scanners/nim_scanner.nim"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 3. SHARED VALIDATION TESTS

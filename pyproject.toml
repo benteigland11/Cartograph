@@ -4,14 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cartograph-cli"
-version = "0.5.4"
+version = "0.5.5"
 description = "Widget library manager for AI agents — CLI"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-dependencies = [
-    "platformdirs>=4.0.0",
-]
+dependencies = []
 
 [project.scripts]
 cartograph = "cartograph.cli:main"

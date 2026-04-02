@@ -1,11 +1,9 @@
-import sys
 import json
 import os
 import shutil
 import glob
 import re
 import hashlib
-import datetime
 import difflib
 import logging
 
@@ -21,11 +19,14 @@ _SEED_LIBRARY = os.path.join(PACKAGE_DIR, "seed_library")
 
 def _user_data_dir() -> str:
     """Return the platform-appropriate user data directory for Cartograph."""
-    try:
-        from platformdirs import user_data_dir
-        return user_data_dir("cartograph", appauthor=False)
-    except ImportError:
-        return os.path.join(os.path.expanduser("~"), ".cartograph")
+    import sys as _sys
+    if _sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+    elif _sys.platform == "darwin":
+        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    else:
+        base = os.environ.get("XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share"))
+    return os.path.join(base, "cartograph")
 
 
 def _ensure_library(path: str) -> None:
@@ -59,15 +60,7 @@ def _resolve_library_path() -> str:
 
 LIBRARY_PATH = _resolve_library_path()
 
-# Pending widgets directory lives alongside the library
-PENDING_WIDGETS_PATH = os.getenv(
-    "PENDING_WIDGETS_PATH",
-    os.path.join(os.path.dirname(LIBRARY_PATH), "Pending_Widgets"),
-)
-
-# Extraction audit log
 CARTOGRAPH_DIR = os.path.join(REPO_DIR, ".cartograph")
-EXTRACTION_LOG_PATH = os.path.join(CARTOGRAPH_DIR, "extraction_log.json")
 INSTALL_STATS_PATH = os.path.join(CARTOGRAPH_DIR, "stats.json")
 LIBRARY_CACHE_PATH = os.path.join(CARTOGRAPH_DIR, "library_cache.json")
 
@@ -157,14 +150,14 @@ def _edit_distance(a, b):
 
 
 class Cartograph:
-    def __init__(self, library_path, search_backend='hybrid'):
+    def __init__(self, library_path):
         self.library_path = library_path
         self.widgets = []
         self.install_stats = self._load_install_stats()
         self._load_library()
 
-        from .search import get_backend
-        self._search_backend = get_backend(search_backend)
+        from .search import HybridBackend
+        self._search_backend = HybridBackend()
         self._search_backend.build(self.widgets)
 
     def reload(self):
@@ -173,17 +166,6 @@ class Cartograph:
         self._load_library()
         self._search_backend.build(self.widgets)
 
-
-    def _normalize_code(self, code):
-        """Strip comments and empty lines to focus on logic."""
-        # Strip python/coffee/shell comments
-        code = re.sub(r'#.*', '', code)
-        # Strip JS/TS/Java comments
-        code = re.sub(r'//.*', '', code)
-        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
-        # Strip extra whitespace and empty lines
-        lines = [l.strip() for l in code.splitlines() if l.strip()]
-        return " ".join(lines)
 
     def _calculate_implementation_hash(self, path):
         """Calculate a stable hash of the entire src/ folder."""
@@ -520,10 +502,6 @@ class Cartograph:
         return inspect(self, widget_id, show_source=show_source,
                        show_all_versions=show_all_versions,
                        show_reviews=show_reviews, version=version)
-    def _log_registration(self, widget_id, widget_name, similar_widgets, differentiation, needs_review, widget_path):
-        from .inspector import log_registration
-        return log_registration(self, widget_id, widget_name, similar_widgets,
-                                differentiation, needs_review, widget_path)
     def create(self, item_id, language=None, name=None, domain="backend", tags=None,
                 target_dir=None, gpu_targets=None, widget_type=None):
         from .scaffolding import create_widget

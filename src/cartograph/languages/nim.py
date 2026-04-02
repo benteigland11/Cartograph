@@ -127,6 +127,29 @@ class NimEngine(LanguageEngine):
 
     # -- Custom validation (nim check + compile check on top of base scanner) --
 
+    def _nim_check(self, src_files, path, src_dir, cmd_prefix, label, timeout=60):
+        """Run a nim command on each src file, return errors (skipping missing-import failures)."""
+        errors = []
+        for fpath in src_files:
+            rel = os.path.relpath(fpath, path)
+            try:
+                res = self._run(
+                    cmd_prefix + [f"--path:{src_dir}", fpath],
+                    cwd=path, timeout=timeout,
+                )
+                if res.returncode != 0:
+                    output = (res.stderr or res.stdout).strip()
+                    lines = output.splitlines()
+                    if any("cannot find module" in l.lower() or "cannot open file" in l.lower()
+                           for l in lines):
+                        continue
+                    real_errors = [l for l in lines if l.strip()]
+                    if real_errors:
+                        errors.append(f"{label} failed on {rel}:\n" + "\n".join(real_errors))
+            except FileNotFoundError:
+                pass
+        return errors
+
     def validate_widget(self, path: str, dependencies: list) -> dict:
         errors = []
 
@@ -137,53 +160,15 @@ class NimEngine(LanguageEngine):
             errors.append("src/ contains no .nim files - add at least one source file")
 
         # 2. Semantic check - nim check catches type errors, undefined symbols, bad syntax
-        for fpath in src_files:
-            rel = os.path.relpath(fpath, path)
-            try:
-                res = self._run(
-                    ["nim", "check", "--hints:off", "--warnings:off",
-                     f"--path:{src_dir}", fpath],
-                    cwd=path, timeout=60,
-                )
-                if res.returncode != 0:
-                    output = (res.stderr or res.stdout).strip()
-                    lines = output.splitlines()
-                    missing_import = any(
-                        "cannot find module" in l.lower() or "cannot open file" in l.lower()
-                        for l in lines
-                    )
-                    if missing_import:
-                        continue
-                    real_errors = [l for l in lines if l.strip()]
-                    if real_errors:
-                        errors.append(f"nim check failed on {rel}:\n" + "\n".join(real_errors))
-            except FileNotFoundError:
-                pass
+        errors.extend(self._nim_check(src_files, path, src_dir,
+                                      ["nim", "check", "--hints:off", "--warnings:off"],
+                                      "nim check", timeout=60))
 
         # 3. Compile check - catches linker/codegen issues nim check misses
-        for fpath in src_files:
-            rel = os.path.relpath(fpath, path)
-            try:
-                res = self._run(
-                    ["nim", "c", "--compileOnly", "--hints:off", "--warnings:off",
-                     f"--path:{src_dir}", "--nimcache:/tmp/cartograph_nimcache",
-                     fpath],
-                    cwd=path, timeout=120,
-                )
-                if res.returncode != 0:
-                    output = (res.stderr or res.stdout).strip()
-                    lines = output.splitlines()
-                    missing_import = any(
-                        "cannot find module" in l.lower() or "cannot open file" in l.lower()
-                        for l in lines
-                    )
-                    if missing_import:
-                        continue
-                    real_errors = [l for l in lines if l.strip()]
-                    if real_errors:
-                        errors.append(f"nim compile failed on {rel}:\n" + "\n".join(real_errors))
-            except FileNotFoundError:
-                pass
+        errors.extend(self._nim_check(src_files, path, src_dir,
+                                      ["nim", "c", "--compileOnly", "--hints:off", "--warnings:off",
+                                       "--nimcache:/tmp/cartograph_nimcache"],
+                                      "nim compile", timeout=120))
 
         # 4. Native source scanner (uses base class helper)
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")

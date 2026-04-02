@@ -20,8 +20,6 @@ import math
 import os
 import re
 
-from .base import SearchBackend
-
 _SYNONYMS_PATH = os.path.join(os.path.dirname(__file__), "synonyms.json")
 
 try:
@@ -94,7 +92,7 @@ def _extract_field(widget: dict, field: str) -> str:
     return ""
 
 
-class TFIDFBackend(SearchBackend):
+class TFIDFBackend:
     """Field-weighted inverted index with synonym expansion and fuzzy resolution."""
 
     def __init__(self):

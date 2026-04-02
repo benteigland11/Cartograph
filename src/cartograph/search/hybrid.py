@@ -18,7 +18,6 @@ statistics.
 
 from __future__ import annotations
 
-from .base import SearchBackend
 from .filters import apply_filters, format_results
 from .ngram import NgramIndex
 from .tfidf import TFIDFBackend
@@ -48,7 +47,7 @@ def _normalise(scores: list[float]) -> list[float]:
     return [(s - lo) / span for s in scores]
 
 
-class HybridBackend(SearchBackend):
+class HybridBackend:
     def __init__(self):
         self._tfidf = TFIDFBackend()
         self._ngram = NgramIndex()

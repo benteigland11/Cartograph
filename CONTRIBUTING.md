@@ -32,7 +32,7 @@ Run `cartograph doctor` to verify all language engine dependencies are installed
 ## Writing code
 
 - Run `pytest` before submitting. Tests live in `tests/`.
-- No extra dependencies unless absolutely necessary. The core uses only `platformdirs` and `rank-bm25` plus any language files.
+- No extra dependencies. The core uses only the stdlib plus any language-specific tooling.
 - Keep cloud logic in `cloud.py`. Keep auth logic in `auth.py`. The CLI is in `cli.py`.
 - If you add a new command, update the setup command to reflect the new command reference.
 

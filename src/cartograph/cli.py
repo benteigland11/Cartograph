@@ -48,10 +48,6 @@ def _check_and_prompt_tos():
         print("  TOS not accepted. You will not be able to publish widgets.")
 
 
-def _resolve(path: str) -> str:
-    return os.path.abspath(path)
-
-
 def _resolve_widget(path: str) -> str:
     """Resolve a widget directory.
 
@@ -64,10 +60,12 @@ def _resolve_widget(path: str) -> str:
         return resolved
 
     # Try cg/<path>/ from cwd (handles bare widget_id like "logic-test-python")
+    # Skip if path already starts with cg/ to avoid doubling
     from .engine import DEFAULT_INSTALL_DIR
-    candidate = os.path.join(os.getcwd(), DEFAULT_INSTALL_DIR, path)
-    if os.path.isfile(os.path.join(candidate, "widget.json")):
-        return os.path.abspath(candidate)
+    if not path.startswith(DEFAULT_INSTALL_DIR + os.sep) and not path.startswith(DEFAULT_INSTALL_DIR + "/"):
+        candidate = os.path.join(os.getcwd(), DEFAULT_INSTALL_DIR, path)
+        if os.path.isfile(os.path.join(candidate, "widget.json")):
+            return os.path.abspath(candidate)
 
     return resolved
 
@@ -199,7 +197,7 @@ def _cloud_install_note(result):
 def cmd_install(args):
     result = _carto().install(
         widget_id=args.widget_id,
-        target_dir=_resolve(args.target),
+        target_dir=os.path.abspath(args.target),
         version=args.version,
     )
     if result.get("status") == "error":
@@ -211,7 +209,7 @@ def cmd_install(args):
 def cmd_uninstall(args):
     result = _carto().uninstall(
         widget_id=args.widget_id,
-        target_dir=_resolve(args.target),
+        target_dir=os.path.abspath(args.target),
     )
     if result.get("status") == "error":
         err(result)
@@ -221,7 +219,7 @@ def cmd_uninstall(args):
 def cmd_upgrade(args):
     result = _carto().upgrade(
         widget_id=args.widget_id,
-        target_dir=_resolve(args.target),
+        target_dir=os.path.abspath(args.target),
         version=args.version,
     )
     if result.get("status") == "error":
@@ -257,7 +255,7 @@ def cmd_create(args):
         language=args.language,
         domain=args.domain,
         name=args.name,
-        target_dir=_resolve(args.target),
+        target_dir=os.path.abspath(args.target),
     )
     if result.get("status") == "error":
         err(result)
@@ -363,7 +361,7 @@ def cmd_checkin(args):
 
 
 def cmd_status(args):
-    target = _resolve(args.target)
+    target = os.path.abspath(args.target)
 
     if args.widget_id:
         result = _carto().widget_status(widget_id=args.widget_id, target_dir=target)
@@ -390,10 +388,11 @@ def cmd_status(args):
         print(f"  Run 'cartograph install <widget_id>' to install one.\n")
         return
 
+    from .engine import normalize_widget_id
     carto = _carto()
     widgets = []
     for wid in sorted(widget_ids):
-        r = carto.widget_status(widget_id=wid, target_dir=target)
+        r = carto.widget_status(widget_id=normalize_widget_id(wid), target_dir=target)
         widgets.append(r)
 
     out({
@@ -663,7 +662,7 @@ def cmd_rate(args):
     # Local widget
     result = _carto().add_review(
         widget_id=widget_id,
-        target_dir=_resolve(args.target),
+        target_dir=os.path.abspath(args.target),
         score=args.score,
         comment=args.comment,
     )

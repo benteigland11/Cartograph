@@ -48,7 +48,3 @@ def sign_stamp(stamp: dict) -> str:
     return hmac.new(_signing_key(), _canonical(stamp), hashlib.sha256).hexdigest()
 
 
-def verify_stamp(stamp: dict, signature: str) -> bool:
-    """Return True if the signature matches the stamp using the local key."""
-    expected = sign_stamp(stamp)
-    return hmac.compare_digest(expected, signature)

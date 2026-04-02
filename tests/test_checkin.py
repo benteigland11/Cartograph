@@ -31,7 +31,8 @@ def installed_widget(carto_tmp, tmp_path):
     """Install http-client into tmp_path and return the installed dir."""
     install_dir = str(tmp_path / "myproject")
     result = carto_tmp.install("http-client", target_dir=install_dir)
-    assert result["status"] == "success", result
+    if result.get("status") != "success":
+        pytest.fail(f"Fixture setup: install failed - {result}")
     return result["installed_at"]
 
 
@@ -64,7 +65,8 @@ def test_checkin_bumps_version_major(carto_tmp, installed_widget):
 
 
 def test_checkin_leaves_source_intact(carto_tmp, installed_widget):
-    carto_tmp.checkin(installed_widget, reason="Test")
+    result = carto_tmp.checkin(installed_widget, reason="Test")
+    assert result["status"] == "success", f"Checkin failed: {result}"
     assert os.path.isdir(installed_widget), "Source dir must be left in place after checkin"
     assert os.path.exists(os.path.join(installed_widget, "widget.json"))
 

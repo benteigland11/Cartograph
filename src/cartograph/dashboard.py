@@ -175,7 +175,7 @@ def _make_handler(engine):
             return result
 
         def _add_review(self, body):
-            import datetime as _dt
+            from .checkin import write_review
             widget_id = body.get("widget_id", "")
             score = body.get("score", 0)
             comment = body.get("comment", "")
@@ -190,34 +190,7 @@ def _make_handler(engine):
             widget = next((w for w in engine.widgets if w["id"] == widget_id), None)
             if not widget:
                 return {"error": f"Widget '{widget_id}' not found"}
-            author = ""
-            try:
-                from .auth import is_authenticated
-                if is_authenticated():
-                    from .cloud import whoami
-                    profile = whoami()
-                    author = profile.get("owner", "") or profile.get("username", "")
-            except Exception:
-                pass
-            entry = {"rating": score, "version": widget.get("version", "unknown"),
-                     "timestamp": _dt.datetime.now().isoformat()}
-            if author:
-                entry["author"] = author
-            if comment:
-                entry["comment"] = comment
-            review_path = os.path.join(widget["path"], "reviews.json")
-            reviews_data = {"reviews": []}
-            if os.path.exists(review_path):
-                try:
-                    with open(review_path) as f:
-                        reviews_data = json.load(f)
-                except Exception:
-                    pass
-            reviews_data["reviews"].append(entry)
-            with open(review_path, "w") as f:
-                json.dump(reviews_data, f, indent=2)
-            avg = sum(r["rating"] for r in reviews_data["reviews"]) / len(reviews_data["reviews"])
-            return {"status": "success", "rating": score, "avg_rating": round(avg, 1), "author": author}
+            return write_review(widget["path"], score, widget.get("version", "unknown"), comment)
 
         def _whoami(self):
             from .auth import is_authenticated
@@ -260,7 +233,6 @@ def _make_handler(engine):
             q = qs.get("q", "").strip()
             if not q:
                 return {"widgets": [], "total": 0}
-            from .auth import is_authenticated, load_token
             from .cloud import _get
             params = {"q": q}
             if qs.get("domain"): params["domain"] = qs["domain"]

@@ -23,12 +23,24 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from platformdirs import user_config_dir
+import sys as _sys
 
 log = logging.getLogger("cartograph")
 
 _DEFAULT_REGISTRY_URL = "https://cartograph-api-562154372671.us-central1.run.app"
-_CREDENTIALS_FILE = os.path.join(user_config_dir("cartograph"), "credentials.json")
+
+
+def _user_config_dir() -> str:
+    if _sys.platform == "win32":
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+    elif _sys.platform == "darwin":
+        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
+    return os.path.join(base, "cartograph")
+
+
+_CREDENTIALS_FILE = os.path.join(_user_config_dir(), "credentials.json")
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 def _google_client_id() -> str:
     env = os.environ.get("GOOGLE_CLIENT_ID", "")

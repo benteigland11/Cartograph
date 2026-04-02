@@ -36,15 +36,10 @@ def cartograph_version() -> str:
         return "dev"
 
 
-def _engine_patterns(widget_path: str, engine) -> list[str]:
-    """Get watched file patterns from a language engine."""
-    return list(engine.watched_patterns(widget_path))
-
-
 def write_stamp(widget_path: str, language: str, engine,
                 test_results: dict | None = None) -> None:
     """Write a fresh validation stamp. Called after successful validate_item()."""
-    patterns = _engine_patterns(widget_path, engine)
+    patterns = engine.watched_patterns(widget_path)
     from datetime import datetime, timezone
     rv = engine.runtime_version() if engine else None
     metadata = {
@@ -67,7 +62,7 @@ def read_stamp(widget_path: str) -> dict | None:
 
 def is_stamp_valid(widget_path: str, language: str, engine) -> bool:
     """Return True if the stamp exists, language matches, and no watched file changed."""
-    patterns = _engine_patterns(widget_path, engine)
+    patterns = engine.watched_patterns(widget_path)
     valid = _is_stamp_valid(
         widget_path,
         metadata_match={

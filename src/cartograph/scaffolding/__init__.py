@@ -34,12 +34,6 @@ def _library_notes(language: str, domain: str = "") -> dict:
         notes["domain"] = domain_note
     return notes
 
-_LANG_VERSIONS = {
-    "python": ">=3.10",
-}
-
-_COMPILER_DEFAULTS = {}
-
 _VALID_DOMAINS = {"backend", "data", "ml", "security", "infra", "frontend", "universal"}
 
 

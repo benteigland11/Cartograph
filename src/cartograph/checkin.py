@@ -23,37 +23,16 @@ On override the reason is recorded in the changelog entry as an audit trail.
 """
 
 import datetime
-import glob
 import json
 import logging
 import os
-import re
 import shutil
 
 from .languages import get_engine
-from .languages.base import _dep_bare_name
+from .scaffolding import _library_notes as _canonical_library_notes
 from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_FILE, cartograph_version as _cartograph_version
 
 log = logging.getLogger("cartograph")
-
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "library_config.json")
-
-
-def _canonical_library_notes(language: str, domain: str = "") -> dict:
-    """Return the authoritative library_notes for a given language and domain."""
-    try:
-        with open(_CONFIG_PATH) as f:
-            cfg = json.load(f)
-    except Exception:
-        return {}
-    notes = {
-        "general": cfg.get("general_notes", ""),
-        "language": cfg.get("language_notes", {}).get(language.lower(), ""),
-    }
-    domain_note = cfg.get("domain_notes", {}).get(domain.lower(), "")
-    if domain_note:
-        notes["domain"] = domain_note
-    return notes
 
 
 def _restore_library_notes(manifest_path: str) -> None:
@@ -346,6 +325,50 @@ def restore(carto, item_id, version, reason):
     return result
 
 
+def _get_reviewer() -> str:
+    """Return the authenticated user's handle, or empty string."""
+    try:
+        from .auth import is_authenticated
+        if is_authenticated():
+            from .cloud import whoami
+            profile = whoami()
+            return profile.get("owner", "") or profile.get("username", "")
+    except Exception:
+        pass
+    return ""
+
+
+def write_review(widget_path: str, score: float, version: str,
+                 comment: str | None = None) -> dict:
+    """Write a review entry to reviews.json at *widget_path*. Returns result dict."""
+    author = _get_reviewer()
+    entry = {
+        "rating": score,
+        "version": version,
+        "timestamp": datetime.datetime.now().isoformat(),
+    }
+    if author:
+        entry["author"] = author
+    if comment:
+        entry["comment"] = comment
+
+    review_path = os.path.join(widget_path, "reviews.json")
+    reviews_data = {"reviews": []}
+    if os.path.exists(review_path):
+        try:
+            with open(review_path) as f:
+                reviews_data = json.load(f)
+        except Exception:
+            pass
+
+    reviews_data["reviews"].append(entry)
+    with open(review_path, "w") as f:
+        json.dump(reviews_data, f, indent=2)
+
+    avg = sum(r["rating"] for r in reviews_data["reviews"]) / len(reviews_data["reviews"])
+    return {"status": "success", "rating": score, "avg_rating": round(avg, 1), "author": author}
+
+
 def add_review(carto, widget_id, target_dir, score, comment=None):
     """Add a review to a widget. Must be installed at target_dir/widget_id/."""
     from .engine import python_dir_name, DEFAULT_INSTALL_DIR
@@ -364,41 +387,7 @@ def add_review(carto, widget_id, target_dir, score, comment=None):
     except (ValueError, TypeError):
         return {"error": "Score must be a number between 1 and 5."}
 
-    # Get reviewer identity if authenticated
-    author = ""
-    try:
-        from .auth import is_authenticated
-        if is_authenticated():
-            from .cloud import whoami
-            profile = whoami()
-            author = profile.get("owner", "") or profile.get("username", "")
-    except Exception:
-        pass
-
-    review_entry = {
-        "rating": score,
-        "version": widget.get("version", "unknown"),
-        "timestamp": datetime.datetime.now().isoformat(),
-    }
-    if author:
-        review_entry["author"] = author
-    if comment:
-        review_entry["comment"] = comment
-
-    review_path = os.path.join(widget["path"], "reviews.json")
-    reviews_data = {"reviews": []}
-    if os.path.exists(review_path):
-        try:
-            with open(review_path) as f:
-                reviews_data = json.load(f)
-        except Exception:
-            pass
-
-    reviews_data["reviews"].append(review_entry)
-    with open(review_path, "w") as f:
-        json.dump(reviews_data, f, indent=2)
-
-    return {"status": "success", "widget_id": widget_id, "score": score}
+    return write_review(widget["path"], score, widget.get("version", "unknown"), comment)
 
 
 def widget_status(carto, widget_id, target_dir):

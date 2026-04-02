@@ -102,21 +102,12 @@ def validate_item(carto, path):
 
     # -- Resolve engine early so steps 7c/8 can use language-specific behaviour
     from .languages import get_engine
-    from .engine import Cartograph, LIBRARY_PATH
     language = tech_stack.get("language", "python").lower()
     dependencies = tech_stack.get("dependencies", [])
     engine = get_engine(language)
 
     # 6b. No widget-on-widget dependencies
-    try:
-        library_ids = {w["id"] for w in Cartograph(LIBRARY_PATH).widgets}
-    except Exception as e:
-        check("Library dependency index available", False, str(e))
-        _print_checklist(checklist, errors, failed=True)
-        return {
-            "status": "error",
-            "message": f"Could not load library dependency index: {e}",
-        }
+    library_ids = {w["id"] for w in carto.widgets}
     widget_deps = [
         d["name"] if isinstance(d, dict) else str(d)
         for d in dependencies
