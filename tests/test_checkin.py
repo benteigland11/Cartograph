@@ -252,3 +252,20 @@ def test_checkin_stamps_correct_engine_version(carto_tmp, installed_widget):
         data = json.load(f)
 
     assert data["validation"]["engine_version"] == PythonEngine.validation_version
+
+
+def test_checkin_stamps_runtime_version(carto_tmp, installed_widget):
+    import sys
+    result = carto_tmp.checkin(installed_widget, reason="Runtime stamp test")
+    assert result["status"] == "success"
+
+    widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
+    with open(os.path.join(widget["path"], "widget.json")) as f:
+        data = json.load(f)
+
+    v = data["validation"]
+    assert "runtime" in v
+    assert v["runtime"].startswith("python ")
+    # Should match the running interpreter
+    expected = f"python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    assert v["runtime"] == expected

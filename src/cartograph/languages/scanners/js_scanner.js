@@ -26,7 +26,7 @@ const RISKY_IMPORTS = new Set([
 
 const CREDENTIAL_RE = /(?:api_key|api_secret|secret_key|access_token|auth_token|password|passwd|credential)\s*=/i
 const ABS_PATH_RE = /(?:\/home\/|\/Users\/|\/root\/|[A-Za-z]:[/\\])/
-const URL_RE = /^https?:\/\/(?!(?:localhost|127\.0\.0\.1|[\w-]*\.?example\.com|schemas?\.))/i
+const URL_RE = /^https?:\/\/(?!(?:localhost|127\.0\.0\.1|[\w-]*\.?example\.com|[\w.-]+\.test(?:[\/:"'#?]|$)|schemas?\.))/i
 const IP_RE = /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?$/
 
 function loadDeclaredDeps() {
@@ -405,10 +405,10 @@ function detectStringContamination(tokens, filename, findings, inTests) {
         addFinding(findings, filename, 'abs_path', tok.line, `absolute path "${value.substring(0, 60)}" - widgets must be portable`, 'block')
       }
       if (URL_RE.test(value)) {
-        addFinding(findings, filename, 'hardcoded_url', tok.line, `hardcoded URL "${value.substring(0, 60)}"`, 'block')
+        addFinding(findings, filename, 'hardcoded_url', tok.line, `hardcoded URL "${value.substring(0, 60)}"`, 'warning')
       }
       if (IP_RE.test(value)) {
-        addFinding(findings, filename, 'hardcoded_ip', tok.line, `hardcoded IP "${value}"`, 'block')
+        addFinding(findings, filename, 'hardcoded_ip', tok.line, `hardcoded IP "${value}"`, inTests ? 'warning' : 'block')
       }
 
       let assignmentHead = ''

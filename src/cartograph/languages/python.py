@@ -61,6 +61,10 @@ class PythonEngine(LanguageEngine):
     name = "python"
     validation_version = 1
 
+    def runtime_version(self) -> str | None:
+        v = sys.version_info
+        return f"python {v.major}.{v.minor}.{v.micro}"
+
     def check_available(self) -> tuple[bool, str]:
         import subprocess
         missing = []
@@ -129,7 +133,7 @@ class PythonEngine(LanguageEngine):
         re.IGNORECASE,
     )
     _URL_RE = re.compile(
-        r'["\']https?://(?!(?:localhost|127\.0\.0\.1|(?:[\w-]+\.)*example\.com|schemas?\.))[^"\']{8,}["\']'
+        r'["\']https?://(?!(?:localhost|127\.0\.0\.1|(?:[\w-]+\.)*example\.com|[\w.-]+\.test(?:[/:"\'#?]|$)|schemas?\.))[^"\']{8,}["\']'
     )
     _IP_RE = re.compile(r'["\'](?:\d{1,3}\.){3}\d{1,3}(?::\d+)?["\']')
 
@@ -172,11 +176,14 @@ class PythonEngine(LanguageEngine):
 
             for m in self._URL_RE.finditer(code):
                 line_no = code[:m.start()].count("\n") + 1
-                blocks.append(f"Hardcoded URL in {rel}:{line_no}: {m.group()}")
+                warnings.append(f"Hardcoded URL in {rel}:{line_no}: {m.group()}")
 
             for m in self._IP_RE.finditer(code):
                 line_no = code[:m.start()].count("\n") + 1
-                blocks.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
+                if is_src:
+                    blocks.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
+                else:
+                    warnings.append(f"Hardcoded IP in test {rel}:{line_no} - verify it's not project-specific: {m.group()}")
 
             # AST-based checks
             try:

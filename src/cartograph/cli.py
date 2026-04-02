@@ -957,11 +957,17 @@ def cmd_doctor(args):
         available, message = engine.check_available()
         lang_checks = []
         ev = getattr(engine, "validation_version", None)
-        version_tag = f"  (engine v{ev})" if ev is not None else ""
+        rv = engine.runtime_version() if available else None
+        tags = []
+        if ev is not None:
+            tags.append(f"engine v{ev}")
+        if rv:
+            tags.append(rv)
+        tag_str = f"  ({', '.join(tags)})" if tags else ""
         if available:
-            lang_checks.append((lang_name, True, f"ready{version_tag}", None))
+            lang_checks.append((lang_name, True, f"ready{tag_str}", None))
         else:
-            lang_checks.append((lang_name, False, f"not ready{version_tag}", message))
+            lang_checks.append((lang_name, False, f"not ready{tag_str}", message))
         groups.append((lang_name.capitalize(), lang_checks))
 
     # --- Render ---

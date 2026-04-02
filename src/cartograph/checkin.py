@@ -187,11 +187,16 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     data["meta"]["version"] = new_version
 
     # --- Stamp validation metadata into widget.json ---
-    data["validation"] = {
+    validation_block = {
         "engine_version": getattr(engine, "validation_version", None),
         "cartograph_version": _cartograph_version(),
         "validated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+    if engine:
+        rv = engine.runtime_version()
+        if rv:
+            validation_block["runtime"] = rv
+    data["validation"] = validation_block
 
     with open(manifest_path, "w") as f:
         json.dump(data, f, indent=2)

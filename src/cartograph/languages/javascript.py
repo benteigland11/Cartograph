@@ -151,6 +151,16 @@ class JavaScriptEngine(LanguageEngine):
     import_pattern = r"from\s+['\"]\.\.?/src/"
     manifest_patterns = ["package.json"]
 
+    def runtime_version(self) -> str | None:
+        try:
+            res = self._run(["node", "--version"], cwd=".", timeout=10)
+            if res.returncode == 0:
+                ver = res.stdout.strip().lstrip("v")
+                return f"node {ver}"
+        except Exception:
+            pass
+        return None
+
     def scaffold(self, target_dir, module_name, display_name, **kwargs):
         component = "".join(w.capitalize() for w in module_name.split("_"))
         css_class = module_name.replace("_", "-")

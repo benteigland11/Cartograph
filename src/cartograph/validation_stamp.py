@@ -46,9 +46,11 @@ def write_stamp(widget_path: str, language: str, engine,
     """Write a fresh validation stamp. Called after successful validate_item()."""
     patterns = _engine_patterns(widget_path, engine)
     from datetime import datetime, timezone
+    rv = engine.runtime_version() if engine else None
     metadata = {
         "language": language,
         "engine_version": getattr(engine, "validation_version", None),
+        "runtime": rv,
         "cartograph_version": cartograph_version(),
         "test_results": test_results or {},
         "validated_at": datetime.now(timezone.utc).isoformat(),

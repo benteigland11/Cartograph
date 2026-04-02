@@ -262,11 +262,11 @@ class TestContaminationStandard:
     # -- Check 3: Hardcoded URLs -> block --
 
     @pytest.mark.parametrize("lang", LANGUAGES)
-    def test_hardcoded_url_blocks(self, tmp_path, lang):
+    def test_hardcoded_url_warns(self, tmp_path, lang):
         _skip_if_missing(lang)
         result = _scan(tmp_path, lang, EXT[lang], URL_SRC[lang])
-        assert any("url" in b.lower() for b in result["blocks"]), \
-            f"{lang}: hardcoded URL not blocked: {result}"
+        assert any("url" in w.lower() for w in result["warnings"]), \
+            f"{lang}: hardcoded URL not warned: {result}"
 
     @pytest.mark.parametrize("lang", LANGUAGES)
     def test_localhost_url_allowed(self, tmp_path, lang):
@@ -682,7 +682,7 @@ class TestBaseFallback:
     def test_url_caught(self, tmp_path):
         result = self._scan(tmp_path,
                             'url = "https://api.company.com/v2/data"\n')
-        assert any("URL" in b for b in result["blocks"])
+        assert any("URL" in w for w in result["warnings"])
 
     def test_ip_caught(self, tmp_path):
         result = self._scan(tmp_path, 'host = "192.168.1.50"\n')

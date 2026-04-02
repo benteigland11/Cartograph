@@ -313,14 +313,15 @@ proc scanFile(filename: string): seq[Finding] =
                 else: "possible credential assignment",
         severity: if inTests: "warning" else: "block"))
 
-    # Hardcoded URLs (block)
+    # Hardcoded URLs (warning)
     if "\"http://" in rawLine or "\"https://" in rawLine:
       if not ("localhost" in rawLine or "127.0.0.1" in rawLine or
-              "example.com" in rawLine):
+              "example.com" in rawLine or ".test/" in rawLine or
+              ".test\"" in rawLine or ".test:" in rawLine):
         result.add(Finding(
           file: filename, kind: "hardcoded_url", line: lineNo,
           detail: "hardcoded URL in string",
-          severity: "block"))
+          severity: "warning"))
 
     # Hardcoded IPs (block) - string scan for "N.N.N.N" pattern
     block ipCheck:
@@ -354,7 +355,7 @@ proc scanFile(filename: string): seq[Finding] =
         result.add(Finding(
           file: filename, kind: "hardcoded_ip", line: lineNo,
           detail: "hardcoded IP address in string",
-          severity: "block"))
+          severity: if inTests: "warning" else: "block"))
 
     # Environment variable access
     if "getenv(" in code.toLower() or "getEnv(" in code or "envPairs" in code:

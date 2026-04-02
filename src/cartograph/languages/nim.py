@@ -98,6 +98,19 @@ class NimEngine(LanguageEngine):
     import_pattern = r'^import\s+\w+'
     manifest_patterns = ["*.nimble"]
 
+    def runtime_version(self) -> str | None:
+        try:
+            res = self._run(["nim", "--version"], cwd=".", timeout=10)
+            if res.returncode == 0:
+                first_line = res.stdout.strip().splitlines()[0]
+                # "Nim Compiler Version 2.0.4 [Linux: amd64]"
+                parts = first_line.split()
+                if len(parts) >= 4:
+                    return f"nim {parts[3]}"
+        except Exception:
+            pass
+        return None
+
     def scaffold(self, target_dir, module_name, display_name, **_):
         # Nim stdlib modules are resolved before --path:src, so suffix with _lib
         # to guarantee no collision with any stdlib module.

@@ -84,3 +84,38 @@ def test_engine_has_required_interface():
         assert hasattr(engine, "run_tests"), f"{lang} missing run_tests"
         assert callable(engine.install_deps)
         assert callable(engine.run_tests)
+
+
+def test_python_runtime_version():
+    import sys
+    engine = get_engine("python")
+    rv = engine.runtime_version()
+    assert rv is not None
+    assert rv.startswith("python ")
+    expected = f"python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    assert rv == expected
+
+
+def test_js_runtime_version():
+    engine = get_engine("javascript")
+    available, _ = engine.check_available()
+    if not available:
+        pytest.skip("node not installed")
+    rv = engine.runtime_version()
+    assert rv is not None
+    assert rv.startswith("node ")
+
+
+def test_nim_runtime_version():
+    engine = get_engine("nim")
+    available, _ = engine.check_available()
+    if not available:
+        pytest.skip("nim not installed")
+    rv = engine.runtime_version()
+    assert rv is not None
+    assert rv.startswith("nim ")
+
+
+def test_base_engine_runtime_version_is_none():
+    engine = LanguageEngine()
+    assert engine.runtime_version() is None

@@ -81,6 +81,11 @@ class LanguageEngine:
 
     # -- Methods (override for custom behavior) --------------------------------
 
+    def runtime_version(self) -> str | None:
+        """Return the runtime version string, or None if unavailable.
+        Override per engine. Used to stamp widget.json at checkin time."""
+        return None
+
     def check_available(self) -> tuple[bool, str]:
         """Check that all system dependencies for this engine are installed."""
         if not self.toolchain:
@@ -144,18 +149,20 @@ class LanguageEngine:
           1. Absolute paths    - /home/, /Users/, /root/, C:\\ in string literals
           2. Credentials       - api_key/secret/token/password assignments in src/
                                  (in tests/, emit as warning instead)
-          3. Hardcoded URLs    - http(s):// URLs (except localhost, example.com)
-          4. Hardcoded IPs     - IP addresses in string literals
-          5. Sleep/blocking    - sleep calls in src/ (widgets must not block the caller)
+          3. Hardcoded IPs     - IP addresses in src/ string literals
+                                 (in tests/, emit as warning instead)
+          4. Sleep/blocking    - sleep calls in src/ (widgets must not block the caller)
                                  (in tests/examples, warn if duration > 1 second)
 
         Required checks (warnings - overridable with --override-warnings):
+          5. Hardcoded URLs    - http(s):// URLs (except localhost, example.com, .test TLD)
+                                 (warn in both src/ and tests/)
           6. Hardcoded values  - numeric and string constant assignments
           7. Env var access    - language-specific env var APIs
           8. Unlisted imports  - imports not in widget.json dependencies or stdlib
 
-        Both src/ and tests/ files must be scanned. Credentials in tests/ are
-        warnings (verify they're fake), not blocks.
+        Both src/ and tests/ files must be scanned. Credentials and IPs in tests/
+        are warnings (verify they're fake), not blocks.
 
         Returns {"blocks": [...], "warnings": [...]}.
         See python.py, javascript.py, nim.py for reference implementations.
@@ -176,7 +183,7 @@ class LanguageEngine:
             re.IGNORECASE,
         )
         url_re = re.compile(
-            r'["\']https?://(?!(?:localhost|127\.0\.0\.1|(?:[\w-]+\.)*example\.com|schemas?\.))[^"\']{8,}["\']'
+            r'["\']https?://(?!(?:localhost|127\.0\.0\.1|(?:[\w-]+\.)*example\.com|[\w.-]+\.test(?:[/:"\'#?]|$)|schemas?\.))[^"\']{8,}["\']'
         )
         ip_re = re.compile(r'["\'](?:\d{1,3}\.){3}\d{1,3}(?::\d+)?["\']')
         number_re = re.compile(r'^\s*\w+\s*=\s*-?\d+\.?\d*(?:e[+-]?\d+)?\s*$', re.IGNORECASE)
@@ -198,7 +205,7 @@ class LanguageEngine:
                     if credential_re.search(line):
                         blocks.append(f"Possible credential in {loc}: {line.strip()}")
                     if url_re.search(line):
-                        blocks.append(f"Hardcoded URL in {loc}: {line.strip()}")
+                        warnings.append(f"Hardcoded URL in {loc}: {line.strip()}")
                     if ip_re.search(line):
                         blocks.append(f"Hardcoded IP in {loc}: {line.strip()}")
                     if number_re.match(line):
@@ -206,6 +213,10 @@ class LanguageEngine:
                 else:
                     if credential_re.search(line):
                         warnings.append(f"Possible credential in test {loc} - verify it's fake: {line.strip()}")
+                    if url_re.search(line):
+                        warnings.append(f"Hardcoded URL in test {loc} - verify it's not project-specific: {line.strip()}")
+                    if ip_re.search(line):
+                        warnings.append(f"Hardcoded IP in test {loc} - verify it's not project-specific: {line.strip()}")
 
         return {"blocks": blocks, "warnings": warnings}
 
