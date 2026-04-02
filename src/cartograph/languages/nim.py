@@ -92,6 +92,8 @@ class NimEngine(LanguageEngine):
         "env_var": "Environment variable access found in src/ - verify it's not project-specific:",
         "unlisted_import": "Unlisted imports found in src/ - add to dependencies or remove:",
         "sleep": "Sleep/blocking calls found - widgets must not block the caller:",
+        "std_import_style": "Old-style stdlib imports found - prefer std/... imports in modern Nim:",
+        "top_level_var": "Top-level mutable state found - prefer local state or explicit parameters:",
     }
     import_pattern = r'^import\s+\w+'
     manifest_patterns = ["*.nimble"]
@@ -194,7 +196,7 @@ class NimEngine(LanguageEngine):
         test_files = _glob.glob(os.path.join(path, "tests", "**", "*.nim"), recursive=True)
         all_files = src_files + test_files
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")
-        _, scan_warnings, scan_blocks = self._run_native_scanner(
+        scan_errors, scan_warnings, scan_blocks = self._run_native_scanner(
             scanner_path=scanner,
             runner=self.scanner_runner,
             src_files=all_files,
@@ -202,7 +204,7 @@ class NimEngine(LanguageEngine):
             finding_messages=self.scanner_messages,
         )
 
-        return {"blocks": scan_blocks, "warnings": scan_warnings}
+        return {"blocks": scan_blocks + scan_errors, "warnings": scan_warnings}
 
     def required_files(self, path: str) -> list[tuple[str, str]]:
         if _glob.glob(os.path.join(path, "*.nimble")):
@@ -227,7 +229,13 @@ class NimEngine(LanguageEngine):
             if not bare:
                 continue
             log.debug("Installing Nim package: %s", bare)
-            self._run(["nimble", "install", "-y", bare], cwd=path, timeout=120, env=env)
+            res = self._run(["nimble", "install", "-y", bare], cwd=path, timeout=120, env=env)
+            if res.returncode != 0:
+                output = (res.stderr or res.stdout or "").strip()
+                raise RuntimeError(
+                    f"Failed to install Nim dependency '{bare}'."
+                    + (f"\n{output[:2000]}" if output else "")
+                )
 
         self._sync_nimble_requires(path, dependencies)
 

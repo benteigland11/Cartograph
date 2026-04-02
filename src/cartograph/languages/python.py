@@ -154,7 +154,8 @@ class PythonEngine(LanguageEngine):
             is_src = fpath in src_files
             try:
                 code = open(fpath).read()
-            except Exception:
+            except Exception as e:
+                blocks.append(f"Could not read source file {rel}: {e}")
                 continue
 
             # Line-level checks (abs paths, credentials, URLs, IPs)
@@ -319,11 +320,17 @@ class PythonEngine(LanguageEngine):
                         dep_name,
                     )
                 continue
-            self._run(
+            res = self._run(
                 [sys.executable, "-m", "pip", "install", "-q", dep_name],
                 cwd=path,
                 timeout=60,
             )
+            if res.returncode != 0:
+                output = (res.stderr or res.stdout or "").strip()
+                raise RuntimeError(
+                    f"Failed to install Python dependency '{dep_name}'."
+                    + (f"\n{output[:2000]}" if output else "")
+                )
 
     def run_tests(self, path: str) -> dict:
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}

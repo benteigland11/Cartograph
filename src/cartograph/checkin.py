@@ -62,20 +62,17 @@ def _restore_library_notes(manifest_path: str) -> None:
     Called just before copying to the library so agents cannot drift or
     remove the library-wide standards even if they edited widget.json.
     """
-    try:
-        with open(manifest_path) as f:
-            data = json.load(f)
-        language = data.get("tech_stack", {}).get("language", "")
-        if isinstance(language, list):
-            language = language[0] if language else ""
-        domain = data.get("meta", {}).get("domain", "")
-        canonical = _canonical_library_notes(language, domain)
-        if canonical:
-            data["library_notes"] = canonical
-            with open(manifest_path, "w") as f:
-                json.dump(data, f, indent=2)
-    except Exception:
-        pass  # non-fatal — checkin proceeds
+    with open(manifest_path) as f:
+        data = json.load(f)
+    language = data.get("tech_stack", {}).get("language", "")
+    if isinstance(language, list):
+        language = language[0] if language else ""
+    domain = data.get("meta", {}).get("domain", "")
+    canonical = _canonical_library_notes(language, domain)
+    if canonical:
+        data["library_notes"] = canonical
+        with open(manifest_path, "w") as f:
+            json.dump(data, f, indent=2)
 
 
 # Contamination scanning is now in contamination.py, delegated to per-language engines.
@@ -230,7 +227,10 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
                 shutil.copy2(src, dst)
 
     # --- Restore library_notes before copying (agent edits ignored) ---
-    _restore_library_notes(manifest_path)
+    try:
+        _restore_library_notes(manifest_path)
+    except Exception as e:
+        return {"status": "error", "message": f"Could not restore canonical library_notes: {e}"}
 
     # --- Copy working copy → library (never move — leave source intact) ---
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "node_modules", "package-lock.json")

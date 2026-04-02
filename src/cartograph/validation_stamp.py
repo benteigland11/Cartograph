@@ -53,12 +53,9 @@ def write_stamp(widget_path: str, language: str, engine,
         "test_results": test_results or {},
         "validated_at": datetime.now(timezone.utc).isoformat(),
     }
-    try:
-        _write_stamp(widget_path, metadata=metadata, stamp_name=STAMP_FILE,
-                     patterns=patterns)
-        log.debug("Validation stamp written to %s", widget_path)
-    except OSError as e:
-        log.debug("Could not write validation stamp: %s", e)
+    _write_stamp(widget_path, metadata=metadata, stamp_name=STAMP_FILE,
+                 patterns=patterns)
+    log.debug("Validation stamp written to %s", widget_path)
 
 
 def read_stamp(widget_path: str) -> dict | None:

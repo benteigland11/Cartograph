@@ -1,17 +1,17 @@
 /**
  * Cartograph JavaScript/TypeScript source scanner.
  *
- * Scans .js/.jsx/.ts/.tsx files for contamination patterns with awareness
- * of strings, comments, and template literals. Outputs JSON for the Python engine.
+ * This scanner is token-based rather than line-regex-based so it can handle:
+ * - multiline imports / require calls
+ * - JSX / TSX-adjacent syntax
+ * - comments and strings without false positives from comment text
+ * - common JS/TS call patterns with whitespace/newline variation
  *
- * Usage: node js_scanner.js <file1.js> [file2.ts ...]
- * Output: JSON array of {file, kind, line, detail} objects.
+ * It is still intentionally narrow: this is a policy scanner, not a full AST.
  */
 
 const fs = require('fs')
-const path = require('path')
 
-// Node.js built-in modules (skip these for unlisted import checks)
 const NODE_BUILTINS = new Set([
   'assert', 'buffer', 'child_process', 'cluster', 'console', 'constants',
   'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'https',
@@ -20,311 +20,472 @@ const NODE_BUILTINS = new Set([
   'tls', 'tty', 'url', 'util', 'v8', 'vm', 'worker_threads', 'zlib',
 ])
 
-// Load declared dependencies from widget.json in cwd
+const RISKY_IMPORTS = new Set([
+  'fs', 'child_process', 'net', 'http', 'https', 'dgram', 'cluster', 'worker_threads',
+])
+
+const CREDENTIAL_RE = /(?:api_key|api_secret|secret_key|access_token|auth_token|password|passwd|credential)\s*=/i
+const ABS_PATH_RE = /(?:\/home\/|\/Users\/|\/root\/|[A-Za-z]:[/\\])/
+const URL_RE = /^https?:\/\/(?!(?:localhost|127\.0\.0\.1|[\w-]*\.?example\.com|schemas?\.))/i
+const IP_RE = /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?$/
+
 function loadDeclaredDeps() {
   try {
     const data = JSON.parse(fs.readFileSync('widget.json', 'utf-8'))
     const deps = (data.tech_stack || {}).dependencies || []
-    return new Set(deps.map(d => {
-      // Strip version specifiers: 'react>=18.0.0' -> 'react'
-      const bare = d.split(/[><=!~;\[]/)[0].trim().toLowerCase()
-      return bare
-    }))
-  } catch (e) {
+    return new Set(deps.map(d => String(d).split(/[><=!~;\[]/)[0].trim().toLowerCase()))
+  } catch {
     return new Set()
   }
 }
 
 const declaredDeps = loadDeclaredDeps()
 
+function lineOf(content, index) {
+  let line = 1
+  for (let i = 0; i < index; i++) {
+    if (content[i] === '\n') line++
+  }
+  return line
+}
+
+function addFinding(findings, file, kind, line, detail, severity) {
+  const finding = { file, kind, line, detail }
+  if (severity) finding.severity = severity
+  findings.push(finding)
+}
+
+function isIdentStart(ch) {
+  return /[A-Za-z_$]/.test(ch)
+}
+
+function isIdentPart(ch) {
+  return /[A-Za-z0-9_$]/.test(ch)
+}
+
+function isDigit(ch) {
+  return /[0-9]/.test(ch)
+}
+
+function tokenize(content) {
+  const tokens = []
+  let i = 0
+  let prevSignificant = null
+
+  function push(type, value, start, end, extra = {}) {
+    const tok = { type, value, start, end, line: lineOf(content, start), ...extra }
+    tokens.push(tok)
+    if (type !== 'newline') prevSignificant = tok
+  }
+
+  while (i < content.length) {
+    const ch = content[i]
+    const next = i + 1 < content.length ? content[i + 1] : ''
+
+    if (ch === '\n') {
+      push('newline', '\n', i, i + 1)
+      i++
+      continue
+    }
+
+    if (/\s/.test(ch)) {
+      i++
+      continue
+    }
+
+    if (ch === '/' && next === '/') {
+      i += 2
+      while (i < content.length && content[i] !== '\n') i++
+      continue
+    }
+
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) i++
+      i = Math.min(i + 2, content.length)
+      continue
+    }
+
+    if (ch === '"' || ch === "'") {
+      const quote = ch
+      const start = i
+      let value = ''
+      i++
+      while (i < content.length) {
+        const c = content[i]
+        if (c === '\\') {
+          value += c
+          if (i + 1 < content.length) value += content[i + 1]
+          i += 2
+          continue
+        }
+        if (c === quote) {
+          i++
+          break
+        }
+        value += c
+        i++
+      }
+      push('string', value, start, i, { quote })
+      continue
+    }
+
+    if (ch === '`') {
+      const start = i
+      let value = ''
+      i++
+      let templateDepth = 0
+      while (i < content.length) {
+        const c = content[i]
+        const n = i + 1 < content.length ? content[i + 1] : ''
+        if (c === '\\') {
+          value += c
+          if (i + 1 < content.length) value += content[i + 1]
+          i += 2
+          continue
+        }
+        if (templateDepth === 0 && c === '`') {
+          i++
+          break
+        }
+        if (c === '$' && n === '{') {
+          templateDepth++
+          value += '${'
+          i += 2
+          continue
+        }
+        if (templateDepth > 0) {
+          if (c === '{') templateDepth++
+          else if (c === '}') templateDepth--
+        }
+        value += c
+        i++
+      }
+      push('template', value, start, i)
+      continue
+    }
+
+    if (isIdentStart(ch)) {
+      const start = i
+      i++
+      while (i < content.length && isIdentPart(content[i])) i++
+      const value = content.slice(start, i)
+      push('ident', value, start, i)
+      continue
+    }
+
+    if (isDigit(ch) || (ch === '-' && isDigit(next))) {
+      const start = i
+      i++
+      while (i < content.length && /[0-9._eE+-]/.test(content[i])) i++
+      push('number', content.slice(start, i), start, i)
+      continue
+    }
+
+    const three = content.slice(i, i + 3)
+    const two = content.slice(i, i + 2)
+    if (['===', '!==', '=>'].includes(three)) {
+      push('punct', three, i, i + 3)
+      i += 3
+      continue
+    }
+    if (['?.', '??', '&&', '||', '==', '!=', '<=', '>='].includes(two)) {
+      push('punct', two, i, i + 2)
+      i += 2
+      continue
+    }
+
+    push('punct', ch, i, i + 1)
+    i++
+  }
+
+  return tokens
+}
+
+function nextSignificant(tokens, idx) {
+  for (let i = idx + 1; i < tokens.length; i++) {
+    if (tokens[i].type !== 'newline') return tokens[i]
+  }
+  return null
+}
+
+function collectArgTokens(tokens, openIdx) {
+  const args = []
+  let depth = 0
+  for (let i = openIdx; i < tokens.length; i++) {
+    const tok = tokens[i]
+    if (tok.type === 'punct' && tok.value === '(') {
+      depth++
+      if (depth === 1) continue
+    }
+    if (tok.type === 'punct' && tok.value === ')') {
+      depth--
+      if (depth === 0) break
+    }
+    if (depth >= 1) args.push(tok)
+  }
+  return args
+}
+
+function splitTopLevelArgs(tokens) {
+  const args = [[]]
+  let paren = 0
+  let brace = 0
+  let bracket = 0
+  for (const tok of tokens) {
+    if (tok.type === 'punct') {
+      if (tok.value === '(') paren++
+      else if (tok.value === ')') paren--
+      else if (tok.value === '{') brace++
+      else if (tok.value === '}') brace--
+      else if (tok.value === '[') bracket++
+      else if (tok.value === ']') bracket--
+      else if (tok.value === ',' && paren === 0 && brace === 0 && bracket === 0) {
+        args.push([])
+        continue
+      }
+    }
+    args[args.length - 1].push(tok)
+  }
+  return args
+}
+
+function firstMeaningful(tokens) {
+  return tokens.find(t => t.type !== 'newline') || null
+}
+
+function bareImportName(specifier) {
+  if (!specifier || specifier.startsWith('.') || specifier.startsWith('/')) return null
+  if (specifier.startsWith('@')) {
+    const parts = specifier.split('/')
+    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : specifier
+  }
+  return specifier.split('/')[0]
+}
+
+function addImportFinding(findings, filename, moduleName, line) {
+  const bare = bareImportName(moduleName)
+  if (!bare) return
+  const lower = bare.toLowerCase()
+  if (RISKY_IMPORTS.has(lower)) {
+    addFinding(findings, filename, 'risky_import', line, `import '${bare}' - flagged for review`)
+  }
+  if (!NODE_BUILTINS.has(lower) && !declaredDeps.has(lower)) {
+    addFinding(findings, filename, 'unlisted_import', line, `import '${bare}' - not in widget.json dependencies`, 'warning')
+  }
+}
+
+function detectImports(tokens, filename, findings) {
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]
+    if (tok.type === 'ident' && tok.value === 'require') {
+      const open = nextSignificant(tokens, i)
+      if (!open || open.type !== 'punct' || open.value !== '(') continue
+      const args = splitTopLevelArgs(collectArgTokens(tokens, tokens.indexOf(open)))
+      const first = firstMeaningful(args[0] || [])
+      if (first && first.type === 'string') {
+        addImportFinding(findings, filename, first.value, tok.line)
+      }
+      continue
+    }
+
+    if (tok.type === 'ident' && tok.value === 'import') {
+      let j = i + 1
+      while (j < tokens.length) {
+        const cur = tokens[j]
+        if (cur.type === 'punct' && cur.value === ';') break
+        if (cur.type === 'newline' && tokens[j - 1]?.type === 'string') break
+        if (cur.type === 'string') {
+          addImportFinding(findings, filename, cur.value, cur.line)
+          break
+        }
+        j++
+      }
+    }
+  }
+}
+
+function detectMemberCall(tokens, root, memberSet, kind, makeDetail, findings, filename) {
+  for (let i = 0; i < tokens.length - 3; i++) {
+    if (tokens[i].type !== 'ident' || tokens[i].value !== root) continue
+    if (tokens[i + 1].type !== 'punct' || tokens[i + 1].value !== '.') continue
+    if (tokens[i + 2].type !== 'ident' || !memberSet.has(tokens[i + 2].value)) continue
+    if (tokens[i + 3].type !== 'punct' || tokens[i + 3].value !== '(') continue
+    addFinding(findings, filename, kind, tokens[i].line, makeDetail(tokens[i + 2].value))
+  }
+}
+
+function detectMemberAccess(tokens, root, memberSet, kind, makeDetail, findings, filename, severity) {
+  for (let i = 0; i < tokens.length - 2; i++) {
+    if (tokens[i].type !== 'ident' || tokens[i].value !== root) continue
+    if (tokens[i + 1].type !== 'punct' || tokens[i + 1].value !== '.') continue
+    if (tokens[i + 2].type !== 'ident' || !memberSet.has(tokens[i + 2].value)) continue
+    addFinding(findings, filename, kind, tokens[i].line, makeDetail(tokens[i + 2].value), severity)
+  }
+}
+
+function detectSleepCalls(tokens, filename, findings, inTests, inExamples) {
+  function durationWarning(line, name, args) {
+    const second = firstMeaningful(args[1] || [])
+    if (second && second.type === 'number') {
+      const n = parseInt(second.value, 10)
+      if (Number.isFinite(n) && n > 1000) {
+        addFinding(findings, filename, 'sleep', line, `${name}(_, ${n}) - consider reducing sleep duration`, 'warning')
+      }
+    }
+  }
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]
+    if (tok.type === 'ident' && (tok.value === 'setTimeout' || tok.value === 'setInterval')) {
+      const open = nextSignificant(tokens, i)
+      if (!open || open.type !== 'punct' || open.value !== '(') continue
+      if (!inTests && !inExamples) {
+        addFinding(findings, filename, 'sleep', tok.line, `${tok.value}() call - widgets must not block or delay the caller`, 'block')
+      } else {
+        const args = splitTopLevelArgs(collectArgTokens(tokens, tokens.indexOf(open)))
+        durationWarning(tok.line, tok.value, args)
+      }
+      continue
+    }
+
+    if (tok.type === 'ident' && tok.value === 'Bun') {
+      if (tokens[i + 1]?.type !== 'punct' || tokens[i + 1]?.value !== '.') continue
+      if (tokens[i + 2]?.type !== 'ident' || !['sleep', 'sleepSync'].includes(tokens[i + 2].value)) continue
+      if (tokens[i + 3]?.type !== 'punct' || tokens[i + 3].value !== '(') continue
+      const name = `Bun.${tokens[i + 2].value}`
+      if (!inTests && !inExamples) {
+        addFinding(findings, filename, 'sleep', tok.line, `${name}() call - widgets must not block or delay the caller`, 'block')
+      } else {
+        const args = splitTopLevelArgs(collectArgTokens(tokens, i + 3))
+        const first = firstMeaningful(args[0] || [])
+        if (first && first.type === 'number') {
+          const n = parseInt(first.value, 10)
+          if (Number.isFinite(n) && n > 1000) {
+            addFinding(findings, filename, 'sleep', tok.line, `${name}(${n}) - consider reducing sleep duration`, 'warning')
+          }
+        }
+      }
+    }
+  }
+}
+
+function detectAssignments(tokens, filename, findings) {
+  for (let i = 0; i < tokens.length - 3; i++) {
+    const start = tokens[i]
+    if (start.type !== 'ident' || !['const', 'let'].includes(start.value)) continue
+    const name = tokens[i + 1]
+    const eq = tokens[i + 2]
+    const value = tokens[i + 3]
+    if (!name || name.type !== 'ident') continue
+    if (!eq || eq.type !== 'punct' || eq.value !== '=') continue
+
+    // Only warn on config-like names. Local counters and scratch variables are
+    // normal implementation detail and produce noisy warnings.
+    const looksConfigLike =
+      /^[A-Z][A-Z0-9_]*$/.test(name.value) ||
+      /(timeout|limit|retries|retry|delay|interval|host|port|url|api|key|token|model|version|endpoint)$/i.test(name.value)
+    if (!looksConfigLike) continue
+
+    if (value?.type === 'number') {
+      addFinding(findings, filename, 'hardcoded_value', start.line, `${name.value} = ${value.value} - consider making this a parameter`, 'warning')
+    } else if (value?.type === 'string' && value.value.length > 0) {
+      addFinding(findings, filename, 'hardcoded_value', start.line, `${name.value} = "${value.value.substring(0, 60)}" - consider making this a parameter`, 'warning')
+    }
+  }
+}
+
+function detectStringContamination(tokens, filename, findings, inTests) {
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]
+    if (tok.type === 'newline') continue
+    if (tok.type === 'string' || tok.type === 'template') {
+      const value = tok.value
+      if (ABS_PATH_RE.test(value)) {
+        addFinding(findings, filename, 'abs_path', tok.line, `absolute path "${value.substring(0, 60)}" - widgets must be portable`, 'block')
+      }
+      if (URL_RE.test(value)) {
+        addFinding(findings, filename, 'hardcoded_url', tok.line, `hardcoded URL "${value.substring(0, 60)}"`, 'block')
+      }
+      if (IP_RE.test(value)) {
+        addFinding(findings, filename, 'hardcoded_ip', tok.line, `hardcoded IP "${value}"`, 'block')
+      }
+
+      let assignmentHead = ''
+      for (let j = Math.max(0, i - 4); j < i; j++) {
+        const prev = tokens[j]
+        if (prev.type === 'newline') continue
+        assignmentHead += prev.value
+      }
+      if (CREDENTIAL_RE.test(assignmentHead)) {
+        addFinding(
+          findings,
+          filename,
+          'credential',
+          tok.line,
+          inTests
+            ? `possible credential in test - verify it's fake: ${value.substring(0, 40)}`
+            : `possible credential assignment - ${value.substring(0, 40)}`,
+          inTests ? 'warning' : 'block'
+        )
+      }
+    }
+  }
+}
+
 function scanFile(filename) {
   const findings = []
   const content = fs.readFileSync(filename, 'utf-8')
-  const lines = content.split('\n')
+  const tokens = tokenize(content)
+  const inTests = filename.includes('/tests/') || filename.includes('\\tests\\')
+  const inExamples = filename.includes('/examples/') || filename.includes('\\examples\\')
 
-  let inBlockComment = false
-  let inTemplateLiteral = false
+  detectMemberCall(
+    tokens,
+    'console',
+    new Set(['log', 'warn', 'error', 'debug', 'info', 'trace']),
+    'console_log',
+    member => `console.${member}() call - remove debug output from src/`,
+    findings,
+    filename
+  )
 
-  for (let i = 0; i < lines.length; i++) {
-    const lineNo = i + 1
-    let line = lines[i]
-    let code = ''
+  detectMemberCall(
+    tokens,
+    'process',
+    new Set(['exit']),
+    'process_exit',
+    () => 'process.exit() call - widgets must not exit the process',
+    findings,
+    filename
+  )
 
-    // Process character by character to handle strings/comments
-    let inString = false
-    let stringChar = ''
-    let escaped = false
+  detectMemberAccess(
+    tokens,
+    'process',
+    new Set(['env']),
+    'env_var',
+    () => 'process.env access - verify it is not project-specific',
+    findings,
+    filename,
+    'warning'
+  )
 
-    for (let j = 0; j < line.length; j++) {
-      const ch = line[j]
-      const next = j + 1 < line.length ? line[j + 1] : ''
-
-      if (escaped) {
-        escaped = false
-        if (inString || inTemplateLiteral) continue
-        code += ch
-        continue
-      }
-
-      if (ch === '\\') {
-        escaped = true
-        if (inString || inTemplateLiteral) continue
-        code += ch
-        continue
-      }
-
-      // Block comment
-      if (inBlockComment) {
-        if (ch === '*' && next === '/') {
-          inBlockComment = false
-          j++ // skip the /
-        }
-        continue
-      }
-
-      // Template literal
-      if (inTemplateLiteral) {
-        if (ch === '`') {
-          inTemplateLiteral = false
-        }
-        continue
-      }
-
-      // String literal
-      if (inString) {
-        if (ch === stringChar) {
-          inString = false
-        }
-        continue
-      }
-
-      // Start of block comment
-      if (ch === '/' && next === '*') {
-        inBlockComment = true
-        j++
-        continue
-      }
-
-      // Line comment
-      if (ch === '/' && next === '/') {
-        break // rest of line is comment
-      }
-
-      // Start of string
-      if (ch === '"' || ch === "'") {
-        inString = true
-        stringChar = ch
-        continue
-      }
-
-      // Start of template literal
-      if (ch === '`') {
-        inTemplateLiteral = true
-        continue
-      }
-
-      code += ch
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (tokens[i].type === 'ident' && tokens[i].value === 'eval' &&
+        tokens[i + 1].type === 'punct' && tokens[i + 1].value === '(') {
+      addFinding(findings, filename, 'eval', tokens[i].line, 'eval() call - dynamic code execution is a security risk')
     }
-
-    code = code.trim()
-    if (!code) continue
-
-    // --- Checks ---
-
-    // console.log / console.warn / console.error / console.debug
-    const consoleMatch = code.match(/\bconsole\s*\.\s*(log|warn|error|debug|info|trace)\s*\(/)
-    if (consoleMatch) {
-      findings.push({
-        file: filename, kind: 'console_log', line: lineNo,
-        detail: `console.${consoleMatch[1]}() call - remove debug output from src/`
-      })
-    }
-
-    // process.exit()
-    if (/\bprocess\s*\.\s*exit\s*\(/.test(code)) {
-      findings.push({
-        file: filename, kind: 'process_exit', line: lineNo,
-        detail: 'process.exit() call - widgets must not exit the process'
-      })
-    }
-
-    // Import checks: risky imports (error) + unlisted imports (warning)
-    // Check raw line since string content is stripped from code
-    const rawTrimmed = line.trim()
-    const importPatterns = [
-      /require\s*\(\s*['"]([^'"./][^'"]*)['"]/, // require('foo') - skip relative
-      /from\s+['"]([^'"./][^'"]*)['"]/, // import x from 'foo'
-      /import\s+['"]([^'"./][^'"]*)['"]/, // import 'foo'
-    ]
-    const risky = ['fs', 'child_process', 'net', 'http', 'https', 'dgram', 'cluster', 'worker_threads']
-    for (const pat of importPatterns) {
-      const m = rawTrimmed.match(pat)
-      if (m) {
-        // Get bare package name (handle scoped: @scope/pkg -> @scope/pkg)
-        const fullImport = m[1]
-        const bare = fullImport.startsWith('@')
-          ? fullImport.split('/').slice(0, 2).join('/')
-          : fullImport.split('/')[0]
-        const bareLower = bare.toLowerCase()
-
-        if (risky.includes(bareLower)) {
-          findings.push({
-            file: filename, kind: 'risky_import', line: lineNo,
-            detail: `import '${bare}' - flagged for review`
-          })
-        }
-
-        // Unlisted import check (warning) - skip builtins
-        if (!NODE_BUILTINS.has(bareLower) && !declaredDeps.has(bareLower)) {
-          findings.push({
-            file: filename, kind: 'unlisted_import', line: lineNo,
-            detail: `import '${bare}' - not in widget.json dependencies`,
-            severity: 'warning'
-          })
-        }
-
-        break
-      }
-    }
-
-    // eval()
-    if (/\beval\s*\(/.test(code)) {
-      findings.push({
-        file: filename, kind: 'eval', line: lineNo,
-        detail: 'eval() call - dynamic code execution is a security risk'
-      })
-    }
-
-    // Sleep/blocking: setTimeout, setInterval, Bun.sleep, Bun.sleepSync
-    // In src/: block. In tests/examples: warn if duration > 1000ms.
-    const inTests = filename.includes('/tests/') || filename.includes('\\tests\\')
-    const inExamples = filename.includes('/examples/') || filename.includes('\\examples\\')
-
-    const sleepMatch = code.match(/\b(setTimeout|setInterval)\s*\(/)
-    if (sleepMatch) {
-      if (!inTests && !inExamples) {
-        findings.push({
-          file: filename, kind: 'sleep', line: lineNo,
-          detail: `${sleepMatch[1]}() call - widgets must not block or delay the caller`,
-          severity: 'block'
-        })
-      } else {
-        // Check for large duration: setTimeout(fn, 5000) or setTimeout(fn, N) where N > 1000
-        const durationMatch = rawTrimmed.match(/(?:setTimeout|setInterval)\s*\([^,]+,\s*(\d+)/)
-        if (durationMatch && parseInt(durationMatch[1]) > 1000) {
-          findings.push({
-            file: filename, kind: 'sleep', line: lineNo,
-            detail: `${sleepMatch[1]}(_, ${durationMatch[1]}) - consider reducing sleep duration`,
-            severity: 'warning'
-          })
-        }
-      }
-    }
-
-    const bunSleepMatch = code.match(/\bBun\s*\.\s*(sleep|sleepSync)\s*\(/)
-    if (bunSleepMatch) {
-      if (!inTests && !inExamples) {
-        findings.push({
-          file: filename, kind: 'sleep', line: lineNo,
-          detail: `Bun.${bunSleepMatch[1]}() call - widgets must not block or delay the caller`,
-          severity: 'block'
-        })
-      } else {
-        const durationMatch = rawTrimmed.match(/Bun\s*\.\s*(?:sleep|sleepSync)\s*\(\s*(\d+)/)
-        if (durationMatch && parseInt(durationMatch[1]) > 1000) {
-          findings.push({
-            file: filename, kind: 'sleep', line: lineNo,
-            detail: `Bun.${bunSleepMatch[1]}(${durationMatch[1]}) - consider reducing sleep duration`,
-            severity: 'warning'
-          })
-        }
-      }
-    }
-
-    // --- Warning-level checks (contamination) ---
-
-    // Absolute paths in strings (block)
-    const absPathMatch = rawTrimmed.match(/['"](?:\/home\/|\/Users\/|\/root\/|[A-Za-z]:[/\\])[^'"]{3,}['"]/)
-    if (absPathMatch) {
-      findings.push({
-        file: filename, kind: 'abs_path', line: lineNo,
-        detail: `absolute path ${absPathMatch[0]} - widgets must be portable`,
-        severity: 'block'
-      })
-    }
-
-    // Credentials (block in src, warning in tests)
-    const credMatch = rawTrimmed.match(/(?:api_key|api_secret|secret_key|access_token|auth_token|password|passwd|credential)\s*=\s*['"][^'"]{6,}['"]/i)
-    if (credMatch) {
-      const inTests = filename.includes('/tests/') || filename.includes('\\tests\\')
-      findings.push({
-        file: filename, kind: 'credential', line: lineNo,
-        detail: inTests
-          ? `possible credential in test - verify it's fake: ${credMatch[0].substring(0, 40)}`
-          : `possible credential assignment - ${credMatch[0].substring(0, 40)}`,
-        severity: inTests ? 'warning' : 'block'
-      })
-    }
-
-    // Hardcoded URLs (block)
-    const urlMatch = rawTrimmed.match(/['"]https?:\/\/(?!(?:localhost|127\.0\.0\.1|[\w-]*\.?example\.com|schemas?\.))[^'"]{8,}['"]/)
-    if (urlMatch) {
-      findings.push({
-        file: filename, kind: 'hardcoded_url', line: lineNo,
-        detail: `hardcoded URL ${urlMatch[0].substring(0, 60)}`,
-        severity: 'block'
-      })
-    }
-
-    // Hardcoded IPs (block)
-    const ipMatch = rawTrimmed.match(/['"](?:\d{1,3}\.){3}\d{1,3}(?::\d+)?['"]/)
-    if (ipMatch) {
-      findings.push({
-        file: filename, kind: 'hardcoded_ip', line: lineNo,
-        detail: `hardcoded IP ${ipMatch[0]}`,
-        severity: 'block'
-      })
-    }
-
-    // process.env access
-    if (/\bprocess\s*\.\s*env\b/.test(code)) {
-      findings.push({
-        file: filename, kind: 'env_var', line: lineNo,
-        detail: 'process.env access - verify it is not project-specific',
-        severity: 'warning'
-      })
-    }
-
-    // Hardcoded values: const/let with literal numbers or strings
-    const constMatch = code.match(/\b(?:const|let)\s+([A-Za-z_]\w*)\s*=\s*(.+)/)
-    if (constMatch) {
-      const varName = constMatch[1]
-      const valPart = constMatch[2].trim().replace(/;$/, '').trim()
-      // Numeric literal
-      if (/^-?\d+\.?\d*(?:e[+-]?\d+)?$/.test(valPart)) {
-        findings.push({
-          file: filename, kind: 'hardcoded_value', line: lineNo,
-          detail: `${varName} = ${valPart} - consider making this a parameter`,
-          severity: 'warning'
-        })
-      }
-      // String literal (from raw line since strings are stripped from code)
-      const rawValMatch = rawTrimmed.match(/\b(?:const|let)\s+\w+\s*=\s*(['"])(.+)\1/)
-      if (rawValMatch && rawValMatch[2].length > 0) {
-        findings.push({
-          file: filename, kind: 'hardcoded_value', line: lineNo,
-          detail: `${varName} = "${rawValMatch[2].substring(0, 60)}" - consider making this a parameter`,
-          severity: 'warning'
-        })
-      }
-    }
-
   }
+
+  detectImports(tokens, filename, findings)
+  detectSleepCalls(tokens, filename, findings, inTests, inExamples)
+  detectAssignments(tokens, filename, findings)
+  detectStringContamination(tokens, filename, findings, inTests)
 
   return findings
 }
 
-// --- Main ---
 if (process.argv.length < 3) {
   console.log(JSON.stringify({ error: 'usage: node js_scanner.js <file1> [file2 ...]' }))
   process.exit(1)

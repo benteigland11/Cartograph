@@ -5,6 +5,8 @@ and {"status": "passed", ...} on success.
 """
 import os
 import json
+import shutil
+from unittest.mock import patch
 import pytest
 
 
@@ -60,6 +62,25 @@ def test_validate_invalid_domain(carto, tmp_path):
     assert "domain" in result.get("message", "").lower()
 
 
+def test_validate_duplicate_implementation_fails(carto, fixture_library, tmp_path):
+    """A widget with identical src/ implementation to another widget should fail."""
+    src_widget = os.path.join(fixture_library, "http-client")
+    widget_dir = tmp_path / "http-client-clone"
+    shutil.copytree(src_widget, widget_dir)
+
+    manifest_path = widget_dir / "widget.json"
+    with open(manifest_path) as f:
+        data = json.load(f)
+    data["meta"]["id"] = "http-client-clone"
+    data["meta"]["name"] = "HTTP Client Clone"
+    with open(manifest_path, "w") as f:
+        json.dump(data, f)
+
+    result = carto.validate_item(str(widget_dir))
+    assert result.get("status") == "error"
+    assert "Identical code already exists" in result.get("message", "")
+
+
 # ---------------------------------------------------------------------------
 # Validation stamp invalidation on engine version bump
 # ---------------------------------------------------------------------------
@@ -87,3 +108,24 @@ def test_stamp_invalidates_on_engine_version_bump(carto, fixture_library, tmp_pa
 
     # Restore
     engine.validation_version = original_version
+
+
+def test_validate_fails_if_library_dependency_index_unavailable(carto, fixture_library, tmp_path):
+    widget_path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), widget_path)
+
+    with patch("cartograph.engine.Cartograph", side_effect=RuntimeError("library load failed")):
+        result = carto.validate_item(str(widget_path))
+
+    assert result["status"] == "error"
+    assert "dependency index" in result["message"].lower()
+
+
+def test_validate_fails_if_stamp_write_fails(carto, fixture_library, tmp_path):
+    widget_path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), widget_path)
+
+    with patch("cartograph.validation_stamp._write_stamp", side_effect=OSError("disk full")):
+        result = carto.validate_item(str(widget_path))
+    assert result["status"] == "error"
+    assert "validation stamp" in result["message"].lower()

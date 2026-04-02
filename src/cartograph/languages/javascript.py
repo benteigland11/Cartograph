@@ -244,7 +244,7 @@ class JavaScriptEngine(LanguageEngine):
         src_files, test_files = self._collect_source_files(path)
         all_files = src_files + test_files
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "js_scanner.js")
-        _, scan_warnings, scan_blocks = self._run_native_scanner(
+        scan_errors, scan_warnings, scan_blocks = self._run_native_scanner(
             scanner_path=scanner,
             runner=self.scanner_runner,
             src_files=all_files,
@@ -252,7 +252,7 @@ class JavaScriptEngine(LanguageEngine):
             finding_messages=self.scanner_messages,
         )
 
-        return {"blocks": scan_blocks, "warnings": scan_warnings}
+        return {"blocks": scan_blocks + scan_errors, "warnings": scan_warnings}
 
     # ------------------------------------------------------------------ interface
 
@@ -309,7 +309,13 @@ class JavaScriptEngine(LanguageEngine):
                 with open(package_json_path, "w") as f:
                     json.dump(pkg, f, indent=2)
 
-        self._run(["npm", "install", "--silent"], cwd=path, timeout=120)
+        res = self._run(["npm", "install", "--silent"], cwd=path, timeout=120)
+        if res.returncode != 0:
+            output = (res.stderr or res.stdout or "").strip()
+            raise RuntimeError(
+                "Failed to install npm dependencies."
+                + (f"\n{output[:2000]}" if output else "")
+            )
 
     # ------------------------------------------------------------------ tests
 

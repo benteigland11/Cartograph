@@ -31,8 +31,11 @@ def scan_contamination(path: str) -> dict:
     try:
         with open(manifest_path) as f:
             data = json.load(f)
-    except Exception:
-        return {"blocks": [], "warnings": []}
+    except Exception as e:
+        return {
+            "blocks": [f"Could not read widget.json for contamination scan: {e}"],
+            "warnings": [],
+        }
 
     tech_stack = data.get("tech_stack", {})
     language = tech_stack.get("language", "python").lower()

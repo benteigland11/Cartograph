@@ -41,6 +41,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 log = logging.getLogger("cartograph")
 
@@ -185,7 +186,8 @@ class LanguageEngine:
             is_src = fpath in src_files
             try:
                 code = open(fpath).read()
-            except Exception:
+            except Exception as e:
+                blocks.append(f"Could not read source file {rel}: {e}")
                 continue
 
             for line_no, line in enumerate(code.splitlines(), 1):
@@ -215,7 +217,7 @@ class LanguageEngine:
         return src_files, test_files
 
     def install_deps(self, path: str, dependencies: list) -> None:
-        """Install dependencies required to run tests. Best-effort."""
+        """Install dependencies required to run tests."""
         if not self.dep_install_command or not dependencies:
             return
         for dep in dependencies:
@@ -223,7 +225,13 @@ class LanguageEngine:
             if not bare:
                 continue
             log.debug("Installing %s package: %s", self.name, bare)
-            self._run(self.dep_install_command + [bare], cwd=path, timeout=120)
+            res = self._run(self.dep_install_command + [bare], cwd=path, timeout=120)
+            if res.returncode != 0:
+                output = (res.stderr or res.stdout or "").strip()
+                raise RuntimeError(
+                    f"Failed to install {self.name} dependency '{bare}'."
+                    + (f"\n{output[:2000]}" if output else "")
+                )
 
     def run_tests(self, path: str) -> dict:
         """Execute the test suite. Override for custom test runners."""
@@ -313,19 +321,34 @@ class LanguageEngine:
         if not src_files or not os.path.exists(scanner_path):
             return [], [], []
 
-        res = self._run(
-            runner + [scanner_path] + src_files,
-            cwd=cwd, timeout=60,
-        )
+        cmd = list(runner) + [scanner_path] + src_files
+        env = os.environ.copy()
+
+        # Nim defaults to ~/.cache/nim for scanner builds, which may not be
+        # writable in sandboxed environments. Point it at /tmp instead.
+        if cmd and cmd[0] == "nim":
+            cache_root = os.path.join(tempfile.gettempdir(), "cartograph-nim-cache")
+            os.makedirs(cache_root, exist_ok=True)
+            env.setdefault("XDG_CACHE_HOME", cache_root)
+
+        res = self._run(cmd, cwd=cwd, timeout=60, env=env)
+
+        if res.returncode != 0:
+            output = (res.stderr or res.stdout or "").strip()
+            message = f"{self.name} scanner failed to run"
+            if output:
+                message += ":\n" + output[:3000]
+            return [message], [], []
 
         findings = []
-        if res.returncode == 0 and res.stdout.strip():
+        if res.stdout.strip():
             import json
             try:
                 # Scanner may emit other output before the JSON line
                 findings = json.loads(res.stdout.strip().splitlines()[-1])
             except (json.JSONDecodeError, IndexError):
-                pass
+                output = res.stdout.strip()[:3000]
+                return [f"{self.name} scanner produced invalid output:\n{output}"], [], []
 
         if not findings:
             return [], [], []

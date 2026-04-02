@@ -7,6 +7,7 @@ so the session-scoped carto fixture is not polluted.
 import json
 import os
 import shutil
+from unittest.mock import patch
 import pytest
 
 
@@ -211,6 +212,13 @@ def test_checkin_restores_library_notes_if_edited(carto_tmp, installed_widget):
     notes = lib_data.get("library_notes", {})
     assert notes.get("general") != "do whatever"
     assert "pytest" in notes.get("language", "")
+
+
+def test_checkin_fails_if_library_notes_restore_fails(carto_tmp, installed_widget):
+    with patch("cartograph.checkin._canonical_library_notes", side_effect=RuntimeError("boom")):
+        result = carto_tmp.checkin(installed_widget, reason="library notes strictness")
+    assert result["status"] == "error"
+    assert "boom" in result["message"].lower() or "invalid" in result["message"].lower()
 
 
 # ---------------------------------------------------------------------------

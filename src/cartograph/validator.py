@@ -110,8 +110,13 @@ def validate_item(carto, path):
     # 6b. No widget-on-widget dependencies
     try:
         library_ids = {w["id"] for w in Cartograph(LIBRARY_PATH).widgets}
-    except Exception:
-        library_ids = set()
+    except Exception as e:
+        check("Library dependency index available", False, str(e))
+        _print_checklist(checklist, errors, failed=True)
+        return {
+            "status": "error",
+            "message": f"Could not load library dependency index: {e}",
+        }
     widget_deps = [
         d["name"] if isinstance(d, dict) else str(d)
         for d in dependencies
@@ -137,136 +142,143 @@ def validate_item(carto, path):
         _print_checklist(checklist, errors, failed=True)
         return {"status": "error", "message": msg}
 
-    # 7b. src/__init__.py imports cleanly (Python only)
-    init_path = os.path.join(path, "src", "__init__.py")
-    if language == "python" and os.path.exists(init_path):
-        init_result = subprocess.run(
-            [sys.executable, "-c", "import src"],
-            cwd=path, capture_output=True, text=True, timeout=10
-        )
-        init_ok = init_result.returncode == 0
-        init_err = (init_result.stderr or "").strip()
-        if not check("src/__init__.py imports cleanly", init_ok, init_err):
-            _print_checklist(checklist, errors, failed=True)
-            return {"status": "error",
-                    "message": "src/__init__.py has import errors.",
-                    "test_output": init_err}
-
-    # 7c. Example file exists and has no TODOs (execution deferred until after install)
-    # Note: examples/usage_hint.* files are intentionally not executed — they are
-    # real code from the author that requires a browser/app context to run
-    # (see library_config.json general_notes for the full convention).
-    example_file = engine.example_filename(path)
-    example_path = os.path.join(path, "examples", example_file)
-    if not check(f"examples/{example_file} exists", os.path.exists(example_path),
-                 f"Missing examples/{example_file}"):
-        _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": f"Missing examples/{example_file}"}
-
-    example_content = open(example_path).read()
-    example_todos = example_content.count("[TODO]")
-    if not check(f"No [TODO] in {example_file}", example_todos == 0,
-                 f"Found {example_todos} [TODO] placeholder(s) in examples/{example_file} — write real example code"):
-        _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": f"Replace [TODO] placeholders in examples/{example_file}"}
-
-    # 7d. Example imports at least one thing from src/
-    import_pattern = engine.src_import_pattern()
-    if import_pattern is not None:
-        imports_src = bool(re.search(import_pattern, example_content, re.MULTILINE))
-        if not check(f"{example_file} imports from src/", imports_src,
-                     f"examples/{example_file} does not import anything from src/ — the example must use the widget"):
-            _print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": (
-                f"examples/{example_file} must import from src/"
-            )}
-
-    # 8. Test files follow naming convention
-    test_files = engine.find_test_files(path)
-    if not check(f"Test files found ({len(test_files)})", len(test_files) > 0,
-                 f"No test files found in tests/ for language '{language}'"):
-        _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": f"No test files found in tests/ matching the expected pattern for '{language}'"}
-
-    # 8b. Language-specific required files (e.g. .nimble for Nim)
-    required = engine.required_files(path)
-    for rel_path, hint in required:
-        full = os.path.join(path, rel_path)
-        if not check(f"{rel_path} exists", os.path.exists(full), hint):
-            _print_checklist(checklist, errors, failed=True)
-            return {"status": "error", "message": hint}
-
-    # 9. Language checks, install deps, run example, run tests
-    # -- Contamination scan (first stage - before validation)
-    from .contamination import scan_contamination
-    contam = scan_contamination(path)
-    contam_warnings = contam.get("warnings", [])
-    if contam["blocks"]:
-        check("Contamination scan clean", False,
-              "Contamination blocked:\n" + "\n".join(contam["blocks"]))
-        _print_checklist(checklist, errors + contam["blocks"], failed=True)
-        return {"status": "error",
-                "message": "Contamination scan failed - hard blocks found.",
-                "blocks": contam["blocks"]}
-    check("Contamination scan clean", True)
-
-    log.debug("Running language checks...")
-    lang_check = engine.validate_widget(path, dependencies)
-    if not check("Language checks pass", lang_check["passed"],
-                 lang_check.get("error", "")):
-        _print_checklist(checklist, errors, failed=True,
-                          test_output=lang_check.get("error"))
-        return {"status": "error", "message": lang_check.get("error", "Language checks failed"),
-                "test_output": lang_check.get("error", "")}
-
-    log.debug("Installing dependencies...")
+    contam_warnings = []
     try:
-        engine.install_deps(path, dependencies)
-        check("Dependencies installed", True)
-    except Exception as e:
-        check("Dependencies installed", False, str(e))
-        engine.cleanup(path)
-        _print_checklist(checklist, errors, failed=True)
-        return {"status": "error", "message": f"Dependency install failed: {e}"}
+        # 7b. src/__init__.py imports cleanly (Python only)
+        init_path = os.path.join(path, "src", "__init__.py")
+        if language == "python" and os.path.exists(init_path):
+            init_result = subprocess.run(
+                [sys.executable, "-c", "import src"],
+                cwd=path, capture_output=True, text=True, timeout=10
+            )
+            init_ok = init_result.returncode == 0
+            init_err = (init_result.stderr or "").strip()
+            if not check("src/__init__.py imports cleanly", init_ok, init_err):
+                _print_checklist(checklist, errors, failed=True)
+                return {"status": "error",
+                        "message": "src/__init__.py has import errors.",
+                        "test_output": init_err}
 
-    log.debug("Running example...")
-    example_result = engine.run_example(path)
-    example_err = example_result.get("error", "")
-    if not check(f"{example_file} runs cleanly", example_result["passed"], example_err):
-        engine.cleanup(path)
-        _print_checklist(checklist, errors, failed=True, test_output=example_err)
-        return {"status": "error", "message": f"{example_file} failed to run.",
-                "test_output": example_err[:500]}
+        # 7c. Example file exists and has no TODOs (execution deferred until after install)
+        example_file = engine.example_filename(path)
+        example_path = os.path.join(path, "examples", example_file)
+        if not check(f"examples/{example_file} exists", os.path.exists(example_path),
+                     f"Missing examples/{example_file}"):
+            _print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": f"Missing examples/{example_file}"}
 
-    log.debug("Running tests...")
-    result = engine.run_tests(path)
-    test_error = result.get("error", "")
-    if not check("All tests pass", result["passed"], test_error):
-        engine.cleanup(path)
-        _print_checklist(checklist, errors, failed=True, test_output=test_error)
-        return {"status": "error", "message": "Tests failed. Fix before checkin.",
-                "test_output": test_error[:3000]}
+        example_content = open(example_path).read()
+        example_todos = example_content.count("[TODO]")
+        if not check(f"No [TODO] in {example_file}", example_todos == 0,
+                     f"Found {example_todos} [TODO] placeholder(s) in examples/{example_file} — write real example code"):
+            _print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": f"Replace [TODO] placeholders in examples/{example_file}"}
 
-    # 10. Uniqueness check
-    current_hash = carto._calculate_implementation_hash(path)
-    duplicate = next((w for w in carto.widgets
-                      if w.get("implementation_hash") == current_hash
-                      and w["id"] != meta.get("id")), None)
-    check("Implementation is unique",
-          duplicate is None,
-          f"Identical code already exists: {duplicate['id']}" if duplicate else None)
+        # 7d. Example imports at least one thing from src/
+        import_pattern = engine.src_import_pattern()
+        if import_pattern is not None:
+            imports_src = bool(re.search(import_pattern, example_content, re.MULTILINE))
+            if not check(f"{example_file} imports from src/", imports_src,
+                         f"examples/{example_file} does not import anything from src/ — the example must use the widget"):
+                _print_checklist(checklist, errors, failed=True)
+                return {"status": "error", "message": (
+                    f"examples/{example_file} must import from src/"
+                )}
 
-    engine.cleanup(path)
-    _print_checklist(checklist, errors, failed=False, warnings=contam_warnings)
+        # 8. Test files follow naming convention
+        test_files = engine.find_test_files(path)
+        if not check(f"Test files found ({len(test_files)})", len(test_files) > 0,
+                     f"No test files found in tests/ for language '{language}'"):
+            _print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": f"No test files found in tests/ matching the expected pattern for '{language}'"}
 
-    # Write a stamp so checkin can skip re-validation if nothing changes
-    from .validation_stamp import write_stamp
-    write_stamp(path, language, engine)
+        # 8b. Language-specific required files (e.g. .nimble for Nim)
+        required = engine.required_files(path)
+        for rel_path, hint in required:
+            full = os.path.join(path, rel_path)
+            if not check(f"{rel_path} exists", os.path.exists(full), hint):
+                _print_checklist(checklist, errors, failed=True)
+                return {"status": "error", "message": hint}
 
-    result = {"status": "success", "message": "Widget is valid"}
-    if contam_warnings:
-        result["warnings"] = contam_warnings
-    return result
+        # 9. Language checks, install deps, run example, run tests
+        from .contamination import scan_contamination
+        contam = scan_contamination(path)
+        contam_warnings = contam.get("warnings", [])
+        if contam["blocks"]:
+            check("Contamination scan clean", False,
+                  "Contamination blocked:\n" + "\n".join(contam["blocks"]))
+            _print_checklist(checklist, errors + contam["blocks"], failed=True)
+            return {"status": "error",
+                    "message": "Contamination scan failed - hard blocks found.",
+                    "blocks": contam["blocks"]}
+        check("Contamination scan clean", True)
+
+        log.debug("Running language checks...")
+        lang_check = engine.validate_widget(path, dependencies)
+        if not check("Language checks pass", lang_check["passed"],
+                     lang_check.get("error", "")):
+            _print_checklist(checklist, errors, failed=True,
+                              test_output=lang_check.get("error"))
+            return {"status": "error", "message": lang_check.get("error", "Language checks failed"),
+                    "test_output": lang_check.get("error", "")}
+
+        log.debug("Installing dependencies...")
+        try:
+            engine.install_deps(path, dependencies)
+            check("Dependencies installed", True)
+        except Exception as e:
+            check("Dependencies installed", False, str(e))
+            _print_checklist(checklist, errors, failed=True)
+            return {"status": "error", "message": f"Dependency install failed: {e}"}
+
+        log.debug("Running example...")
+        example_result = engine.run_example(path)
+        example_err = example_result.get("error", "")
+        if not check(f"{example_file} runs cleanly", example_result["passed"], example_err):
+            _print_checklist(checklist, errors, failed=True, test_output=example_err)
+            return {"status": "error", "message": f"{example_file} failed to run.",
+                    "test_output": example_err[:500]}
+
+        log.debug("Running tests...")
+        result = engine.run_tests(path)
+        test_error = result.get("error", "")
+        if not check("All tests pass", result["passed"], test_error):
+            _print_checklist(checklist, errors, failed=True, test_output=test_error)
+            return {"status": "error", "message": "Tests failed. Fix before checkin.",
+                    "test_output": test_error[:3000]}
+
+        # 10. Uniqueness check
+        current_hash = carto._calculate_implementation_hash(path)
+        duplicate = next((w for w in carto.widgets
+                          if w.get("implementation_hash") == current_hash
+                          and w["id"] != meta.get("id")), None)
+        if not check("Implementation is unique",
+                     duplicate is None,
+                     f"Identical code already exists: {duplicate['id']}" if duplicate else None):
+            _print_checklist(checklist, errors, failed=True)
+            return {
+                "status": "error",
+                "message": f"Identical code already exists: {duplicate['id']}",
+            }
+
+        _print_checklist(checklist, errors, failed=False, warnings=contam_warnings)
+
+        # Write a stamp so checkin can skip re-validation if nothing changes
+        from .validation_stamp import write_stamp
+        try:
+            write_stamp(path, language, engine)
+        except Exception as e:
+            return {"status": "error", "message": f"Could not write validation stamp: {e}"}
+
+        result = {"status": "success", "message": "Widget is valid"}
+        if contam_warnings:
+            result["warnings"] = contam_warnings
+        return result
+    finally:
+        try:
+            engine.cleanup(path)
+        except Exception as e:
+            log.error("Validation cleanup failed for %s: %s", path, e)
 
 
 def _print_checklist(checklist, errors, failed, test_output=None, warnings=None):

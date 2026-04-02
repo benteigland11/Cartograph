@@ -93,6 +93,7 @@ proc scanFile(filename: string): seq[Finding] =
 
   var inMultilineString = false
   var inRawString = false
+  var topLevelSection = true
 
   for i, rawLine in lines:
     let lineNo = i + 1
@@ -141,6 +142,10 @@ proc scanFile(filename: string): seq[Finding] =
 
     if code.len == 0:
       continue
+
+    let startsIndented = rawLine.len > 0 and rawLine[0].isSpaceAscii()
+    if not startsIndented and not code.startsWith("import ") and not code.startsWith("from "):
+      topLevelSection = true
 
     # --- Checks ---
 
@@ -232,6 +237,11 @@ proc scanFile(filename: string): seq[Finding] =
       for rawMod in modules:
         let modName = rawMod.strip().split("/")[^1].strip()  # std/foo -> foo
         let fullMod = rawMod.strip().toLower()
+        if rawMod.strip().len > 0 and "/" notin rawMod and modName.toLower() in nimStdlib and modName.toLower() != "system":
+          result.add(Finding(
+            file: filename, kind: "std_import_style", line: lineNo,
+            detail: "import " & modName & " - prefer std/" & modName,
+            severity: "warning"))
         if modName.len > 0 and fullMod notin nimStdlib and modName.toLower() notin nimStdlib:
           if modName.toLower() notin declaredDeps:
             result.add(Finding(
@@ -384,6 +394,29 @@ proc scanFile(filename: string): seq[Finding] =
                 file: filename, kind: "hardcoded_value", line: lineNo,
                 detail: varName & " = \"" & strVal[0 ..< min(strVal.len, 60)] & "\" - consider making this a parameter",
                 severity: "warning"))
+
+    if topLevelSection and code.startsWith("var ") and "{.global.}" notin code:
+      let afterKeyword = code[4 .. ^1].strip()
+      let splitters = [' ', ':', '=', '*']
+      var endPos = afterKeyword.len
+      for idx, ch in afterKeyword:
+        if ch in splitters:
+          endPos = idx
+          break
+      let varName = afterKeyword[0 ..< endPos].strip()
+      if varName.len > 0:
+        result.add(Finding(
+          file: filename, kind: "top_level_var", line: lineNo,
+          detail: "var " & varName & " - avoid top-level mutable state in widgets",
+          severity: "warning"))
+
+    if not startsIndented and (code.startsWith("proc ") or code.startsWith("func ") or
+                               code.startsWith("template ") or code.startsWith("macro ") or
+                               code.startsWith("iterator ") or code.startsWith("converter ") or
+                               code.startsWith("method ") or code.startsWith("type ") or
+                               code.startsWith("var ") or code.startsWith("let ") or
+                               code.startsWith("const ")):
+      topLevelSection = false
 
 
 when isMainModule:

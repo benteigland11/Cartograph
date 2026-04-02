@@ -18,6 +18,7 @@ Structure:
 import json
 import os
 import shutil
+from unittest.mock import patch
 
 import pytest
 
@@ -488,6 +489,27 @@ class TestJSSpecific:
                         "const path = require('path')\n")
         assert not any("unlisted" in w.lower() for w in result["warnings"])
 
+    def test_multiline_require_warns_unlisted(self, tmp_path):
+        result = _scan(
+            tmp_path, "javascript", "js",
+            "const axios = require(\n  'axios'\n)\n"
+        )
+        assert any("unlisted" in w.lower() for w in result["warnings"])
+
+    def test_multiline_import_warns_unlisted(self, tmp_path):
+        result = _scan(
+            tmp_path, "javascript", "js",
+            "import {\n  thing\n} from 'axios'\n"
+        )
+        assert any("unlisted" in w.lower() for w in result["warnings"])
+
+    def test_multiline_settimeout_in_src_blocks(self, tmp_path):
+        result = _scan(
+            tmp_path, "javascript", "js",
+            "setTimeout(\n  () => {},\n  1000\n)\n"
+        )
+        assert any("sleep" in b.lower() for b in result["blocks"])
+
 
 class TestNimSpecific:
     """Nim-only validation and contamination checks."""
@@ -549,6 +571,16 @@ class TestNimSpecific:
         engine = NimEngine()
         result = engine.validate_widget(wdir, [])
         assert result["passed"] is False
+
+    def test_old_style_stdlib_import_warns(self, tmp_path):
+        result = _scan(tmp_path, "nim", "nim", "import strutils\n")
+        assert any("std/" in w.lower() or "modern nim" in w.lower() or "old-style" in w.lower()
+                   for w in result["warnings"])
+
+    def test_top_level_var_warns(self, tmp_path):
+        result = _scan(tmp_path, "nim", "nim", "var cache = 0\nproc hello*(): string =\n  \"ok\"\n")
+        assert any("top-level mutable state" in w.lower() or "top-level" in w.lower()
+                   for w in result["warnings"])
 
 
 # ---------------------------------------------------------------------------
@@ -615,7 +647,9 @@ class TestOrchestrator:
 
     def test_missing_manifest_returns_empty(self, tmp_path):
         result = scan_contamination(str(tmp_path))
-        assert result == {"blocks": [], "warnings": []}
+        assert result["warnings"] == []
+        assert len(result["blocks"]) == 1
+        assert "widget.json" in result["blocks"][0]
 
     def test_unknown_language_uses_base_fallback(self, tmp_path):
         wdir = _make_widget(tmp_path, "lua", "mod.lua",
@@ -673,3 +707,20 @@ class TestBaseFallback:
         result = self._scan(tmp_path, "x = compute()\n")
         assert result["blocks"] == []
         assert result["warnings"] == []
+
+    def test_unreadable_source_file_blocks(self, tmp_path):
+        wdir = _make_widget(tmp_path, "base", "module.txt", "x = 1\n")
+        engine = LanguageEngine()
+        engine.file_ext = "txt"
+        target = os.path.join(wdir, "src", "module.txt")
+        real_open = open
+
+        def fake_open(path, *args, **kwargs):
+            if path == target:
+                raise OSError("permission denied")
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=fake_open):
+            result = engine.scan_contamination(wdir, {"language": "base"})
+
+        assert any("could not read source file" in b.lower() for b in result["blocks"])
