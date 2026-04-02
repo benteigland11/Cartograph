@@ -14,16 +14,23 @@ import webbrowser
 import http.server
 import urllib.parse
 
-_PID_DIR = os.path.join(os.path.expanduser("~"), ".cartograph")
-_PID_FILE = os.path.join(_PID_DIR, "dashboard.pid")
-_CONFIG_FILE = os.path.join(_PID_DIR, "config.json")
+def _state_dir():
+    from .engine import _user_data_dir
+    return os.path.join(_user_data_dir(), ".state")
+
+def _pid_file():
+    return os.path.join(_state_dir(), "dashboard.pid")
+
+def _config_file():
+    return os.path.join(_state_dir(), "dashboard.json")
 _DEFAULT_PORT = 9473
 
 
 def _load_config():
-    if os.path.exists(_CONFIG_FILE):
+    cf = _config_file()
+    if os.path.exists(cf):
         try:
-            with open(_CONFIG_FILE) as f:
+            with open(cf) as f:
                 return json.load(f)
         except Exception:
             pass
@@ -31,8 +38,8 @@ def _load_config():
 
 
 def _save_config(cfg):
-    os.makedirs(_PID_DIR, exist_ok=True)
-    with open(_CONFIG_FILE, "w") as f:
+    os.makedirs(_state_dir(), exist_ok=True)
+    with open(_config_file(), "w") as f:
         json.dump(cfg, f, indent=2)
 
 
@@ -233,6 +240,9 @@ def _make_handler(engine):
             q = qs.get("q", "").strip()
             if not q:
                 return {"widgets": [], "total": 0}
+            from .config import cloud_enabled
+            if not cloud_enabled():
+                return {"widgets": [], "total": 0}
             from .cloud import _get
             params = {"q": q}
             if qs.get("domain"): params["domain"] = qs["domain"]
@@ -371,8 +381,8 @@ def _make_handler(engine):
 
 
 def _write_pid(pid, port):
-    os.makedirs(_PID_DIR, exist_ok=True)
-    with open(_PID_FILE, "w") as f:
+    os.makedirs(_state_dir(), exist_ok=True)
+    with open(_pid_file(), "w") as f:
         f.write(f"{pid}\n{port}\n")
 
 
@@ -409,18 +419,19 @@ def _kill_pid(pid):
 
 def _read_pid():
     """Returns (pid, port) or (None, None)."""
-    if not os.path.exists(_PID_FILE):
+    pf = _pid_file()
+    if not os.path.exists(pf):
         return None, None
     try:
-        lines = open(_PID_FILE).read().strip().splitlines()
+        lines = open(pf).read().strip().splitlines()
         pid = int(lines[0])
         port = int(lines[1]) if len(lines) > 1 else 0
         if not _is_pid_alive(pid):
-            os.remove(_PID_FILE)
+            os.remove(pf)
             return None, None
         return pid, port
     except (ValueError, IndexError):
-        os.remove(_PID_FILE)
+        os.remove(pf)
         return None, None
 
 
@@ -430,8 +441,9 @@ def stop():
     if pid is None:
         return False
     _kill_pid(pid)
-    if os.path.exists(_PID_FILE):
-        os.remove(_PID_FILE)
+    pf = _pid_file()
+    if os.path.exists(pf):
+        os.remove(pf)
     return True
 
 
@@ -503,8 +515,9 @@ def serve(engine, port=9473, open_browser=True):
             server.serve_forever()
         finally:
             server.server_close()
-            if os.path.exists(_PID_FILE):
-                os.remove(_PID_FILE)
+            pf = _pid_file()
+            if os.path.exists(pf):
+                os.remove(pf)
 
 
 # Allow running as subprocess for Windows background serving:
@@ -514,4 +527,4 @@ if __name__ == "__main__":
     from .engine import Cartograph, LIBRARY_PATH
     engine = Cartograph(LIBRARY_PATH)
     handler = _make_handler(engine)
-    _serve_foreground(handler, port, _PID_FILE)
+    _serve_foreground(handler, port, _pid_file())

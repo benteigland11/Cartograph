@@ -89,12 +89,15 @@ def _preflight_language(language: str) -> None:
 
 def _preflight_from_path(path: str) -> None:
     """Read widget.json language and run preflight check."""
+    manifest = os.path.join(path, "widget.json")
+    if not os.path.isfile(manifest):
+        return  # command itself will report the missing file
     try:
-        with open(os.path.join(path, "widget.json")) as f:
+        with open(manifest) as f:
             language = json.load(f).get("tech_stack", {}).get("language", "python")
         _preflight_language(language)
-    except Exception:
-        pass  # let the command itself report the missing file
+    except json.JSONDecodeError:
+        print(f"\n  Warning: widget.json is malformed at {path}\n", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -109,14 +112,18 @@ def cmd_search(args):
         top_k=args.top_k,
     )
 
-    # Always search cloud — the registry is a public resource
-    from .cloud import search as cloud_search
-    cloud = cloud_search(
-        query=args.query,
-        domain_filter=args.domain,
-        language_filter=args.language,
-        top_k=args.top_k,
-    )
+    # Search cloud if enabled
+    from .config import cloud_enabled
+    if cloud_enabled():
+        from .cloud import search as cloud_search
+        cloud = cloud_search(
+            query=args.query,
+            domain_filter=args.domain,
+            language_filter=args.language,
+            top_k=args.top_k,
+        )
+    else:
+        cloud = {"widgets": []}
 
     # Merge: cloud version wins for published widgets, local-only stays local.
     # Cloud results have id="@handle/widget_id", local have id="widget_id".
@@ -415,8 +422,8 @@ def cmd_login(args):
 
         from .config import list_values
         items = list_values()
-        max_key = max(len(i["key"]) for i in items)
-        max_val = max(len(str(i["value"] if i["value"] is not None else "-")) for i in items)
+        max_key = max((len(i["key"]) for i in items), default=0)
+        max_val = max((len(str(i["value"] if i["value"] is not None else "-")) for i in items), default=0)
         print("\n  Your current settings:")
         for item in items:
             val = item["value"]
@@ -505,8 +512,8 @@ def cmd_login(args):
     # Show current config so user knows their defaults
     from .config import list_values
     items = list_values()
-    max_key = max(len(i["key"]) for i in items)
-    max_val = max(len(str(i["value"] if i["value"] is not None else "-")) for i in items)
+    max_key = max((len(i["key"]) for i in items), default=0)
+    max_val = max((len(str(i["value"] if i["value"] is not None else "-")) for i in items), default=0)
     print("  Your current settings:")
     for item in items:
         val = item["value"]
@@ -564,7 +571,7 @@ def cmd_cloud_publish(args):
         # Resolve path from library by widget_id
         widget_id = args.widget_id
         if not widget_id:
-            err({"error": "Provide a widget_id when using --lib"})
+            err({"error": "Usage: cartograph cloud publish <widget_id> --lib"})
         carto = _carto()
         widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
         if not widget:
@@ -676,8 +683,8 @@ def cmd_cloud_unpublish(args):
     from . import cloud, auth
     if not auth.is_authenticated():
         err({"error": "Not authenticated. Run: cartograph login"})
-    if not args.confirm:
-        err({"error": f"This will remove '{args.widget_id}' from the cloud registry. Add --confirm to proceed."})
+    if not getattr(args, "confirm", False):
+        err({"error": f"This will remove '{args.widget_id}' from the cloud registry. Pass --confirm to proceed."})
     result = cloud.delete_widget(args.widget_id)
     if "error" in result:
         err(result)
@@ -1075,6 +1082,80 @@ _AGENT_FILENAMES = {
 
 
 
+def cmd_export(args):
+    """Export the widget library as a zip file."""
+    import zipfile
+    from .engine import LIBRARY_PATH
+
+    if not os.path.isdir(LIBRARY_PATH):
+        err({"error": "No widget library found."})
+
+    output = args.output or "cartograph-library.zip"
+    if not output.endswith(".zip"):
+        output += ".zip"
+
+    skip = {"__pycache__", ".pytest_cache", "node_modules"}
+
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(LIBRARY_PATH):
+            dirs[:] = [d for d in dirs if d not in skip]
+            for fname in files:
+                if fname.endswith(".pyc"):
+                    continue
+                full = os.path.join(root, fname)
+                arcname = os.path.relpath(full, LIBRARY_PATH)
+                zf.write(full, arcname)
+
+    size_mb = os.path.getsize(output) / (1024 * 1024)
+    carto = _carto()
+    print(f"\n  Exported {len(carto.widgets)} widgets to {output} ({size_mb:.1f} MB)\n")
+
+
+def cmd_import(args):
+    """Import a widget library from a zip file."""
+    import zipfile
+    from .engine import LIBRARY_PATH
+
+    path = args.path
+    if not os.path.isfile(path):
+        err({"error": f"File not found: {path}"})
+
+    if not zipfile.is_zipfile(path):
+        err({"error": f"Not a valid zip file: {path}"})
+
+    with zipfile.ZipFile(path, "r") as zf:
+        names = zf.namelist()
+        # Verify it looks like a widget library (has at least one widget.json)
+        manifests = [n for n in names if n.endswith("widget.json") and n.count("/") == 1]
+        if not manifests:
+            err({"error": "Zip does not appear to contain a widget library (no widget.json files found)."})
+
+        os.makedirs(LIBRARY_PATH, exist_ok=True)
+
+        imported = 0
+        skipped = 0
+        for name in names:
+            dest = os.path.join(LIBRARY_PATH, name)
+            if name.endswith("/"):
+                os.makedirs(dest, exist_ok=True)
+                continue
+            # Don't overwrite existing files unless --force
+            if os.path.exists(dest) and not getattr(args, "force", False):
+                skipped += 1
+                continue
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with zf.open(name) as src, open(dest, "wb") as dst:
+                dst.write(src.read())
+            imported += 1
+
+    # Reload to pick up new widgets
+    carto = _carto()
+    print(f"\n  Imported {imported} files ({len(manifests)} widgets). {skipped} files skipped (already exist).")
+    if skipped:
+        print(f"  Re-run with --force to overwrite existing files.")
+    print()
+
+
 def cmd_stats(args):
     from collections import defaultdict
     widgets = _carto().widgets
@@ -1349,8 +1430,8 @@ def cmd_config(args):
         # List all
         from .config import list_values
         items = list_values()
-        max_key = max(len(i["key"]) for i in items)
-        max_val = max(len(str(i["value"] if i["value"] is not None else "-")) for i in items)
+        max_key = max((len(i["key"]) for i in items), default=0)
+        max_val = max((len(str(i["value"] if i["value"] is not None else "-")) for i in items), default=0)
         print()
         for item in items:
             val = item["value"]
@@ -1661,6 +1742,25 @@ def _build_cli() -> AgentCLI:
                 {"name": "--port", "type": int, "default": 0, "help": "Override port"},
                 {"name": "--set-port", "type": int, "default": None, "dest": "set_port"},
                 {"name": "--stop", "action": "store_true", "default": False},
+            ],
+        },
+        {
+            "name": "export",
+            "help": "Export widget library as a zip file",
+            "handler": cmd_export,
+            "args": [
+                {"name": "--output", "default": None,
+                 "help": "Output file (default: cartograph-library.zip)"},
+            ],
+        },
+        {
+            "name": "import",
+            "help": "Import widgets from a zip file into the library",
+            "handler": cmd_import,
+            "args": [
+                {"name": "path", "help": "Path to zip file"},
+                {"name": "--force", "action": "store_true", "default": False,
+                 "help": "Overwrite existing files"},
             ],
         },
         {

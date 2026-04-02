@@ -30,17 +30,12 @@ log = logging.getLogger("cartograph")
 _DEFAULT_REGISTRY_URL = "https://cartograph-api-562154372671.us-central1.run.app"
 
 
-def _user_config_dir() -> str:
-    if _sys.platform == "win32":
-        base = os.environ.get("APPDATA", os.path.expanduser("~"))
-    elif _sys.platform == "darwin":
-        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
-    else:
-        base = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
-    return os.path.join(base, "cartograph")
+def _credentials_path() -> str:
+    from .engine import _user_data_dir
+    return os.path.join(_user_data_dir(), "credentials.json")
 
 
-_CREDENTIALS_FILE = os.path.join(_user_config_dir(), "credentials.json")
+_CREDENTIALS_FILE = _credentials_path()
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 def _google_client_id() -> str:
     env = os.environ.get("GOOGLE_CLIENT_ID", "")
@@ -179,13 +174,20 @@ def _write_credentials(creds: dict) -> None:
         json.dump(creds, f)
     try:
         os.chmod(_CREDENTIALS_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
-    except OSError as e:
-        log.debug("Could not set credentials file permissions: %s", e)
+    except OSError:
+        # Permissions failed - remove the file rather than leave it world-readable
+        os.remove(_CREDENTIALS_FILE)
+        raise OSError(
+            f"Could not set permissions on {_CREDENTIALS_FILE}. "
+            "Credentials were not saved."
+        )
 
 
 def save_credentials(id_token: str, refresh_token: str, signing_key: str,
                      client_id: str = "", client_secret: str = "") -> None:
     """Persist OAuth credentials to disk."""
+    if not id_token or not id_token.strip():
+        raise ValueError("Received empty id_token - credentials not saved.")
     creds = {
         "id_token": id_token,
         "refresh_token": refresh_token,

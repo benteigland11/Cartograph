@@ -60,7 +60,7 @@ def _resolve_library_path() -> str:
 
 LIBRARY_PATH = _resolve_library_path()
 
-CARTOGRAPH_DIR = os.path.join(REPO_DIR, ".cartograph")
+CARTOGRAPH_DIR = os.path.join(_user_data_dir(), ".state")
 INSTALL_STATS_PATH = os.path.join(CARTOGRAPH_DIR, "stats.json")
 LIBRARY_CACHE_PATH = os.path.join(CARTOGRAPH_DIR, "library_cache.json")
 
@@ -312,6 +312,35 @@ class Cartograph:
         except (OSError, json.JSONDecodeError, KeyError):
             return {"rating": 0, "count": 0, "trend": None, "reviews": [], "version_averages": {}}
 
+    # Minimum reviews before a widget's raw rating is fully trusted.
+    _RATING_CONFIDENCE_THRESHOLD = 5
+
+    def _compute_weighted_ratings(self):
+        """Apply Bayesian averaging to widget ratings.
+
+        weighted = (count * avg + C * M) / (count + C)
+
+        C = confidence threshold (reviews needed to trust the raw rating)
+        M = global mean rating across all rated widgets
+
+        Widgets with few reviews regress toward the global mean;
+        widgets with many reviews converge to their raw average.
+        """
+        C = self._RATING_CONFIDENCE_THRESHOLD
+        rated = [w for w in self.widgets if w["review_count"] > 0]
+        if not rated:
+            for w in self.widgets:
+                w["weighted_rating"] = 0
+            return
+        M = sum(w["rating"] for w in rated) / len(rated)
+        for w in self.widgets:
+            count = w["review_count"]
+            avg = w["rating"]
+            if count == 0:
+                w["weighted_rating"] = 0
+            else:
+                w["weighted_rating"] = round((count * avg + C * M) / (count + C), 2)
+
     def _load_install_stats(self):
         """Load install counts from stats.json."""
         if not os.path.exists(INSTALL_STATS_PATH):
@@ -491,6 +520,18 @@ class Cartograph:
 
         if cache_dirty:
             self._save_library_cache(cache)
+
+        # Bayesian weighted ratings - regress toward global mean until enough
+        # reviews accumulate. Prevents a single 5-star review from dominating.
+        self._compute_weighted_ratings()
+
+        # Filter out widgets for unavailable languages if configured
+        from .config import load_config
+        if not load_config().get("library", {}).get("show_unavailable", True):
+            from .languages import available_languages
+            allowed = available_languages()
+            self.widgets = [w for w in self.widgets
+                           if normalize_language(w.get("language", "")) in allowed]
 
     def list_popular(self, limit=10):
         from .inspector import list_popular

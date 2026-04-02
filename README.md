@@ -71,6 +71,9 @@ cartograph rate <widget_id> <score 1-5>  [--comment "..."]
     also works with @handle/widget-id for cloud widgets
 cartograph setup  [--agent claude|codex|gemini|antigravity|cursor]
                   [--write] [--workflow [name]]
+cartograph export [--output file.zip]        default: cartograph-library.zip
+cartograph import <file.zip> [--force]       --force overwrites existing
+
 cartograph config [key] [value]
 cartograph stats
 cartograph doctor
@@ -109,13 +112,17 @@ Run `cartograph doctor` to check that all language engine dependencies (pytest, 
 
 ## Cloud registry
 
-The CLI tool is made to have a local registry on your machine. It has support for a cloud registry to be integrated alongside the local one. The default registry is hosted by the Cartograph project. To point at your own registry instance, set `CARTOGRAPH_REGISTRY_URL`:
+The CLI tool is built around a local registry on your machine. It also supports an optional cloud registry for sharing widgets across teams or publicly.
+
+The default hosted registry is in early development and may have rough edges. The local engine is production-ready and does not depend on cloud availability. If the registry is down or unreachable, everything local continues to work.
+
+To point at your own registry instance, set `CARTOGRAPH_REGISTRY_URL`:
 
 ```bash
 export CARTOGRAPH_REGISTRY_URL=https://your-registry.example.com
 ```
 
-`cartograph login` opens a browser-based authentication flow provided by whichever registry you're connected to. Once authenticated, you can publish widgets. We encourage you to use the default cloud registry to build up a network effect. Setting a custom registry URL is a good fit for enterprise systems that want this as an internal tool.
+`cartograph login` opens a browser-based authentication flow provided by whichever registry you're connected to. Once authenticated, you can publish widgets. Setting a custom registry URL is a good fit for teams or enterprises that want this as an internal tool.
 
 ## Roadmap
 

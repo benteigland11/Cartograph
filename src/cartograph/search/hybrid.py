@@ -29,6 +29,11 @@ _BETA  = 0.60   # N-gram contribution
 # Score boost for exact substring match in name or id (added after normalisation)
 _EXACT_BOOST = 0.30
 
+# Rating nudge - small enough to never override relevance, large enough to
+# break ties between equally relevant widgets.  weighted_rating is 0-5,
+# so dividing by 5 normalises to [0, 1] before applying the weight.
+_RATING_WEIGHT = 0.05
+
 # Minimum combined score to appear in results - filters out weak/tangential matches
 _MIN_SCORE = 0.10
 
@@ -81,6 +86,11 @@ class HybridBackend:
                 if term in name_lower or term in id_lower:
                     combined += _EXACT_BOOST
                     break
+
+            # Rating nudge - tiebreaker for equally relevant widgets
+            wr = widget.get("weighted_rating", 0)
+            if wr > 0:
+                combined += _RATING_WEIGHT * (wr / 5.0)
 
             if combined < _MIN_SCORE:
                 continue

@@ -135,12 +135,14 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         return {
             "status": "warnings",
             "message": "Checkin paused: potential contamination found. "
-                       "Review warnings and re-run with override_warnings=True and override_reason=<explanation>.",
+                       "Review warnings below, then re-run with "
+                       "--override-warnings --override-reason \"<why these warnings are acceptable>\".",
             "warnings": scan["warnings"],
         }
 
     if override_warnings and not override_reason:
-        return {"status": "error", "message": "override_reason is required when override_warnings=True"}
+        return {"status": "error",
+                "message": "--override-reason is required when using --override-warnings."}
 
     # --- Determine update vs new ---
     is_update = widget_record is not None
@@ -194,6 +196,8 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     if is_update and os.path.exists(dest_path):
         old_version = widget_record.get("version", "unknown")
         history_path = os.path.join(dest_path, "history", old_version)
+        if os.path.exists(history_path):
+            shutil.rmtree(history_path)
         os.makedirs(history_path, exist_ok=True)
         ignore = shutil.ignore_patterns(
             "__pycache__", "*.pyc", ".pytest_cache",
@@ -264,8 +268,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
             log.warning("Could not write validation stamp after checkin: %s", e)
 
     # --- Reload library so the in-memory index reflects the new widget ---
-    carto._load_library()
-    carto._search_backend.build(carto.widgets)
+    carto.reload()
 
     action = "updated" if is_update else "registered"
     log.info("Successfully %s %s → v%s", action, item_id, new_version)
@@ -304,9 +307,9 @@ def restore(carto, item_id, version, reason):
         return {"status": "error", "message": f"Version '{version}' not found in history for {item_id}"}
 
     # Copy history version to a temp dir, then checkin as update
-    temp_dir = os.path.join(os.getcwd(), f"_restore_{item_id}")
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
+    import tempfile
+    temp_dir = tempfile.mkdtemp(prefix=f"cartograph_restore_{item_id}_")
+    shutil.rmtree(temp_dir)  # mkdtemp creates it, copytree needs it to not exist
     shutil.copytree(history_path, temp_dir)
 
     # Set manifest version to current library version so the version guard

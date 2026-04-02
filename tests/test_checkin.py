@@ -271,3 +271,66 @@ def test_checkin_stamps_runtime_version(carto_tmp, installed_widget):
     # Should match the running interpreter
     expected = f"python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     assert v["runtime"] == expected
+
+
+# ---------------------------------------------------------------------------
+# Rollback (restore)
+# ---------------------------------------------------------------------------
+
+def test_rollback_restores_old_version(carto_tmp, installed_widget):
+    """Rollback should restore a previous version's source as a new patch release."""
+    widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
+    old_version = widget["version"]
+
+    # Checkin to create a history entry
+    src_file = os.path.join(installed_widget, "src", "http_client.py")
+    with open(src_file, "a") as f:
+        f.write("\n# v2 change\n")
+    result = carto_tmp.checkin(installed_widget, reason="v2 change")
+    assert result["status"] == "success"
+    new_version = result["version"]
+
+    # Rollback to old version
+    from cartograph.checkin import restore
+    result = restore(carto_tmp, "http-client", old_version, "reverting v2")
+    assert result["status"] == "success"
+    assert result["action"] == "updated"
+    # Restore does a patch bump from the current library version (1.3.0 -> 1.3.1)
+    assert result["version"] == "1.3.1"
+
+    # Source should NOT contain the v2 change
+    widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
+    with open(os.path.join(widget["path"], "src", "http_client.py")) as f:
+        content = f.read()
+    assert "# v2 change" not in content
+
+
+def test_rollback_records_reason_in_changelog(carto_tmp, installed_widget):
+    """Rollback reason should appear in the changelog."""
+    widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
+    old_version = widget["version"]
+
+    carto_tmp.checkin(installed_widget, reason="setup")
+
+    from cartograph.checkin import restore
+    restore(carto_tmp, "http-client", old_version, "broke prod")
+
+    widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
+    with open(os.path.join(widget["path"], "changelog.json")) as f:
+        log = json.load(f)
+    assert any("RESTORE" in entry["reason"] and "broke prod" in entry["reason"]
+               for entry in log)
+
+
+def test_rollback_unknown_widget_errors(carto_tmp):
+    from cartograph.checkin import restore
+    result = restore(carto_tmp, "nonexistent-widget", "1.0.0", "test")
+    assert result["status"] == "error"
+    assert "not found" in result["message"].lower()
+
+
+def test_rollback_unknown_version_errors(carto_tmp, installed_widget):
+    from cartograph.checkin import restore
+    result = restore(carto_tmp, "http-client", "99.99.99", "test")
+    assert result["status"] == "error"
+    assert "not found" in result["message"].lower()

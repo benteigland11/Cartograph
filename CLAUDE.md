@@ -72,13 +72,18 @@ update. Wrap or extend in your own code instead.
     cartograph cloud proposals [widget_id] [proposal_id]
         [--accept] [--reject] [--reason "..."]
 
+**Library transfer**
+
+    cartograph export [--output file.zip]     default: cartograph-library.zip
+    cartograph import <file.zip> [--force]    --force overwrites existing files
+
 **Configuration**
 
     cartograph config                      show all settings
     cartograph config <key>                get a setting
     cartograph config <key> <value>        set a setting
 
-    Keys: auto-publish, visibility, governance
+    Keys: auto-publish, visibility, governance, cloud, show-unavailable
 
 **Library and account**
 

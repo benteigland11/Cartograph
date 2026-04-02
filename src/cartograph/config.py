@@ -20,6 +20,10 @@ except ModuleNotFoundError:
     tomllib = None
 
 _DEFAULTS = {
+    "library": {
+        "show_unavailable": True,
+        "cloud": True,
+    },
     "publish": {
         "auto_publish": False,
         "visibility": "public",
@@ -35,7 +39,16 @@ _SCHEMA = {
                      "Default visibility for published widgets"),
     "governance":   ("publish", "governance", "str", ["open", "protected"],
                      "Default contribution governance model"),
+    "cloud":            ("library", "cloud", "bool", None,
+                         "Enable cloud registry integration"),
+    "show-unavailable": ("library", "show_unavailable", "bool", None,
+                         "Show widgets for languages not installed on this machine"),
 }
+
+
+def cloud_enabled() -> bool:
+    """Check if cloud registry integration is enabled."""
+    return load_config().get("library", {}).get("cloud", True)
 
 
 def _config_path() -> str:

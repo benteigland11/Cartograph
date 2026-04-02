@@ -72,3 +72,9 @@ def get_engine(language: str) -> LanguageEngine | None:
 def supported_languages() -> list[str]:
     """Return languages with full validation support - derived from _ENGINES."""
     return sorted(name for name, engine in _ENGINES.items() if engine.supported)
+
+
+def available_languages() -> set[str]:
+    """Return languages whose toolchain is installed on this machine."""
+    return {name for name, engine in _ENGINES.items()
+            if engine.supported and engine.check_available()[0]}

@@ -143,7 +143,10 @@ def install(carto, widget_id, target_dir, version=None):
         except Exception as e:
             return {"error": str(e)}
 
-    # Fall back to cloud registry
+    # Fall back to cloud registry if enabled
+    from .config import cloud_enabled
+    if not cloud_enabled():
+        return {"error": f"Widget '{widget_id}' not found in local library."}
     return _install_from_cloud(widget_id, dest_path, owner_hint=owner_hint)
 
 
