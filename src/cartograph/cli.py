@@ -956,10 +956,12 @@ def cmd_doctor(args):
     for lang_name, engine in sorted(_ENGINES.items()):
         available, message = engine.check_available()
         lang_checks = []
+        ev = getattr(engine, "validation_version", None)
+        version_tag = f"  (engine v{ev})" if ev is not None else ""
         if available:
-            lang_checks.append((lang_name, True, "ready", None))
+            lang_checks.append((lang_name, True, f"ready{version_tag}", None))
         else:
-            lang_checks.append((lang_name, False, "not ready", message))
+            lang_checks.append((lang_name, False, f"not ready{version_tag}", message))
         groups.append((lang_name.capitalize(), lang_checks))
 
     # --- Render ---

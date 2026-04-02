@@ -32,7 +32,7 @@ import shutil
 
 from .languages import get_engine
 from .languages.base import _dep_bare_name
-from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_FILE
+from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_FILE, cartograph_version as _cartograph_version
 
 log = logging.getLogger("cartograph")
 
@@ -188,6 +188,14 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         new_version = version
 
     data["meta"]["version"] = new_version
+
+    # --- Stamp validation metadata into widget.json ---
+    data["validation"] = {
+        "engine_version": getattr(engine, "validation_version", None),
+        "cartograph_version": _cartograph_version(),
+        "validated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
     with open(manifest_path, "w") as f:
         json.dump(data, f, indent=2)
 

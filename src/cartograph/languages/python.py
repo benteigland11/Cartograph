@@ -59,6 +59,7 @@ _HEAVY_ML_DEPS = {
 
 class PythonEngine(LanguageEngine):
     name = "python"
+    validation_version = 1
 
     def check_available(self) -> tuple[bool, str]:
         import subprocess

@@ -67,6 +67,7 @@ discard result  # replace with meaningful output or assertions
 
 class NimEngine(LanguageEngine):
     name = "nim"
+    validation_version = 1
     file_ext = "nim"
     toolchain = {
         "nim": "Install Nim 2.0+ - nim-lang.org",

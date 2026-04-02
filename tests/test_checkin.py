@@ -211,3 +211,36 @@ def test_checkin_restores_library_notes_if_edited(carto_tmp, installed_widget):
     notes = lib_data.get("library_notes", {})
     assert notes.get("general") != "do whatever"
     assert "pytest" in notes.get("language", "")
+
+
+# ---------------------------------------------------------------------------
+# Validation version stamped into widget.json
+# ---------------------------------------------------------------------------
+
+def test_checkin_stamps_validation_block(carto_tmp, installed_widget):
+    result = carto_tmp.checkin(installed_widget, reason="Version stamp test")
+    assert result["status"] == "success"
+
+    widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
+    with open(os.path.join(widget["path"], "widget.json")) as f:
+        data = json.load(f)
+
+    assert "validation" in data
+    v = data["validation"]
+    assert "engine_version" in v
+    assert "cartograph_version" in v
+    assert "validated_at" in v
+    assert isinstance(v["engine_version"], int)
+    assert v["engine_version"] >= 1
+
+
+def test_checkin_stamps_correct_engine_version(carto_tmp, installed_widget):
+    from cartograph.languages.python import PythonEngine
+    result = carto_tmp.checkin(installed_widget, reason="Engine version check")
+    assert result["status"] == "success"
+
+    widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
+    with open(os.path.join(widget["path"], "widget.json")) as f:
+        data = json.load(f)
+
+    assert data["validation"]["engine_version"] == PythonEngine.validation_version

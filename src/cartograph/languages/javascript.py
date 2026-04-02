@@ -135,6 +135,7 @@ export default defineConfig({
 class JavaScriptEngine(LanguageEngine):
     name = "javascript"
     aliases = ["js"]
+    validation_version = 1
     file_ext = "js"
     toolchain = {
         "node": "Install Node.js 18+ - nodejs.org",

@@ -29,7 +29,7 @@ log = logging.getLogger("cartograph")
 STAMP_FILE = ".validation_stamp.json"
 
 
-def _cartograph_version() -> str:
+def cartograph_version() -> str:
     try:
         return importlib.metadata.version("cartograph-cli")
     except Exception:
@@ -48,7 +48,8 @@ def write_stamp(widget_path: str, language: str, engine,
     from datetime import datetime, timezone
     metadata = {
         "language": language,
-        "cartograph_version": _cartograph_version(),
+        "engine_version": getattr(engine, "validation_version", None),
+        "cartograph_version": cartograph_version(),
         "test_results": test_results or {},
         "validated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -70,7 +71,10 @@ def is_stamp_valid(widget_path: str, language: str, engine) -> bool:
     patterns = _engine_patterns(widget_path, engine)
     valid = _is_stamp_valid(
         widget_path,
-        metadata_match={"language": language},
+        metadata_match={
+            "language": language,
+            "engine_version": getattr(engine, "validation_version", None),
+        },
         stamp_name=STAMP_FILE,
         patterns=patterns,
     )
