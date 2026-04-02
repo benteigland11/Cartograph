@@ -29,7 +29,6 @@ import logging
 import os
 import re
 import shutil
-import sys
 
 from .languages import get_engine
 from .languages.base import _dep_bare_name
@@ -79,125 +78,9 @@ def _restore_library_notes(manifest_path: str) -> None:
         pass  # non-fatal — checkin proceeds
 
 
-# ---------------------------------------------------------------------------
-# Contamination scanner
-# ---------------------------------------------------------------------------
-
-_ABS_PATH_RE = re.compile(
-    r'["\'](?:/home/|/Users/|/root/|[A-Za-z]:[/\\\\])[^"\']{3,}["\']'
-)
-
-_CREDENTIAL_RE = re.compile(
-    r'(?:api_key|api_secret|secret_key|access_token|auth_token|password|passwd|credential)\s*=\s*["\'][^"\']{6,}["\']',
-    re.IGNORECASE,
-)
-
-_ENVVAR_RE = re.compile(r'os\.getenv\(|os\.environ')
-_JS_ENVVAR_RE = re.compile(r'process\.env\b')
-
-_URL_RE = re.compile(
-    r'["\']https?://(?!(?:localhost|127\.0\.0\.1|(?:[\w-]+\.)*example\.com|schemas?\.))[^"\']{8,}["\']'
-)
-
-_IP_RE = re.compile(r'["\'](?:\d{1,3}\.){3}\d{1,3}(?::\d+)?["\']')
-
-_IMPORT_RE = re.compile(r'^\s*(?:import|from)\s+([\w.]+)', re.MULTILINE)
-
-_STDLIB = sys.stdlib_module_names  # complete, maintained by Python itself (3.10+)
-
-
-def _scan_contamination(path: str, widget: dict) -> dict:
-    """
-    Scan source files for project-specific contamination.
-    Handles Python (.py) and JavaScript/React (.js, .jsx) files.
-    Returns {"blocks": [...], "warnings": [...]}.
-    """
-    blocks, warnings = [], []
-    language = widget.get("language", "python").lower()
-    is_js = language in ("javascript", "typescript", "js", "ts")
-
-    # Collect declared dependency names (for Python import check)
-    deps = widget.get("dependencies", [])
-    dep_names = {_dep_bare_name(d).lower() for d in deps if isinstance(d, str)}
-
-    # Widget's own module names (Python only)
-    own_modules = {"src"}  # src/ is always the widget's own package
-    src_dir = os.path.join(path, "src")
-    if os.path.isdir(src_dir) and not is_js:
-        for f in os.listdir(src_dir):
-            if f.endswith(".py"):
-                own_modules.add(f[:-3])
-
-    if is_js:
-        exts = ("*.js", "*.jsx", "*.ts", "*.tsx")
-        src_files = []
-        for ext in exts:
-            src_files.extend(glob.glob(os.path.join(path, "src", "**", ext), recursive=True))
-        test_files = []
-        for ext in exts:
-            test_files.extend(glob.glob(os.path.join(path, "tests", "**", ext), recursive=True))
-    else:
-        src_files = glob.glob(os.path.join(path, "src", "**", "*.py"), recursive=True)
-        test_files = glob.glob(os.path.join(path, "tests", "**", "*.py"), recursive=True)
-
-    all_files = src_files + test_files
-
-    for fpath in all_files:
-        rel = os.path.relpath(fpath, path)
-        try:
-            code = open(fpath).read()
-        except Exception:
-            continue
-
-        for line_no, line in enumerate(code.splitlines(), 1):
-            loc = f"{rel}:{line_no}"
-
-            if fpath in src_files:
-                if _ABS_PATH_RE.search(line):
-                    blocks.append(f"Absolute path in {loc}: {line.strip()}")
-                if _CREDENTIAL_RE.search(line):
-                    blocks.append(f"Possible credential in {loc}: {line.strip()}")
-            else:
-                if _CREDENTIAL_RE.search(line):
-                    warnings.append(f"Possible credential in test {loc} — verify it's fake: {line.strip()}")
-
-        envvar_re = _JS_ENVVAR_RE if is_js else _ENVVAR_RE
-        envvar_label = "process.env" if is_js else "os.environ/getenv"
-        for m in envvar_re.finditer(code):
-            line_no = code[:m.start()].count("\n") + 1
-            warnings.append(f"{envvar_label} call in {rel}:{line_no} — verify it's not project-specific")
-
-        for m in _URL_RE.finditer(code):
-            line_no = code[:m.start()].count("\n") + 1
-            warnings.append(f"Hardcoded URL in {rel}:{line_no}: {m.group()}")
-
-        for m in _IP_RE.finditer(code):
-            line_no = code[:m.start()].count("\n") + 1
-            warnings.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
-
-        # Python-only: unlisted import check (AST-based to skip docstrings)
-        if not is_js and fpath in src_files:
-            try:
-                import ast
-                tree = ast.parse(code)
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Import):
-                        for alias in node.names:
-                            top = alias.name.split(".")[0].lower()
-                            if top and top not in _STDLIB and top not in dep_names and top not in own_modules:
-                                warnings.append(
-                                    f"Unlisted import '{top}' in {rel}:{node.lineno} — add to dependencies or remove"
-                                )
-                    elif isinstance(node, ast.ImportFrom) and node.module:
-                        top = node.module.split(".")[0].lower()
-                        if top and top not in _STDLIB and top not in dep_names and top not in own_modules:
-                            warnings.append(
-                                f"Unlisted import '{top}' in {rel}:{node.lineno} — add to dependencies or remove"
-                            )
-            except SyntaxError:
-                pass
-
-    return {"blocks": blocks, "warnings": warnings}
+# Contamination scanning is now in contamination.py, delegated to per-language engines.
+# Kept as import alias for backwards compatibility within this module.
+from .contamination import scan_contamination as _scan_contamination
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +146,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
             }
 
     # --- Contamination scan ---
-    scan = _scan_contamination(path, data.get("tech_stack", {}))
+    scan = _scan_contamination(path)
 
     if scan["blocks"]:
         return {

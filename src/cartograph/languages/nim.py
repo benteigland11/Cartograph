@@ -82,6 +82,15 @@ class NimEngine(LanguageEngine):
         "os_specific": "OS-specific when defined() found in src/ - widgets must validate on all platforms:",
         "risky_import": "Risky stdlib imports found in src/ - flagged for review:",
     }
+    scanner_warning_messages = {
+        "abs_path": "Absolute paths found in src/ - widgets must be portable:",
+        "credential": "Possible credentials found in src/ - remove before checkin:",
+        "hardcoded_url": "Hardcoded URLs found in src/ - consider making these configurable:",
+        "hardcoded_ip": "Hardcoded IPs found in src/ - consider making these configurable:",
+        "hardcoded_value": "Hardcoded values found in src/ - consider making these configurable:",
+        "env_var": "Environment variable access found in src/ - verify it's not project-specific:",
+        "unlisted_import": "Unlisted imports found in src/ - add to dependencies or remove:",
+    }
     import_pattern = r'^import\s+\w+'
     manifest_patterns = ["*.nimble"]
 
@@ -161,13 +170,14 @@ class NimEngine(LanguageEngine):
 
         # 4. Native source scanner (uses base class helper)
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")
-        errors.extend(self._run_native_scanner(
+        scan_errors, _, _ = self._run_native_scanner(
             scanner_path=scanner,
             runner=self.scanner_runner,
             src_files=src_files,
             cwd=path,
             finding_messages=self.scanner_messages,
-        ))
+        )
+        errors.extend(scan_errors)
 
         # 5. Dependencies must have a version floor
         errors.extend(self._check_dep_pinning(dependencies))
@@ -175,6 +185,22 @@ class NimEngine(LanguageEngine):
         if errors:
             return self._fail("\n".join(errors))
         return self._ok()
+
+    def scan_contamination(self, path: str, widget: dict) -> dict:
+        """Nim contamination: native scanner on src + test files."""
+        src_files = _glob.glob(os.path.join(path, "src", "**", "*.nim"), recursive=True)
+        test_files = _glob.glob(os.path.join(path, "tests", "**", "*.nim"), recursive=True)
+        all_files = src_files + test_files
+        scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")
+        _, scan_warnings, scan_blocks = self._run_native_scanner(
+            scanner_path=scanner,
+            runner=self.scanner_runner,
+            src_files=all_files,
+            cwd=path,
+            finding_messages=self.scanner_messages,
+        )
+
+        return {"blocks": scan_blocks, "warnings": scan_warnings}
 
     def required_files(self, path: str) -> list[tuple[str, str]]:
         if _glob.glob(os.path.join(path, "*.nimble")):

@@ -197,6 +197,19 @@ def validate_item(carto, path):
             return {"status": "error", "message": hint}
 
     # 9. Language checks, install deps, run example, run tests
+    # -- Contamination scan (first stage - before validation)
+    from .contamination import scan_contamination
+    contam = scan_contamination(path)
+    contam_warnings = contam.get("warnings", [])
+    if contam["blocks"]:
+        check("Contamination scan clean", False,
+              "Contamination blocked:\n" + "\n".join(contam["blocks"]))
+        _print_checklist(checklist, errors + contam["blocks"], failed=True)
+        return {"status": "error",
+                "message": "Contamination scan failed - hard blocks found.",
+                "blocks": contam["blocks"]}
+    check("Contamination scan clean", True)
+
     log.debug("Running language checks...")
     lang_check = engine.validate_widget(path, dependencies)
     if not check("Language checks pass", lang_check["passed"],
@@ -244,16 +257,19 @@ def validate_item(carto, path):
           f"Identical code already exists: {duplicate['id']}" if duplicate else None)
 
     engine.cleanup(path)
-    _print_checklist(checklist, errors, failed=False)
+    _print_checklist(checklist, errors, failed=False, warnings=contam_warnings)
 
     # Write a stamp so checkin can skip re-validation if nothing changes
     from .validation_stamp import write_stamp
     write_stamp(path, language, engine)
 
-    return {"status": "success", "message": "Widget is valid"}
+    result = {"status": "success", "message": "Widget is valid"}
+    if contam_warnings:
+        result["warnings"] = contam_warnings
+    return result
 
 
-def _print_checklist(checklist, errors, failed, test_output=None):
+def _print_checklist(checklist, errors, failed, test_output=None, warnings=None):
     """Log validation results."""
     status = "FAILED" if failed else "PASSED"
     log.info("Validation %s (%d checks)", status, len(checklist))
@@ -263,3 +279,7 @@ def _print_checklist(checklist, errors, failed, test_output=None):
         log.debug("  Error: %s", error)
     if test_output:
         log.debug("  Test output: %s", test_output[:500])
+    if warnings:
+        log.info("Warnings (%d):", len(warnings))
+        for w in warnings:
+            log.info("  %s", w)

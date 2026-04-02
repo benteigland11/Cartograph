@@ -6,7 +6,7 @@
 ## Usage: nim r nim_scanner.nim <file1.nim> [file2.nim ...]
 ## Output: JSON array of {file, kind, line, detail} objects.
 
-import std/[json, os, strutils, re]
+import std/[json, os, strutils, re, sets]
 
 type
   Finding = object
@@ -14,6 +14,72 @@ type
     kind: string
     line: int
     detail: string
+    severity: string  # "error" or "warning"
+
+# Nim stdlib modules - skip for unlisted import checks
+const nimStdlib = [
+  "std/algorithm", "std/atomics", "std/base64", "std/bitops", "std/browsers",
+  "std/cgi", "std/colors", "std/complex", "std/critbits", "std/db_common",
+  "std/db_mysql", "std/db_postgres", "std/db_sqlite", "std/deques",
+  "std/distros", "std/dynlib", "std/encodings", "std/enumerate",
+  "std/envvars", "std/exitprocs", "std/files", "std/formatfloat",
+  "std/hashes", "std/heapqueue", "std/htmlgen", "std/htmlparser",
+  "std/httpclient", "std/httpcore", "std/intsets", "std/json", "std/jsonutils",
+  "std/locks", "std/logging", "std/macros", "std/marshal", "std/math",
+  "std/md5", "std/memfiles", "std/mimetypes", "std/monotimes", "std/net",
+  "std/nativesockets", "std/oids", "std/options", "std/os", "std/osproc",
+  "std/parsecfg", "std/parsecsv", "std/parsejson", "std/parseopt",
+  "std/parsesql", "std/parseutils", "std/parsexml", "std/paths", "std/pathnorm",
+  "std/pegs", "std/posix", "std/random", "std/rationals", "std/re",
+  "std/readline", "std/rlocks", "std/ropes", "std/selectors", "std/sequtils",
+  "std/sets", "std/sha1", "std/sharedlist", "std/sharedtables",
+  "std/smtp", "std/sockets", "std/stats", "std/streams", "std/streamwrapper",
+  "std/strformat", "std/strscans", "std/strtabs", "std/strutils",
+  "std/sugar", "std/sysrand", "std/tables", "std/tempfiles", "std/terminal",
+  "std/threadpool", "std/times", "std/typeinfo", "std/typetraits",
+  "std/unicode", "std/unittest", "std/uri", "std/volatile", "std/widestrs",
+  "std/winlean", "std/wordwrap", "std/wrapnils", "std/xmlparser",
+  "std/xmltree",
+  # Short forms (without std/ prefix)
+  "algorithm", "atomics", "base64", "bitops", "browsers", "cgi", "colors",
+  "complex", "critbits", "deques", "distros", "dynlib", "encodings",
+  "enumerate", "envvars", "exitprocs", "files", "formatfloat", "hashes",
+  "heapqueue", "htmlgen", "htmlparser", "httpclient", "httpcore", "intsets",
+  "json", "jsonutils", "locks", "logging", "macros", "marshal", "math",
+  "md5", "memfiles", "mimetypes", "monotimes", "net", "nativesockets",
+  "oids", "options", "os", "osproc", "parsecfg", "parsecsv", "parsejson",
+  "parseopt", "parsesql", "parseutils", "parsexml", "paths", "pathnorm",
+  "pegs", "posix", "random", "rationals", "re", "readline", "rlocks",
+  "ropes", "selectors", "sequtils", "sets", "sha1", "sharedlist",
+  "sharedtables", "smtp", "sockets", "stats", "streams", "streamwrapper",
+  "strformat", "strscans", "strtabs", "strutils", "sugar", "sysrand",
+  "tables", "tempfiles", "terminal", "threadpool", "times", "typeinfo",
+  "typetraits", "unicode", "unittest", "uri", "volatile", "widestrs",
+  "winlean", "wordwrap", "wrapnils", "xmlparser", "xmltree",
+  # system is always available
+  "system",
+].toHashSet()
+
+proc loadDeclaredDeps(): HashSet[string] =
+  ## Read widget.json from cwd and extract dependency names.
+  result = initHashSet[string]()
+  try:
+    let data = parseJson(readFile("widget.json"))
+    let deps = data{"tech_stack", "dependencies"}
+    if deps != nil and deps.kind == JArray:
+      for dep in deps:
+        if dep.kind == JString:
+          # Strip version specifiers: "nimble_pkg>=1.0" -> "nimble_pkg"
+          var bare = dep.getStr()
+          for i, c in bare:
+            if c in {' ', '>', '<', '=', '!', '~', ';', '['}:
+              bare = bare[0 ..< i]
+              break
+          result.incl(bare.strip().toLower())
+  except:
+    discard
+
+let declaredDeps = loadDeclaredDeps()
 
 proc isInCode(line: string): bool =
   ## Returns false if the line is a comment-only line.
@@ -80,41 +146,48 @@ proc scanFile(filename: string): seq[Finding] =
     if code.startsWith("echo ") or code.startsWith("echo(") or code == "echo":
       result.add(Finding(
         file: filename, kind: "echo", line: lineNo,
-        detail: "echo call - remove debug output from src/"))
+        detail: "echo call - remove debug output from src/",
+        severity: "error"))
 
     # quit detection
     if code.startsWith("quit") and (code.len == 4 or code[4] in {'(', ' '}):
       result.add(Finding(
         file: filename, kind: "quit", line: lineNo,
-        detail: "quit() call - widgets must not exit the process"))
+        detail: "quit() call - widgets must not exit the process",
+        severity: "error"))
 
     if "system.quit" in code:
       result.add(Finding(
         file: filename, kind: "quit", line: lineNo,
-        detail: "system.quit() call - widgets must not exit the process"))
+        detail: "system.quit() call - widgets must not exit the process",
+        severity: "error"))
 
     # C FFI pragmas
     if "{.importc" in code:
       result.add(Finding(
         file: filename, kind: "ffi", line: lineNo,
-        detail: "{.importc.} - C FFI makes widgets platform-dependent"))
+        detail: "{.importc.} - C FFI makes widgets platform-dependent",
+        severity: "error"))
 
     if "{.compile" in code:
       result.add(Finding(
         file: filename, kind: "ffi", line: lineNo,
-        detail: "{.compile.} - C FFI makes widgets platform-dependent"))
+        detail: "{.compile.} - C FFI makes widgets platform-dependent",
+        severity: "error"))
 
     # Global mutable state
     if "{.global.}" in code:
       result.add(Finding(
         file: filename, kind: "global", line: lineNo,
-        detail: "{.global.} - widgets must not use global mutable state"))
+        detail: "{.global.} - widgets must not use global mutable state",
+        severity: "error"))
 
     # isMainModule guard
     if "when isMainModule" in code:
       result.add(Finding(
         file: filename, kind: "main_module", line: lineNo,
-        detail: "when isMainModule - widgets are libraries, not executables"))
+        detail: "when isMainModule - widgets are libraries, not executables",
+        severity: "error"))
 
     # OS-specific when defined()
     const osTargets = ["windows", "linux", "macosx", "osx", "posix",
@@ -125,10 +198,11 @@ proc scanFile(filename: string): seq[Finding] =
         if ("defined(" & target) in code.toLower():
           result.add(Finding(
             file: filename, kind: "os_specific", line: lineNo,
-            detail: "OS-specific when defined(" & target & ") - widgets must validate on all platforms"))
+            detail: "OS-specific when defined(" & target & ") - widgets must validate on all platforms",
+            severity: "error"))
           break
 
-    # Risky stdlib imports (future domain restrictions)
+    # Import checks: risky imports (error) + unlisted imports (warning)
     if code.startsWith("import ") or code.startsWith("from "):
       let lower = code.toLower()
       const riskyModules = ["std/os", "std/osproc", "std/httpclient",
@@ -137,7 +211,111 @@ proc scanFile(filename: string): seq[Finding] =
         if m in lower:
           result.add(Finding(
             file: filename, kind: "risky_import", line: lineNo,
-            detail: "import " & m & " - flagged for review"))
+            detail: "import " & m & " - flagged for review",
+            severity: "error"))
+
+      # Unlisted import check - extract module name(s)
+      var importLine = code
+      if importLine.startsWith("from "):
+        # "from module import thing" -> check "module"
+        importLine = importLine[5 .. ^1].strip()
+        let spacePos = importLine.find(" ")
+        if spacePos > 0:
+          importLine = importLine[0 ..< spacePos]
+      elif importLine.startsWith("import "):
+        importLine = importLine[7 .. ^1].strip()
+
+      # Handle comma-separated imports: "import a, b, c"
+      let modules = importLine.split(",")
+      for rawMod in modules:
+        let modName = rawMod.strip().split("/")[^1].strip()  # std/foo -> foo
+        let fullMod = rawMod.strip().toLower()
+        if modName.len > 0 and fullMod notin nimStdlib and modName.toLower() notin nimStdlib:
+          if modName.toLower() notin declaredDeps:
+            result.add(Finding(
+              file: filename, kind: "unlisted_import", line: lineNo,
+              detail: "import " & modName & " - not in widget.json dependencies",
+              severity: "warning"))
+
+    # --- Warning/block-level checks (contamination) ---
+
+    # Absolute paths in strings (block)
+    if "\"/" in rawLine or "\"C:" in rawLine or "\"c:" in rawLine:
+      if rawLine.contains("\"/home/") or rawLine.contains("\"/Users/") or
+         rawLine.contains("\"/root/") or rawLine.contains("\"C:") or
+         rawLine.contains("\"c:"):
+        result.add(Finding(
+          file: filename, kind: "abs_path", line: lineNo,
+          detail: "absolute path in string - widgets must be portable",
+          severity: "block"))
+
+    # Credentials (block in src, warning in tests)
+    let lowerRaw = rawLine.toLower()
+    if ("api_key" in lowerRaw or "secret_key" in lowerRaw or
+        "access_token" in lowerRaw or "auth_token" in lowerRaw or
+        "password" in lowerRaw or "credential" in lowerRaw) and
+       "= \"" in rawLine and rawLine.count("\"") >= 2:
+      let inTests = "/tests/" in filename or "\\tests\\" in filename
+      result.add(Finding(
+        file: filename, kind: "credential", line: lineNo,
+        detail: if inTests: "possible credential in test - verify it's fake"
+                else: "possible credential assignment",
+        severity: if inTests: "warning" else: "block"))
+
+    # Hardcoded URLs (block)
+    if "\"http://" in rawLine or "\"https://" in rawLine:
+      if not ("localhost" in rawLine or "127.0.0.1" in rawLine or
+              "example.com" in rawLine):
+        result.add(Finding(
+          file: filename, kind: "hardcoded_url", line: lineNo,
+          detail: "hardcoded URL in string",
+          severity: "block"))
+
+    # Hardcoded IPs (block)
+    if rawLine.contains(re"\"(\d{1,3}\.){3}\d{1,3}"):
+      result.add(Finding(
+        file: filename, kind: "hardcoded_ip", line: lineNo,
+        detail: "hardcoded IP address in string",
+        severity: "block"))
+
+    # Environment variable access
+    if "getenv(" in code.toLower() or "getEnv(" in code or "envPairs" in code:
+      result.add(Finding(
+        file: filename, kind: "env_var", line: lineNo,
+        detail: "environment variable access - verify it is not project-specific",
+        severity: "warning"))
+
+    # Hardcoded values: let/const with numeric literals
+    if code.startsWith("let ") or code.startsWith("const "):
+      let eqPos = code.find(" = ")
+      if eqPos >= 0:
+        let afterKeyword = code.split(" ", 1)[1].strip()
+        let nameEnd = afterKeyword.find(" ")
+        if nameEnd > 0:
+          let varName = afterKeyword[0 ..< nameEnd].strip(chars = {':', '*'})
+          let valPart = code[eqPos + 3 .. ^1].strip()
+          if varName.len > 0 and valPart.len > 0:
+            var checkVal = valPart
+            if checkVal.startsWith("-"):
+              checkVal = checkVal[1 .. ^1]
+            if checkVal.len > 0 and (checkVal[0].isDigit or checkVal[0] == '.'):
+              var allNumChars = true
+              for c in checkVal:
+                if c notin {'0'..'9', '.', '-', 'e', 'E', '+', '_', '\''}:
+                  allNumChars = false
+                  break
+              if allNumChars:
+                result.add(Finding(
+                  file: filename, kind: "hardcoded_value", line: lineNo,
+                  detail: varName & " = " & valPart & " - consider making this a parameter",
+                  severity: "warning"))
+            # String literal
+            elif valPart.startsWith("\"") and valPart.endsWith("\"") and valPart.len > 2:
+              let strVal = valPart[1 ..< valPart.len - 1]
+              result.add(Finding(
+                file: filename, kind: "hardcoded_value", line: lineNo,
+                detail: varName & " = \"" & strVal[0 ..< min(strVal.len, 60)] & "\" - consider making this a parameter",
+                severity: "warning"))
 
 
 when isMainModule:
@@ -158,7 +336,8 @@ when isMainModule:
         "file": f.file,
         "kind": f.kind,
         "line": f.line,
-        "detail": f.detail
+        "detail": f.detail,
+        "severity": f.severity
       })
 
   echo $allFindings

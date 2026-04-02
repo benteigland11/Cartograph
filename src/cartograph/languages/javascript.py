@@ -192,6 +192,16 @@ class JavaScriptEngine(LanguageEngine):
 
     # ------------------------------------------------------------------ validation
 
+    scanner_warning_messages = {
+        "abs_path": "Absolute paths found in src/ - widgets must be portable:",
+        "credential": "Possible credentials found in src/ - remove before checkin:",
+        "hardcoded_url": "Hardcoded URLs found in src/ - consider making these configurable:",
+        "hardcoded_ip": "Hardcoded IPs found in src/ - consider making these configurable:",
+        "hardcoded_value": "Hardcoded values found in src/ - consider making these configurable:",
+        "env_var": "Environment variable access found in src/ - verify it's not project-specific:",
+        "unlisted_import": "Unlisted imports found in src/ - add to dependencies or remove:",
+    }
+
     def validate_widget(self, path: str, dependencies: list) -> dict:
         """Scan src/ for contamination using native JS scanner."""
         errors = []
@@ -204,19 +214,43 @@ class JavaScriptEngine(LanguageEngine):
                 src_files.extend(_glob.glob(os.path.join(src_dir, "**", ext), recursive=True))
 
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "js_scanner.js")
-        errors.extend(self._run_native_scanner(
+        scan_errors, _, _ = self._run_native_scanner(
             scanner_path=scanner,
             runner=self.scanner_runner,
             src_files=src_files,
             cwd=path,
             finding_messages=self.scanner_messages,
-        ))
+        )
+        errors.extend(scan_errors)
 
         errors.extend(self._check_dep_pinning(dependencies))
 
         if errors:
             return self._fail("\n".join(errors))
         return self._ok()
+
+    def _collect_source_files(self, path: str) -> tuple[list[str], list[str]]:
+        """JS/TS uses multiple extensions."""
+        src_files, test_files = [], []
+        for ext in ("*.js", "*.jsx", "*.ts", "*.tsx"):
+            src_files.extend(_glob.glob(os.path.join(path, "src", "**", ext), recursive=True))
+            test_files.extend(_glob.glob(os.path.join(path, "tests", "**", ext), recursive=True))
+        return src_files, test_files
+
+    def scan_contamination(self, path: str, widget: dict) -> dict:
+        """JS contamination: native scanner on src + test files."""
+        src_files, test_files = self._collect_source_files(path)
+        all_files = src_files + test_files
+        scanner = os.path.join(os.path.dirname(__file__), "scanners", "js_scanner.js")
+        _, scan_warnings, scan_blocks = self._run_native_scanner(
+            scanner_path=scanner,
+            runner=self.scanner_runner,
+            src_files=all_files,
+            cwd=path,
+            finding_messages=self.scanner_messages,
+        )
+
+        return {"blocks": scan_blocks, "warnings": scan_warnings}
 
     # ------------------------------------------------------------------ interface
 

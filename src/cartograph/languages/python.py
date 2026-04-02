@@ -3,9 +3,10 @@
 import ast
 import glob
 import os
+import re
 import sys
 
-from .base import LanguageEngine, log
+from .base import LanguageEngine, _dep_bare_name, log
 
 # Starter file contents for scaffold
 _SRC_INIT = "# Package marker - add explicit exports here once the public API is stable.\n"
@@ -115,6 +116,131 @@ class PythonEngine(LanguageEngine):
             ):
                 lines.append(node.lineno)
         return lines
+
+    _STDLIB = sys.stdlib_module_names
+    _ENVVAR_RE = re.compile(r'os\.getenv\(|os\.environ')
+    _ABS_PATH_RE = re.compile(
+        r'["\'](?:/home/|/Users/|/root/|[A-Za-z]:[/\\\\])[^"\']{3,}["\']'
+    )
+    _CREDENTIAL_RE = re.compile(
+        r'(?:api_key|api_secret|secret_key|access_token|auth_token|password|passwd|credential)\s*=\s*["\'][^"\']{6,}["\']',
+        re.IGNORECASE,
+    )
+    _URL_RE = re.compile(
+        r'["\']https?://(?!(?:localhost|127\.0\.0\.1|(?:[\w-]+\.)*example\.com|schemas?\.))[^"\']{8,}["\']'
+    )
+    _IP_RE = re.compile(r'["\'](?:\d{1,3}\.){3}\d{1,3}(?::\d+)?["\']')
+
+    def scan_contamination(self, path: str, widget: dict) -> dict:
+        """Python contamination: AST-based checks for all contamination concerns."""
+        blocks, warnings = [], []
+
+        deps = widget.get("dependencies", [])
+        dep_names = {_dep_bare_name(d).lower() for d in deps if isinstance(d, str)}
+        own_modules = {"src"}
+        src_dir = os.path.join(path, "src")
+        if os.path.isdir(src_dir):
+            for f in os.listdir(src_dir):
+                if f.endswith(".py"):
+                    own_modules.add(f[:-3])
+
+        src_files = glob.glob(os.path.join(path, "src", "**", "*.py"), recursive=True)
+        test_files = glob.glob(os.path.join(path, "tests", "**", "*.py"), recursive=True)
+
+        for fpath in src_files + test_files:
+            rel = os.path.relpath(fpath, path)
+            is_src = fpath in src_files
+            try:
+                code = open(fpath).read()
+            except Exception:
+                continue
+
+            # Line-level checks (abs paths, credentials, URLs, IPs)
+            for line_no, line in enumerate(code.splitlines(), 1):
+                loc = f"{rel}:{line_no}"
+                if is_src:
+                    if self._ABS_PATH_RE.search(line):
+                        blocks.append(f"Absolute path in {loc}: {line.strip()}")
+                    if self._CREDENTIAL_RE.search(line):
+                        blocks.append(f"Possible credential in {loc}: {line.strip()}")
+                else:
+                    if self._CREDENTIAL_RE.search(line):
+                        warnings.append(f"Possible credential in test {loc} - verify it's fake: {line.strip()}")
+
+            for m in self._URL_RE.finditer(code):
+                line_no = code[:m.start()].count("\n") + 1
+                blocks.append(f"Hardcoded URL in {rel}:{line_no}: {m.group()}")
+
+            for m in self._IP_RE.finditer(code):
+                line_no = code[:m.start()].count("\n") + 1
+                blocks.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
+
+            # AST-based checks (src/ only)
+            if not is_src:
+                continue
+
+            try:
+                tree = ast.parse(code)
+            except Exception:
+                continue
+
+            # Unlisted imports
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        top = alias.name.split(".")[0].lower()
+                        if top and top not in self._STDLIB and top not in dep_names and top not in own_modules:
+                            warnings.append(
+                                f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
+                            )
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    top = node.module.split(".")[0].lower()
+                    if top and top not in self._STDLIB and top not in dep_names and top not in own_modules:
+                        warnings.append(
+                            f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
+                        )
+
+            # Hardcoded values
+            for node in ast.iter_child_nodes(tree):
+                if isinstance(node, ast.Assign):
+                    warnings.extend(self._check_assign_targets(node.targets, node.value, node.lineno, rel))
+                elif isinstance(node, ast.ClassDef):
+                    for child in ast.iter_child_nodes(node):
+                        if isinstance(child, ast.Assign):
+                            warnings.extend(self._check_assign_targets(child.targets, child.value, child.lineno, rel))
+
+            # os.environ/getenv
+            for m in self._ENVVAR_RE.finditer(code):
+                line_no = code[:m.start()].count("\n") + 1
+                warnings.append(f"os.environ/getenv call in {rel}:{line_no} - verify it's not project-specific")
+
+        return {"blocks": blocks, "warnings": warnings}
+
+    def _check_assign_targets(self, targets, value, lineno, rel="") -> list[str]:
+        """Check if an assignment's value is a hardcoded constant."""
+        results = []
+        names = []
+        for t in targets:
+            if isinstance(t, ast.Name):
+                names.append(t.id)
+        if not names:
+            return results
+
+        name = names[0]
+
+        if isinstance(value, ast.Constant):
+            val = value.value
+            if isinstance(val, (int, float)):
+                results.append(f"Hardcoded value in {rel}:{lineno}: {name} = {val} - consider making this a parameter")
+            elif isinstance(val, str) and len(val) > 0:
+                results.append(f"Hardcoded value in {rel}:{lineno}: {name} = \"{val[:60]}\" - consider making this a parameter")
+        elif isinstance(value, ast.UnaryOp) and isinstance(value.op, ast.USub):
+            if isinstance(value.operand, ast.Constant):
+                val = -value.operand.value
+                if isinstance(val, (int, float)):
+                    results.append(f"Hardcoded value in {rel}:{lineno}: {name} = {val} - consider making this a parameter")
+
+        return results
 
     def scaffold(self, target_dir, module_name, display_name, **_):
         with open(os.path.join(target_dir, "src", "__init__.py"), "w") as f:

@@ -44,6 +44,7 @@ import sys
 
 log = logging.getLogger("cartograph")
 
+
 # Compiled once at module level — used by _dep_bare_name and _check_dep_pinning.
 _DEP_SPLIT_RE = re.compile(r'[><=!~;\[]')
 _PIN_RE = re.compile(r'[><=!~]|\d')
@@ -72,7 +73,8 @@ class LanguageEngine:
     example_command: list = []       # e.g. ["lua"] - example file path is appended
     dep_install_command: list = []   # e.g. ["luarocks", "install"] - dep name is appended
     scanner_runner: list = []        # e.g. ["lua"] - runs scanners/<name>_scanner.<ext>
-    scanner_messages: dict = {}      # {finding_kind: "human-readable header"}
+    scanner_messages: dict = {}      # {finding_kind: "human-readable header"} - errors (block checkin)
+    scanner_warning_messages: dict = {}  # {finding_kind: "human-readable header"} - warnings (don't block)
     import_pattern: str = ""         # regex for "does example import from src?"
     manifest_patterns: list = []     # e.g. ["*.rockspec"] - added to watched_patterns
 
@@ -98,6 +100,7 @@ class LanguageEngine:
     def validate_widget(self, path: str, dependencies: list) -> dict:
         """Source scanning + dep pinning check. Override to add custom steps."""
         errors = []
+        warnings = []
 
         # Run native scanner if configured
         if self.file_ext and self.scanner_runner:
@@ -109,19 +112,103 @@ class LanguageEngine:
                 os.path.dirname(__file__), "scanners",
                 f"{self.name}_scanner.{self.file_ext}"
             )
-            errors.extend(self._run_native_scanner(
+            scan_errors, _, _ = self._run_native_scanner(
                 scanner_path=scanner,
                 runner=self.scanner_runner,
                 src_files=src_files,
                 cwd=path,
                 finding_messages=self.scanner_messages,
-            ))
+            )
+            errors.extend(scan_errors)
+            warnings.extend(scan_warnings)
 
         errors.extend(self._check_dep_pinning(dependencies))
 
         if errors:
-            return self._fail("\n".join(errors))
-        return self._ok()
+            result = self._fail("\n".join(errors))
+        else:
+            result = self._ok()
+        if warnings:
+            result["warnings"] = warnings
+        return result
+
+    def scan_contamination(self, path: str, widget: dict) -> dict:
+        """Scan for contamination. Override to implement language-specific checks.
+
+        Each language engine must implement detection for the following using
+        native tooling (AST, native scanners) that understands the language's
+        strings, comments, and code constructs.
+
+        Required checks (blocks - hard failures, no override):
+          1. Absolute paths    - /home/, /Users/, /root/, C:\\ in string literals
+          2. Credentials       - api_key/secret/token/password assignments in src/
+                                 (in tests/, emit as warning instead)
+          3. Hardcoded URLs    - http(s):// URLs (except localhost, example.com)
+          4. Hardcoded IPs     - IP addresses in string literals
+
+        Required checks (warnings - overridable with --override-warnings):
+          5. Hardcoded values  - numeric and string constant assignments
+          6. Env var access    - language-specific env var APIs
+          7. Unlisted imports  - imports not in widget.json dependencies or stdlib
+
+        Both src/ and tests/ files must be scanned. Credentials in tests/ are
+        warnings (verify they're fake), not blocks.
+
+        Returns {"blocks": [...], "warnings": [...]}.
+        See python.py, javascript.py, nim.py for reference implementations.
+
+        The base class provides a regex fallback that covers checks 1-5.
+        It is not language-aware (cannot distinguish strings from comments),
+        but ensures a bare minimum for engines that lack a native scanner.
+        Override with native tooling for accurate detection.
+        """
+        blocks, warnings = [], []
+        src_files, test_files = self._collect_source_files(path)
+
+        abs_path_re = re.compile(r'["\'](?:/home/|/Users/|/root/|[A-Za-z]:[/\\\\])[^"\']{3,}["\']')
+        credential_re = re.compile(
+            r'(?:api_key|api_secret|secret_key|access_token|auth_token|password|passwd|credential)\s*=\s*["\'][^"\']{6,}["\']',
+            re.IGNORECASE,
+        )
+        url_re = re.compile(
+            r'["\']https?://(?!(?:localhost|127\.0\.0\.1|(?:[\w-]+\.)*example\.com|schemas?\.))[^"\']{8,}["\']'
+        )
+        ip_re = re.compile(r'["\'](?:\d{1,3}\.){3}\d{1,3}(?::\d+)?["\']')
+        number_re = re.compile(r'^\s*\w+\s*=\s*-?\d+\.?\d*(?:e[+-]?\d+)?\s*$', re.IGNORECASE)
+
+        for fpath in src_files + test_files:
+            rel = os.path.relpath(fpath, path)
+            is_src = fpath in src_files
+            try:
+                code = open(fpath).read()
+            except Exception:
+                continue
+
+            for line_no, line in enumerate(code.splitlines(), 1):
+                loc = f"{rel}:{line_no}"
+                if is_src:
+                    if abs_path_re.search(line):
+                        blocks.append(f"Absolute path in {loc}: {line.strip()}")
+                    if credential_re.search(line):
+                        blocks.append(f"Possible credential in {loc}: {line.strip()}")
+                    if url_re.search(line):
+                        blocks.append(f"Hardcoded URL in {loc}: {line.strip()}")
+                    if ip_re.search(line):
+                        blocks.append(f"Hardcoded IP in {loc}: {line.strip()}")
+                    if number_re.match(line):
+                        warnings.append(f"Hardcoded value in {loc}: {line.strip()} - consider making this a parameter")
+                else:
+                    if credential_re.search(line):
+                        warnings.append(f"Possible credential in test {loc} - verify it's fake: {line.strip()}")
+
+        return {"blocks": blocks, "warnings": warnings}
+
+    def _collect_source_files(self, path: str) -> tuple[list[str], list[str]]:
+        """Return (src_files, test_files) for this language. Override for multi-ext languages."""
+        ext = self.file_ext or "*"
+        src_files = _glob.glob(os.path.join(path, "src", "**", f"*.{ext}"), recursive=True)
+        test_files = _glob.glob(os.path.join(path, "tests", "**", f"*.{ext}"), recursive=True)
+        return src_files, test_files
 
     def install_deps(self, path: str, dependencies: list) -> None:
         """Install dependencies required to run tests. Best-effort."""
@@ -204,20 +291,23 @@ class LanguageEngine:
 
     def _run_native_scanner(self, scanner_path: str, runner: list,
                             src_files: list, cwd: str,
-                            finding_messages: dict = None) -> list[str]:
+                            finding_messages: dict = None,
+                            warning_messages: dict = None) -> tuple[list[str], list[str], list[str]]:
         """
-        Run a native language scanner and return a list of formatted error strings.
+        Run a native language scanner and return (errors, warnings, blocks).
 
         scanner_path: absolute path to the scanner source file
         runner: command prefix to execute it, e.g. ["node"] or ["nim", "r", "--hints:off"]
         src_files: list of source files to scan
-        finding_messages: dict mapping finding kind -> human-readable header
+        finding_messages: dict mapping finding kind -> human-readable header (errors)
+        warning_messages: dict mapping finding kind -> human-readable header (warnings)
 
         The scanner must output a JSON array of objects with keys:
-          kind, file, line, detail
+          kind, file, line, detail, [severity]
+        Severity values: "error" (default), "warning", "block".
         """
         if not src_files or not os.path.exists(scanner_path):
-            return []
+            return [], [], []
 
         res = self._run(
             runner + [scanner_path] + src_files,
@@ -234,21 +324,45 @@ class LanguageEngine:
                 pass
 
         if not findings:
-            return []
+            return [], [], []
 
         finding_messages = finding_messages or {}
-        grouped: dict[str, list[str]] = {}
+        warning_messages = warning_messages or self.scanner_warning_messages or {}
+        warning_kinds = set(warning_messages.keys())
+
+        error_grouped: dict[str, list[str]] = {}
+        warn_grouped: dict[str, list[str]] = {}
+        block_grouped: dict[str, list[str]] = {}
         for f in findings:
             kind = f.get("kind", "unknown")
+            severity = f.get("severity", "error")
             rel = os.path.relpath(f.get("file", ""), cwd)
             loc = f"  {rel}:{f.get('line', 0)}: {f.get('detail', '')}"
-            grouped.setdefault(kind, []).append(loc)
+            if severity == "block":
+                block_grouped.setdefault(kind, []).append(loc)
+            elif severity == "warning" or kind in warning_kinds:
+                warn_grouped.setdefault(kind, []).append(loc)
+            else:
+                error_grouped.setdefault(kind, []).append(loc)
+
+        all_messages = {**finding_messages, **warning_messages}
 
         errors = []
-        for kind, violations in grouped.items():
-            header = finding_messages.get(kind, f"{kind} found in src/:")
+        for kind, violations in error_grouped.items():
+            header = all_messages.get(kind, f"{kind} found in src/:")
             errors.append(header + "\n" + "\n".join(violations))
-        return errors
+
+        warnings = []
+        for kind, violations in warn_grouped.items():
+            header = all_messages.get(kind, f"{kind} found in src/:")
+            warnings.append(header + "\n" + "\n".join(violations))
+
+        blocks = []
+        for kind, violations in block_grouped.items():
+            header = all_messages.get(kind, f"{kind} found in src/:")
+            blocks.append(header + "\n" + "\n".join(violations))
+
+        return errors, warnings, blocks
 
     def _run(self, cmd: list, cwd: str, timeout: int = 60,
              env: dict = None) -> subprocess.CompletedProcess:

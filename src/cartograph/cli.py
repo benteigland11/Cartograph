@@ -281,6 +281,12 @@ def cmd_validate(args):
     result = _carto().validate_item(path=path)
     if result.get("status") == "error":
         err(result)
+    if result.get("warnings"):
+        import sys as _sys
+        print("\nWarnings:", file=_sys.stderr)
+        for w in result["warnings"]:
+            print(f"  {w}", file=_sys.stderr)
+        print("", file=_sys.stderr)
     out(result)
 
 
@@ -600,8 +606,8 @@ def cmd_cloud_publish(args):
             err(validate_result)
 
     # Contamination scan — same gate as checkin
-    from .checkin import _scan_contamination
-    scan = _scan_contamination(path, tech_stack)
+    from .contamination import scan_contamination
+    scan = scan_contamination(path)
 
     if scan["blocks"]:
         err({

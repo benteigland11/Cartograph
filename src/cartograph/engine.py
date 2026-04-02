@@ -109,11 +109,12 @@ def normalize_widget_id(widget_id: str) -> str:
 def python_dir_name(widget_id: str) -> str:
     """Return the filesystem directory name for a widget.
 
-    Python widgets get underscores so the directory is importable.
+    Python and Nim widgets get underscores so the directory is importable
+    (both languages cannot handle hyphens in import paths).
     Other languages keep the canonical hyphenated ID.
     """
     canonical = normalize_widget_id(widget_id)
-    if canonical.endswith("-python"):
+    if canonical.endswith("-python") or canonical.endswith("-nim"):
         return canonical.replace("-", "_")
     return canonical
 
