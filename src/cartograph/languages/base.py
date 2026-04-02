@@ -112,7 +112,7 @@ class LanguageEngine:
                 os.path.dirname(__file__), "scanners",
                 f"{self.name}_scanner.{self.file_ext}"
             )
-            scan_errors, _, _ = self._run_native_scanner(
+            scan_errors, scan_warnings, _ = self._run_native_scanner(
                 scanner_path=scanner,
                 runner=self.scanner_runner,
                 src_files=src_files,
@@ -145,11 +145,13 @@ class LanguageEngine:
                                  (in tests/, emit as warning instead)
           3. Hardcoded URLs    - http(s):// URLs (except localhost, example.com)
           4. Hardcoded IPs     - IP addresses in string literals
+          5. Sleep/blocking    - sleep calls in src/ (widgets must not block the caller)
+                                 (in tests/examples, warn if duration > 1 second)
 
         Required checks (warnings - overridable with --override-warnings):
-          5. Hardcoded values  - numeric and string constant assignments
-          6. Env var access    - language-specific env var APIs
-          7. Unlisted imports  - imports not in widget.json dependencies or stdlib
+          6. Hardcoded values  - numeric and string constant assignments
+          7. Env var access    - language-specific env var APIs
+          8. Unlisted imports  - imports not in widget.json dependencies or stdlib
 
         Both src/ and tests/ files must be scanned. Credentials in tests/ are
         warnings (verify they're fake), not blocks.
@@ -157,9 +159,11 @@ class LanguageEngine:
         Returns {"blocks": [...], "warnings": [...]}.
         See python.py, javascript.py, nim.py for reference implementations.
 
-        The base class provides a regex fallback that covers checks 1-5.
-        It is not language-aware (cannot distinguish strings from comments),
-        but ensures a bare minimum for engines that lack a native scanner.
+        The base class provides a regex fallback that covers checks 1-4.
+        Check 5 (sleep/blocking) REQUIRES language-native tooling - sleep calls
+        cannot be reliably detected with regex because language-specific call
+        syntax must be understood (e.g. time.sleep vs a variable named sleep_timer).
+        Each engine must implement sleep detection natively.
         Override with native tooling for accurate detection.
         """
         blocks, warnings = [], []

@@ -1,0 +1,675 @@
+"""
+Tests for the contamination and validation pipeline.
+
+This is the most critical gate in widget quality. Every check that can block
+or warn during checkin must be tested here.
+
+Structure:
+  1. Base capability tests - parameterized across all engines. These verify
+     the 8 required contamination checks defined in base.py. If a language
+     can't pass these, it doesn't ship.
+
+  2. Language-specific tests - checks unique to each engine's validate_widget
+     (print detection, echo detection, console.log, etc.).
+
+  3. Shared validation tests - dep pinning, orchestrator delegation, base
+     class regex fallback.
+"""
+import json
+import os
+import shutil
+
+import pytest
+
+from cartograph.languages.python import PythonEngine
+from cartograph.languages.javascript import JavaScriptEngine
+from cartograph.languages.nim import NimEngine
+from cartograph.languages.base import LanguageEngine
+from cartograph.contamination import scan_contamination
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _write(path, content):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(content)
+
+
+def _make_widget(tmp_path, language, src_filename, src_code,
+                 test_code="", dependencies=None):
+    """Create a minimal widget dir with the given source and return its path."""
+    wdir = str(tmp_path)
+    manifest = {
+        "meta": {"id": "test-widget", "name": "Test Widget",
+                 "version": "1.0.0", "tags": ["test"], "domain": "backend"},
+        "description": "Test widget for contamination checks.",
+        "tech_stack": {
+            "language": language,
+            "dependencies": dependencies or [],
+        },
+    }
+    _write(os.path.join(wdir, "widget.json"), json.dumps(manifest, indent=2))
+    _write(os.path.join(wdir, "src", src_filename), src_code)
+    if language == "python":
+        _write(os.path.join(wdir, "src", "__init__.py"), "")
+    if test_code:
+        test_name = "test_" + src_filename
+        _write(os.path.join(wdir, "tests", test_name), test_code)
+    return wdir
+
+
+# ---------------------------------------------------------------------------
+# Per-language scan helpers
+# ---------------------------------------------------------------------------
+
+def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None):
+    """Run scan_contamination for a given language engine."""
+    engines = {
+        "python": PythonEngine,
+        "javascript": JavaScriptEngine,
+        "nim": NimEngine,
+    }
+    wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
+                        test_code, dependencies)
+    engine = engines[language]()
+    tech_stack = {"language": language, "dependencies": dependencies or []}
+    return engine.scan_contamination(wdir, tech_stack)
+
+
+# ---------------------------------------------------------------------------
+# Test data: per-language source snippets for each contamination check
+#
+# Each entry: (src_code, test_code_or_None, dependencies_or_None)
+# src_code is planted in src/, test_code in tests/ if provided.
+# ---------------------------------------------------------------------------
+
+# Noop source per language (clean code that triggers nothing)
+CLEAN = {
+    "python":     ("def hello():\n    return 'world'\n", "", None),
+    "javascript": ("function hello() { return 'world' }\n", "", None),
+    "nim":        ("proc hello*(): string =\n  \"world\"\n", "", None),
+}
+
+# Check 1: Absolute paths in src/ -> block
+ABS_PATH_SRC = {
+    "python":     'LOG = "/home/user/logs/app.log"\n',
+    "javascript": "const LOG = '/home/user/logs/app.log'\n",
+    "nim":        'let logDir = "/home/user/logs/app"\n',
+}
+
+# Check 2: Credentials in src/ -> block
+CREDENTIAL_SRC = {
+    "python":     'api_key = "sk-abc123verylongkey"\n',
+    "javascript": "const api_key = 'sk-abc123verylongkey'\n",
+    "nim":        'let api_key = "sk-abc123verylongkey"\n',
+}
+
+# Check 2b: Credentials in tests/ -> warning (not block)
+CREDENTIAL_TEST = {
+    "python":     'password = "fake_test_password_123"\n',
+    "javascript": "const password = 'fake_test_password_123'\n",
+    "nim":        'let password = "fake_test_password_123"\n',
+}
+
+# Check 3: Hardcoded URLs -> block
+URL_SRC = {
+    "python":     'API = "https://api.mycompany.com/v1"\n',
+    "javascript": "const API = 'https://api.mycompany.com/v1'\n",
+    "nim":        'let api = "https://api.mycompany.com/v1"\n',
+}
+
+# Check 3b: localhost/example.com URLs -> allowed
+URL_ALLOWED = {
+    "python":     'API = "http://localhost:8080/api"\n',
+    "javascript": "const API = 'http://localhost:8080/api'\n",
+    "nim":        'let api = "http://localhost:8080/api"\n',
+}
+
+# Check 4: Hardcoded IPs -> block
+IP_SRC = {
+    "python":     'HOST = "192.168.1.100"\n',
+    "javascript": "const HOST = '192.168.1.100'\n",
+    "nim":        'let host = "192.168.1.100"\n',
+}
+
+# Check 5: Sleep in src/ -> block
+SLEEP_SRC = {
+    "python":     "import time\ntime.sleep(1)\n",
+    "javascript": "setTimeout(() => {}, 1000)\n",
+    "nim":        "sleep(1000)\n",
+}
+
+# Check 5b: Sleep in tests/ with small duration -> no warning
+SLEEP_TEST_SMALL = {
+    "python":     "import time\ntime.sleep(0.5)\n",
+    "javascript": "setTimeout(() => {}, 500)\n",
+    "nim":        "sleep(500)\n",
+}
+
+# Check 5c: Sleep in tests/ with large duration -> warning
+SLEEP_TEST_LARGE = {
+    "python":     "import time\ntime.sleep(5)\n",
+    "javascript": "setTimeout(() => {}, 5000)\n",
+    "nim":        "sleep(5000)\n",
+}
+
+# Check 6: Hardcoded values -> warning
+HARDCODED_VALUE = {
+    "python":     "TIMEOUT = 30\n",
+    "javascript": "const TIMEOUT = 30\n",
+    "nim":        "let timeout = 30\n",
+}
+
+# Check 7: Env var access -> warning
+ENV_VAR = {
+    "python":     "import os\nv = os.getenv('KEY')\n",
+    "javascript": "const v = process.env.KEY\n",
+    "nim":        'let v = getEnv("KEY")\n',
+}
+
+# Check 8: Unlisted imports -> warning
+UNLISTED_IMPORT = {
+    "python":     "import requests\n",
+    "javascript": "const axios = require('axios')\n",
+    "nim":        "import somepkg\n",
+}
+
+# Check 8b: Listed imports -> no warning
+LISTED_IMPORT = {
+    "python":     ("import requests\n", ["requests>=2.0.0"]),
+    "javascript": ("const axios = require('axios')\n", ["axios>=1.0.0"]),
+    "nim":        ("import somepkg\n", ["somepkg>=1.0.0"]),
+}
+
+# Check 8c: Stdlib imports -> no warning
+STDLIB_IMPORT = {
+    "python":     "import json\n",
+    "javascript": "const path = require('path')\n",
+    "nim":        "import std/json\n",
+}
+
+# File extensions per language
+EXT = {"python": "py", "javascript": "js", "nim": "nim"}
+
+# Which languages need external tools to run their scanners
+NEEDS_TOOL = {"javascript": "node", "nim": "nim"}
+
+
+# ---------------------------------------------------------------------------
+# 1. BASE CAPABILITY TESTS - parameterized across all languages
+# ---------------------------------------------------------------------------
+
+LANGUAGES = ["python", "javascript", "nim"]
+
+
+def _skip_if_missing(lang):
+    """Skip test if the language's external tool is not installed."""
+    tool = NEEDS_TOOL.get(lang)
+    if tool and not shutil.which(tool):
+        pytest.skip(f"{tool} not installed")
+
+
+class TestContaminationStandard:
+    """Every language engine must pass all 8 contamination checks.
+
+    These tests are the contract defined in base.py's scan_contamination
+    docstring. A new language engine is not ready until it passes all of these.
+    """
+
+    # -- Clean code --
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_clean_code_no_findings(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        src, test, deps = CLEAN[lang]
+        result = _scan(tmp_path, lang, EXT[lang], src, test, deps)
+        assert result["blocks"] == [], f"{lang}: unexpected blocks: {result['blocks']}"
+        assert result["warnings"] == [], f"{lang}: unexpected warnings: {result['warnings']}"
+
+    # -- Check 1: Absolute paths -> block --
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_absolute_path_blocks(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], ABS_PATH_SRC[lang])
+        assert any("path" in b.lower() for b in result["blocks"]), \
+            f"{lang}: absolute path not blocked: {result}"
+
+    # -- Check 2: Credentials -> block in src, warn in tests --
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_credential_in_src_blocks(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], CREDENTIAL_SRC[lang])
+        assert any("credential" in b.lower() for b in result["blocks"]), \
+            f"{lang}: credential not blocked: {result}"
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_credential_in_tests_warns_not_blocks(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        clean_src = CLEAN[lang][0]
+        result = _scan(tmp_path, lang, EXT[lang], clean_src,
+                        test_code=CREDENTIAL_TEST[lang])
+        assert not any("credential" in b.lower() for b in result["blocks"]), \
+            f"{lang}: test credential should not block: {result['blocks']}"
+        assert any("credential" in w.lower() for w in result["warnings"]), \
+            f"{lang}: test credential should warn: {result['warnings']}"
+
+    # -- Check 3: Hardcoded URLs -> block --
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_hardcoded_url_blocks(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], URL_SRC[lang])
+        assert any("url" in b.lower() for b in result["blocks"]), \
+            f"{lang}: hardcoded URL not blocked: {result}"
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_localhost_url_allowed(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], URL_ALLOWED[lang])
+        assert not any("url" in b.lower() for b in result["blocks"]), \
+            f"{lang}: localhost URL should not block: {result['blocks']}"
+
+    # -- Check 4: Hardcoded IPs -> block --
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_hardcoded_ip_blocks(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], IP_SRC[lang])
+        assert any("ip" in b.lower() for b in result["blocks"]), \
+            f"{lang}: hardcoded IP not blocked: {result}"
+
+    # -- Check 5: Sleep/blocking -> block in src, conditional warn in tests --
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_sleep_in_src_blocks(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], SLEEP_SRC[lang])
+        assert any("sleep" in b.lower() for b in result["blocks"]), \
+            f"{lang}: sleep not blocked in src: {result}"
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_sleep_in_tests_small_no_warning(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        clean_src = CLEAN[lang][0]
+        result = _scan(tmp_path, lang, EXT[lang], clean_src,
+                        test_code=SLEEP_TEST_SMALL[lang])
+        assert not any("sleep" in w.lower() for w in result["warnings"]), \
+            f"{lang}: small sleep should not warn: {result['warnings']}"
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_sleep_in_tests_large_warns(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        clean_src = CLEAN[lang][0]
+        result = _scan(tmp_path, lang, EXT[lang], clean_src,
+                        test_code=SLEEP_TEST_LARGE[lang])
+        assert any("sleep" in w.lower() for w in result["warnings"]), \
+            f"{lang}: large sleep should warn: {result['warnings']}"
+
+    # -- Check 6: Hardcoded values -> warning --
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_hardcoded_value_warns(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], HARDCODED_VALUE[lang])
+        assert any("hardcoded" in w.lower() for w in result["warnings"]), \
+            f"{lang}: hardcoded value should warn: {result['warnings']}"
+
+    # -- Check 7: Env var access -> warning --
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_env_var_warns(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], ENV_VAR[lang])
+        assert any("env" in w.lower() for w in result["warnings"]), \
+            f"{lang}: env var should warn: {result['warnings']}"
+
+    # -- Check 8: Unlisted imports -> warning --
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_unlisted_import_warns(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], UNLISTED_IMPORT[lang])
+        assert any("unlisted" in w.lower() or "import" in w.lower()
+                    for w in result["warnings"]), \
+            f"{lang}: unlisted import should warn: {result['warnings']}"
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_listed_import_no_warning(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        src, deps = LISTED_IMPORT[lang]
+        result = _scan(tmp_path, lang, EXT[lang], src, dependencies=deps)
+        assert not any("unlisted" in w.lower() for w in result["warnings"]), \
+            f"{lang}: listed import should not warn: {result['warnings']}"
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_stdlib_import_no_warning(self, tmp_path, lang):
+        _skip_if_missing(lang)
+        result = _scan(tmp_path, lang, EXT[lang], STDLIB_IMPORT[lang])
+        assert not any("unlisted" in w.lower() for w in result["warnings"]), \
+            f"{lang}: stdlib import should not warn: {result['warnings']}"
+
+
+# ---------------------------------------------------------------------------
+# 2. LANGUAGE-SPECIFIC TESTS - checks unique to each engine
+# ---------------------------------------------------------------------------
+
+class TestPythonSpecific:
+    """Python-only validation and contamination checks."""
+
+    # -- validate_widget --
+
+    def test_print_in_src_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "python", "mod.py", "print('debug')\n")
+        result = PythonEngine().validate_widget(wdir, [])
+        assert result["passed"] is False
+        assert "print()" in result["error"]
+
+    def test_missing_init_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "python", "mod.py", "def f(): pass\n")
+        os.remove(os.path.join(wdir, "src", "__init__.py"))
+        result = PythonEngine().validate_widget(wdir, [])
+        assert result["passed"] is False
+        assert "__init__.py" in result["error"]
+
+    def test_clean_passes(self, tmp_path):
+        wdir = _make_widget(tmp_path, "python", "mod.py", "def f(): pass\n")
+        result = PythonEngine().validate_widget(wdir, [])
+        assert result["passed"] is True
+
+    # -- contamination extras --
+
+    def test_asyncio_sleep_in_src_blocks(self, tmp_path):
+        result = _scan(tmp_path, "python", "py",
+                        "import asyncio\nasync def f():\n    await asyncio.sleep(1)\n")
+        assert any("sleep" in b.lower() for b in result["blocks"])
+
+    def test_from_import_sleep_in_src_blocks(self, tmp_path):
+        result = _scan(tmp_path, "python", "py",
+                        "from time import sleep\nsleep(5)\n")
+        assert any("sleep" in b.lower() for b in result["blocks"])
+
+    def test_from_import_sleep_aliased_blocks(self, tmp_path):
+        result = _scan(tmp_path, "python", "py",
+                        "from time import sleep as nap\nnap(5)\n")
+        assert any("sleep" in b.lower() for b in result["blocks"])
+
+    def test_from_import_sleep_in_tests_large_warns(self, tmp_path):
+        result = _scan(tmp_path, "python", "py",
+                        "def f(): pass\n",
+                        test_code="from time import sleep\nsleep(5)\n")
+        assert any("sleep" in w.lower() for w in result["warnings"])
+
+    def test_absolute_path_windows_blocks(self, tmp_path):
+        result = _scan(tmp_path, "python", "py",
+                        'LOG = "C:\\\\Users\\\\dev\\\\logs"\n')
+        assert any("path" in b.lower() for b in result["blocks"])
+
+    def test_absolute_path_root_blocks(self, tmp_path):
+        result = _scan(tmp_path, "python", "py",
+                        'CFG = "/root/.config/myapp"\n')
+        assert any("path" in b.lower() for b in result["blocks"])
+
+    def test_ip_with_port_blocks(self, tmp_path):
+        result = _scan(tmp_path, "python", "py", 'HOST = "10.0.0.5:8080"\n')
+        assert any("IP" in b for b in result["blocks"])
+
+    def test_example_com_url_allowed(self, tmp_path):
+        result = _scan(tmp_path, "python", "py",
+                        'API = "https://example.com/test"\n')
+        assert not any("URL" in b for b in result["blocks"])
+
+    def test_os_environ_warns(self, tmp_path):
+        result = _scan(tmp_path, "python", "py",
+                        "import os\nv = os.environ['KEY']\n")
+        assert any("environ" in w for w in result["warnings"])
+
+    def test_hardcoded_string_warns(self, tmp_path):
+        result = _scan(tmp_path, "python", "py", 'MODEL = "gpt-4"\n')
+        assert any("Hardcoded value" in w for w in result["warnings"])
+
+    def test_password_in_src_blocks(self, tmp_path):
+        result = _scan(tmp_path, "python", "py",
+                        'password = "supersecretpassword"\n')
+        assert any("credential" in b.lower() for b in result["blocks"])
+
+
+class TestJSSpecific:
+    """JavaScript-only validation and contamination checks."""
+
+    @pytest.fixture(autouse=True)
+    def _require_node(self):
+        if not shutil.which("node"):
+            pytest.skip("Node.js not installed")
+
+    # -- validate_widget --
+
+    def test_console_log_in_src_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "javascript", "mod.js",
+                            "console.log('debug')\n")
+        result = JavaScriptEngine().validate_widget(wdir, [])
+        assert result["passed"] is False
+        assert "console" in result["error"].lower()
+
+    def test_process_exit_in_src_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "javascript", "mod.js",
+                            "process.exit(1)\n")
+        result = JavaScriptEngine().validate_widget(wdir, [])
+        assert result["passed"] is False
+        assert "process.exit" in result["error"]
+
+    def test_eval_in_src_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "javascript", "mod.js",
+                            "eval('alert(1)')\n")
+        result = JavaScriptEngine().validate_widget(wdir, [])
+        assert result["passed"] is False
+        assert "eval" in result["error"].lower()
+
+    def test_clean_passes(self, tmp_path):
+        wdir = _make_widget(tmp_path, "javascript", "mod.js",
+                            "function hello() { return 1 }\n")
+        result = JavaScriptEngine().validate_widget(wdir, [])
+        assert result["passed"] is True
+
+    # -- contamination extras --
+
+    def test_setinterval_in_src_blocks(self, tmp_path):
+        result = _scan(tmp_path, "javascript", "js",
+                        "setInterval(() => {}, 1000)\n")
+        assert any("sleep" in b.lower() or "setInterval" in b
+                    for b in result["blocks"])
+
+    def test_builtin_import_no_warning(self, tmp_path):
+        result = _scan(tmp_path, "javascript", "js",
+                        "const path = require('path')\n")
+        assert not any("unlisted" in w.lower() for w in result["warnings"])
+
+
+class TestNimSpecific:
+    """Nim-only validation and contamination checks."""
+
+    @pytest.fixture(autouse=True)
+    def _require_nim(self):
+        if not shutil.which("nim"):
+            pytest.skip("Nim not installed")
+
+    # -- validate_widget (nim check + compile check + scanner errors) --
+
+    def test_echo_in_src_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "nim", "mod.nim",
+                            'echo "debug"\n')
+        engine = NimEngine()
+        result = engine.validate_widget(wdir, [])
+        assert result["passed"] is False
+        assert "echo" in result["error"].lower()
+
+    def test_quit_in_src_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "nim", "mod.nim", "quit(1)\n")
+        engine = NimEngine()
+        result = engine.validate_widget(wdir, [])
+        assert result["passed"] is False
+        assert "quit" in result["error"].lower()
+
+    def test_when_is_main_module_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "nim", "mod.nim",
+                            'proc f() = discard\nwhen isMainModule:\n  f()\n')
+        engine = NimEngine()
+        result = engine.validate_widget(wdir, [])
+        assert result["passed"] is False
+        assert "isMainModule" in result["error"] or "main_module" in result["error"].lower()
+
+    def test_clean_passes(self, tmp_path):
+        wdir = _make_widget(tmp_path, "nim", "mod.nim",
+                            "proc hello*(): string =\n  \"world\"\n")
+        engine = NimEngine()
+        result = engine.validate_widget(wdir, [])
+        assert result["passed"] is True
+
+    # -- contamination extras --
+
+    def test_sleep_async_in_src_blocks(self, tmp_path):
+        result = _scan(tmp_path, "nim", "nim",
+                        "import std/asyncdispatch\nsleepAsync(1000)\n")
+        assert any("sleep" in b.lower() for b in result["blocks"])
+
+    def test_global_pragma_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "nim", "mod.nim",
+                            'var x {.global.} = 0\n')
+        engine = NimEngine()
+        result = engine.validate_widget(wdir, [])
+        assert result["passed"] is False
+
+    def test_os_specific_when_defined_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "nim", "mod.nim",
+                            'when defined(windows):\n  discard\n')
+        engine = NimEngine()
+        result = engine.validate_widget(wdir, [])
+        assert result["passed"] is False
+
+
+# ---------------------------------------------------------------------------
+# 3. SHARED VALIDATION TESTS
+# ---------------------------------------------------------------------------
+
+class TestDepPinning:
+    """_check_dep_pinning is shared across all engines."""
+
+    @pytest.mark.parametrize("lang,engine_cls", [
+        ("python", PythonEngine),
+        ("javascript", JavaScriptEngine),
+        ("nim", NimEngine),
+    ])
+    def test_unpinned_dep_fails(self, tmp_path, lang, engine_cls):
+        if lang in NEEDS_TOOL:
+            _skip_if_missing(lang)
+        wdir = _make_widget(tmp_path, lang, f"mod.{EXT[lang]}",
+                            CLEAN[lang][0])
+        result = engine_cls().validate_widget(wdir, ["somelib"])
+        assert result["passed"] is False
+        assert "version pin" in result["error"] or "version" in result["error"].lower()
+
+    @pytest.mark.parametrize("lang,engine_cls", [
+        ("python", PythonEngine),
+        ("javascript", JavaScriptEngine),
+        ("nim", NimEngine),
+    ])
+    def test_pinned_dep_passes_pinning(self, tmp_path, lang, engine_cls):
+        if lang in NEEDS_TOOL:
+            _skip_if_missing(lang)
+        wdir = _make_widget(tmp_path, lang, f"mod.{EXT[lang]}",
+                            CLEAN[lang][0])
+        result = engine_cls().validate_widget(wdir, ["somelib>=1.0.0"])
+        # Should not fail due to pinning (may fail for other reasons)
+        if not result["passed"]:
+            assert "version pin" not in result.get("error", "")
+
+
+class TestOrchestrator:
+    """The contamination.py module delegates to the right engine."""
+
+    def test_python_delegation(self, tmp_path):
+        wdir = _make_widget(tmp_path, "python", "mod.py",
+                            'LOG = "/home/user/logs"\n')
+        result = scan_contamination(wdir)
+        assert any("path" in b.lower() for b in result["blocks"])
+
+    def test_js_delegation(self, tmp_path):
+        if not shutil.which("node"):
+            pytest.skip("Node.js not installed")
+        wdir = _make_widget(tmp_path, "javascript", "mod.js",
+                            "const api_key = 'sk-abc123verylongkey'\n")
+        result = scan_contamination(wdir)
+        assert any("credential" in b.lower() for b in result["blocks"])
+
+    def test_nim_delegation(self, tmp_path):
+        if not shutil.which("nim"):
+            pytest.skip("Nim not installed")
+        wdir = _make_widget(tmp_path, "nim", "mod.nim",
+                            'let api_key = "sk-abc123verylongkey"\n')
+        result = scan_contamination(wdir)
+        assert any("credential" in b.lower() for b in result["blocks"])
+
+    def test_missing_manifest_returns_empty(self, tmp_path):
+        result = scan_contamination(str(tmp_path))
+        assert result == {"blocks": [], "warnings": []}
+
+    def test_unknown_language_uses_base_fallback(self, tmp_path):
+        wdir = _make_widget(tmp_path, "lua", "mod.lua",
+                            'LOG = "/home/user/logs/app.log"\n')
+        result = scan_contamination(wdir)
+        assert any("Absolute path" in b for b in result["blocks"])
+
+
+class TestBaseFallback:
+    """The base LanguageEngine provides regex fallback for checks 1-4.
+
+    Check 5 (sleep) is explicitly NOT covered by regex - it requires
+    native tooling per the standard in base.py.
+    """
+
+    def _scan(self, tmp_path, src_code, ext="txt"):
+        wdir = _make_widget(tmp_path, "base", f"module.{ext}", src_code)
+        engine = LanguageEngine()
+        engine.file_ext = ext
+        return engine.scan_contamination(wdir, {"language": "base"})
+
+    def test_abs_path_caught(self, tmp_path):
+        result = self._scan(tmp_path, 'x = "/home/user/data"\n')
+        assert any("Absolute path" in b for b in result["blocks"])
+
+    def test_credential_caught(self, tmp_path):
+        result = self._scan(tmp_path, 'api_key = "sk-abc123verylongkey"\n')
+        assert any("credential" in b.lower() for b in result["blocks"])
+
+    def test_url_caught(self, tmp_path):
+        result = self._scan(tmp_path,
+                            'url = "https://api.company.com/v2/data"\n')
+        assert any("URL" in b for b in result["blocks"])
+
+    def test_ip_caught(self, tmp_path):
+        result = self._scan(tmp_path, 'host = "192.168.1.50"\n')
+        assert any("IP" in b for b in result["blocks"])
+
+    def test_hardcoded_number_warns(self, tmp_path):
+        result = self._scan(tmp_path, "TIMEOUT = 30\n")
+        assert any("Hardcoded value" in w for w in result["warnings"])
+
+    def test_credential_in_tests_warns(self, tmp_path):
+        wdir = _make_widget(tmp_path, "base", "module.txt",
+                            "x = 1\n")
+        engine = LanguageEngine()
+        engine.file_ext = "txt"
+        _write(os.path.join(wdir, "tests", "test_module.txt"),
+               'password = "fake_test_password_123"\n')
+        result = engine.scan_contamination(wdir, {"language": "base"})
+        assert not any("credential" in b.lower() for b in result["blocks"])
+        assert any("credential" in w.lower() for w in result["warnings"])
+
+    def test_clean_passes(self, tmp_path):
+        result = self._scan(tmp_path, "x = compute()\n")
+        assert result["blocks"] == []
+        assert result["warnings"] == []

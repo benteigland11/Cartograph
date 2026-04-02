@@ -200,6 +200,7 @@ class JavaScriptEngine(LanguageEngine):
         "hardcoded_value": "Hardcoded values found in src/ - consider making these configurable:",
         "env_var": "Environment variable access found in src/ - verify it's not project-specific:",
         "unlisted_import": "Unlisted imports found in src/ - add to dependencies or remove:",
+        "sleep": "Sleep/blocking calls found - widgets must not block the caller:",
     }
 
     def validate_widget(self, path: str, dependencies: list) -> dict:

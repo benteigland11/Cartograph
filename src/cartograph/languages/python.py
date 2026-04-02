@@ -119,6 +119,7 @@ class PythonEngine(LanguageEngine):
 
     _STDLIB = sys.stdlib_module_names
     _ENVVAR_RE = re.compile(r'os\.getenv\(|os\.environ')
+    _SLEEP_MODULES = {"time", "asyncio"}
     _ABS_PATH_RE = re.compile(
         r'["\'](?:/home/|/Users/|/root/|[A-Za-z]:[/\\\\])[^"\']{3,}["\']'
     )
@@ -175,13 +176,53 @@ class PythonEngine(LanguageEngine):
                 line_no = code[:m.start()].count("\n") + 1
                 blocks.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
 
-            # AST-based checks (src/ only)
-            if not is_src:
-                continue
-
+            # AST-based checks
             try:
                 tree = ast.parse(code)
             except Exception:
+                continue
+
+            # Sleep/blocking calls (all files)
+            # Collect bare names imported from sleep modules:
+            # "from time import sleep" -> sleep_names = {"sleep"}
+            # "from time import sleep as s" -> sleep_names = {"s"}
+            sleep_names = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module in self._SLEEP_MODULES:
+                    for alias in node.names:
+                        if alias.name == "sleep":
+                            sleep_names.add(alias.asname or alias.name)
+
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                is_sleep = False
+                # time.sleep() or asyncio.sleep()
+                if (isinstance(func, ast.Attribute) and func.attr == "sleep"
+                        and isinstance(func.value, ast.Name)
+                        and func.value.id in self._SLEEP_MODULES):
+                    is_sleep = True
+                # from time import sleep; sleep()
+                elif (isinstance(func, ast.Name) and func.id in sleep_names):
+                    is_sleep = True
+
+                if is_sleep:
+                    if is_src:
+                        blocks.append(
+                            f"sleep() call in {rel}:{node.lineno} - widgets must not block the caller"
+                        )
+                    else:
+                        # In tests/examples: warn if duration > 1 second
+                        if (node.args and isinstance(node.args[0], ast.Constant)
+                                and isinstance(node.args[0].value, (int, float))
+                                and node.args[0].value > 1):
+                            warnings.append(
+                                f"sleep({node.args[0].value}) in {rel}:{node.lineno} - consider reducing sleep duration"
+                            )
+
+            # Remaining AST checks are src/ only
+            if not is_src:
                 continue
 
             # Unlisted imports

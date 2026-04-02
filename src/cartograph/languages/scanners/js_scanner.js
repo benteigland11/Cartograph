@@ -195,6 +195,52 @@ function scanFile(filename) {
       })
     }
 
+    // Sleep/blocking: setTimeout, setInterval, Bun.sleep, Bun.sleepSync
+    // In src/: block. In tests/examples: warn if duration > 1000ms.
+    const inTests = filename.includes('/tests/') || filename.includes('\\tests\\')
+    const inExamples = filename.includes('/examples/') || filename.includes('\\examples\\')
+
+    const sleepMatch = code.match(/\b(setTimeout|setInterval)\s*\(/)
+    if (sleepMatch) {
+      if (!inTests && !inExamples) {
+        findings.push({
+          file: filename, kind: 'sleep', line: lineNo,
+          detail: `${sleepMatch[1]}() call - widgets must not block or delay the caller`,
+          severity: 'block'
+        })
+      } else {
+        // Check for large duration: setTimeout(fn, 5000) or setTimeout(fn, N) where N > 1000
+        const durationMatch = rawTrimmed.match(/(?:setTimeout|setInterval)\s*\([^,]+,\s*(\d+)/)
+        if (durationMatch && parseInt(durationMatch[1]) > 1000) {
+          findings.push({
+            file: filename, kind: 'sleep', line: lineNo,
+            detail: `${sleepMatch[1]}(_, ${durationMatch[1]}) - consider reducing sleep duration`,
+            severity: 'warning'
+          })
+        }
+      }
+    }
+
+    const bunSleepMatch = code.match(/\bBun\s*\.\s*(sleep|sleepSync)\s*\(/)
+    if (bunSleepMatch) {
+      if (!inTests && !inExamples) {
+        findings.push({
+          file: filename, kind: 'sleep', line: lineNo,
+          detail: `Bun.${bunSleepMatch[1]}() call - widgets must not block or delay the caller`,
+          severity: 'block'
+        })
+      } else {
+        const durationMatch = rawTrimmed.match(/Bun\s*\.\s*(?:sleep|sleepSync)\s*\(\s*(\d+)/)
+        if (durationMatch && parseInt(durationMatch[1]) > 1000) {
+          findings.push({
+            file: filename, kind: 'sleep', line: lineNo,
+            detail: `Bun.${bunSleepMatch[1]}(${durationMatch[1]}) - consider reducing sleep duration`,
+            severity: 'warning'
+          })
+        }
+      }
+    }
+
     // --- Warning-level checks (contamination) ---
 
     // Absolute paths in strings (block)

@@ -90,6 +90,7 @@ class NimEngine(LanguageEngine):
         "hardcoded_value": "Hardcoded values found in src/ - consider making these configurable:",
         "env_var": "Environment variable access found in src/ - verify it's not project-specific:",
         "unlisted_import": "Unlisted imports found in src/ - add to dependencies or remove:",
+        "sleep": "Sleep/blocking calls found - widgets must not block the caller:",
     }
     import_pattern = r'^import\s+\w+'
     manifest_patterns = ["*.nimble"]

@@ -6,7 +6,7 @@
 ## Usage: nim r nim_scanner.nim <file1.nim> [file2.nim ...]
 ## Output: JSON array of {file, kind, line, detail} objects.
 
-import std/[json, os, strutils, re, sets]
+import std/[json, os, strutils, sets]
 
 type
   Finding = object
@@ -97,6 +97,8 @@ proc scanFile(filename: string): seq[Finding] =
   for i, rawLine in lines:
     let lineNo = i + 1
     let stripped = rawLine.strip()
+    let inTests = "/tests/" in filename or "\\tests\\" in filename
+    let inExamples = "/examples/" in filename or "\\examples\\" in filename
 
     # Track multiline string literals (triple quotes)
     if inMultilineString:
@@ -237,6 +239,46 @@ proc scanFile(filename: string): seq[Finding] =
               detail: "import " & modName & " - not in widget.json dependencies",
               severity: "warning"))
 
+    # Sleep/blocking: sleep(), sleepAsync()
+    # In src/: block. In tests/examples: warn if duration > 1000.
+    if code.startsWith("sleep") and (code.len == 5 or code[5] in {'(', ' '}):
+      if not inTests and not inExamples:
+        result.add(Finding(
+          file: filename, kind: "sleep", line: lineNo,
+          detail: "sleep() call - widgets must not block the caller",
+          severity: "block"))
+      else:
+        # Check for large duration: sleep(2000)
+        let parenPos = code.find("(")
+        if parenPos >= 0:
+          let afterParen = code[parenPos + 1 .. ^1].strip()
+          let endPos = afterParen.find(")")
+          if endPos > 0:
+            let durStr = afterParen[0 ..< endPos].strip()
+            try:
+              let dur = parseInt(durStr)
+              if dur > 1000:
+                result.add(Finding(
+                  file: filename, kind: "sleep", line: lineNo,
+                  detail: "sleep(" & durStr & ") - consider reducing sleep duration",
+                  severity: "warning"))
+            except CatchableError:
+              discard
+
+    if "sleepAsync" in code:
+      if not inTests and not inExamples:
+        result.add(Finding(
+          file: filename, kind: "sleep", line: lineNo,
+          detail: "sleepAsync() call - widgets must not block the caller",
+          severity: "block"))
+
+    if "os.sleep" in code.toLower():
+      if not inTests and not inExamples:
+        result.add(Finding(
+          file: filename, kind: "sleep", line: lineNo,
+          detail: "os.sleep() call - widgets must not block the caller",
+          severity: "block"))
+
     # --- Warning/block-level checks (contamination) ---
 
     # Absolute paths in strings (block)
@@ -255,7 +297,6 @@ proc scanFile(filename: string): seq[Finding] =
         "access_token" in lowerRaw or "auth_token" in lowerRaw or
         "password" in lowerRaw or "credential" in lowerRaw) and
        "= \"" in rawLine and rawLine.count("\"") >= 2:
-      let inTests = "/tests/" in filename or "\\tests\\" in filename
       result.add(Finding(
         file: filename, kind: "credential", line: lineNo,
         detail: if inTests: "possible credential in test - verify it's fake"
@@ -271,12 +312,39 @@ proc scanFile(filename: string): seq[Finding] =
           detail: "hardcoded URL in string",
           severity: "block"))
 
-    # Hardcoded IPs (block)
-    if rawLine.contains(re"\"(\d{1,3}\.){3}\d{1,3}"):
-      result.add(Finding(
-        file: filename, kind: "hardcoded_ip", line: lineNo,
-        detail: "hardcoded IP address in string",
-        severity: "block"))
+    # Hardcoded IPs (block) - string scan for "N.N.N.N" pattern
+    block ipCheck:
+      let qpos = rawLine.find('"')
+      if qpos < 0: break ipCheck
+      let after = rawLine[qpos + 1 .. ^1]
+      var dots = 0
+      var digits = 0
+      var valid = false
+      for ci in 0 ..< after.len:
+        let c = after[ci]
+        if c == '"':
+          if dots == 3 and digits > 0:
+            valid = true
+          break
+        elif c == '.':
+          if digits == 0: break ipCheck
+          dots += 1
+          digits = 0
+          if dots > 3: break ipCheck
+        elif c.isDigit:
+          digits += 1
+          if digits > 3: break ipCheck
+        elif c == ':' and dots == 3 and digits > 0:
+          # port suffix like "10.0.0.1:8080" - keep scanning
+          valid = true
+          break
+        else:
+          break ipCheck
+      if valid or (dots == 3 and digits > 0):
+        result.add(Finding(
+          file: filename, kind: "hardcoded_ip", line: lineNo,
+          detail: "hardcoded IP address in string",
+          severity: "block"))
 
     # Environment variable access
     if "getenv(" in code.toLower() or "getEnv(" in code or "envPairs" in code:
