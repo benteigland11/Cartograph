@@ -274,7 +274,10 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
 
     # --- Write fresh stamp at library path (files are in final state) ---
     if engine:
-        write_stamp(dest_path, language, engine)
+        try:
+            write_stamp(dest_path, language, engine)
+        except OSError as e:
+            log.warning("Could not write validation stamp after checkin: %s", e)
 
     # --- Reload library so the in-memory index reflects the new widget ---
     carto._load_library()
