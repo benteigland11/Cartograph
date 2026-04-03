@@ -20,6 +20,8 @@ Cartograph is built on a few principles that guide every decision:
 
 **Zero external dependencies.** The core engine uses only the Python standard library. Language-specific tooling (pytest, vitest, nimble) is invoked via subprocess, not imported. This keeps installs clean and avoids dependency conflicts. It is also in response to recent supply chain attacks. This needs to be a trusted tool.
 
+**We enforce rules, we don't write tests.** The validation pipeline runs the widget author's tests with their chosen tools and enforces quality thresholds (80% coverage, passing tests, clean examples). We never inject test configurations, environments, or frameworks. The widget author owns their test setup - we just verify the results meet the bar. This is the same model as a CI system: you bring your tests, we bring the standards.
+
 **Support a language fully or not at all.** Adding a language means owning its entire validation pipeline. Tests, coverage, contamination scanning, example execution, dependency isolation. We don't ship partial support.
 
 ## Getting started

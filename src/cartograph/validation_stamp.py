@@ -13,7 +13,6 @@ I/O. This module adds Cartograph-specific concerns: language engines for
 watched_patterns, cartograph version tracking, and test result storage.
 """
 
-import importlib.metadata
 import logging
 
 from cg.infra_file_stamp_python.src.file_stamp import (
@@ -29,12 +28,6 @@ log = logging.getLogger("cartograph")
 STAMP_FILE = ".validation_stamp.json"
 
 
-def cartograph_version() -> str:
-    try:
-        return importlib.metadata.version("cartograph-cli")
-    except Exception:
-        return "dev"
-
 
 def write_stamp(widget_path: str, language: str, engine,
                 test_results: dict | None = None) -> None:
@@ -46,7 +39,6 @@ def write_stamp(widget_path: str, language: str, engine,
         "language": language,
         "engine_version": getattr(engine, "validation_version", None),
         "runtime": rv,
-        "cartograph_version": cartograph_version(),
         "test_results": test_results or {},
         "validated_at": datetime.now(timezone.utc).isoformat(),
     }

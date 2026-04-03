@@ -27,7 +27,7 @@ import sys as _sys
 
 log = logging.getLogger("cartograph")
 
-_DEFAULT_REGISTRY_URL = "https://cartograph-api-562154372671.us-central1.run.app"
+_DEFAULT_REGISTRY_URL = "https://api.cartograph.tools"
 
 
 def _credentials_path() -> str:

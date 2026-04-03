@@ -53,63 +53,7 @@ const result = {module}('hello')
 console.log(`Result: ${{result}}`)
 '''
 
-# React/frontend JS
-_JS_SRC = '''\
-/**
- * {name}
- */
-export function {component}({{ children }}) {{
-  return (
-    <div className="{css_class}">
-      {{children}}
-    </div>
-  )
-}}
-'''
 
-_JS_TEST = '''\
-import {{ render, screen }} from '@testing-library/react'
-import {{ {component} }} from '../src/{component}.jsx'
-
-test('renders children', () => {{
-  render(<{component}>Hello</{component}>)
-  expect(screen.getByText('Hello')).toBeTruthy()
-}})
-'''
-
-_JS_EXAMPLE = '''\
-/**
- * Example usage of {name}.
- *
- * Renders via react-dom/server - no browser needed.
- * Use fake/hardcoded props to demonstrate the component API.
- */
-import {{ renderToString }} from 'react-dom/server'
-import {{ {component} }} from '../src/{component}.jsx'
-
-// [TODO] Replace with a realistic call using fake props
-const html = renderToString(
-  <{component}>Example content</{component}>
-)
-console.log(html)
-'''
-
-_JS_USAGE_HINT = '''\
-/**
- * Usage hint for {name} - real integration code, not pipeline-validated.
- *
- * Show how this component fits into a real app: routing, providers, layout, etc.
- * This file is a courtesy from the author and is not executed by Cartograph.
- * Fill it in or delete it - it has no effect on validation or checkin.
- */
-
-// [TODO] Show a real-world integration - e.g. inside a router, a page, a provider tree
-// import {{ {component} }} from './cg/{component}/src/{component}.jsx'
-//
-// export function MyPage() {{
-//   return <{component}>Hello</{component}>
-// }}
-'''
 
 _TS_SRC = '''\
 /**
@@ -153,73 +97,31 @@ _REACT_DEV_DEPS = {
 
 _COVERAGE_THRESHOLD = 80
 
-_VITEST_PLAIN = """\
+
+_VITEST_FALLBACK = """\
 export default {
   test: {
     include: ['tests/test_*.*'],
     globals: true,
     coverage: {
-      provider: 'v8',
       include: ['src/**'],
-      thresholds: { statements: %d, branches: %d, functions: %d, lines: %d },
     },
   }
 }
-""" % (_COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD)
+"""
 
-_VITEST_DOM = """\
+_VITEST_FRONTEND = """\
 export default {
   test: {
     include: ['tests/test_*.*'],
     environment: 'happy-dom',
     globals: true,
     coverage: {
-      provider: 'v8',
       include: ['src/**'],
-      thresholds: { statements: %d, branches: %d, functions: %d, lines: %d },
     },
   }
 }
-""" % (_COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD)
-
-_VITEST_BROWSER = """\
-import { defineConfig } from 'vitest/config'
-export default defineConfig({
-  test: {
-    include: ['tests/test_*.*'],
-    globals: true,
-    browser: {
-      enabled: true,
-      provider: 'playwright',
-      name: 'chromium',
-      headless: true,
-    },
-    coverage: {
-      provider: 'istanbul',
-      include: ['src/**'],
-      thresholds: { statements: %d, branches: %d, functions: %d, lines: %d },
-    },
-  }
-})
-""" % (_COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD)
-
-_VITEST_REACT = """\
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    include: ['tests/test_*.*'],
-    environment: 'jsdom',
-    globals: true,
-    coverage: {
-      provider: 'v8',
-      include: ['src/**'],
-      thresholds: { statements: %d, branches: %d, functions: %d, lines: %d },
-    },
-  }
-})
-""" % (_COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD)
+"""
 
 
 class JavaScriptEngine(LanguageEngine):
@@ -271,13 +173,25 @@ class JavaScriptEngine(LanguageEngine):
 
     def scaffold(self, target_dir, module_name, display_name, **kwargs):
         domain = kwargs.get("domain", "")
+        is_frontend = domain == "frontend"
 
-        if domain == "frontend":
-            self._scaffold_react(target_dir, module_name, display_name)
-        else:
-            self._scaffold_plain(target_dir, module_name, display_name)
+        dev_deps = {
+            "vitest": "^1.0.0",
+            "@vitest/coverage-v8": "^1.0.0",
+        }
+        if is_frontend:
+            dev_deps["happy-dom"] = "^15.0.0"
 
-    def _scaffold_plain(self, target_dir, module_name, display_name):
+        pkg = {
+            "name": os.path.basename(target_dir),
+            "version": "1.0.0",
+            "type": "module",
+            "dependencies": {},
+            "devDependencies": dev_deps,
+        }
+        with open(os.path.join(target_dir, "package.json"), "w") as f:
+            json.dump(pkg, f, indent=2)
+
         with open(os.path.join(target_dir, "src", f"{module_name}.js"), "w") as f:
             f.write(_JS_PLAIN_SRC.format(name=display_name, module=module_name))
         with open(os.path.join(target_dir, "tests", f"test_{module_name}.js"), "w") as f:
@@ -285,29 +199,10 @@ class JavaScriptEngine(LanguageEngine):
         with open(os.path.join(target_dir, "examples", "example_usage.js"), "w") as f:
             f.write(_JS_PLAIN_EXAMPLE.format(name=display_name, module=module_name))
 
-    def _scaffold_react(self, target_dir, module_name, display_name):
-        component = "".join(w.capitalize() for w in module_name.split("_"))
-        css_class = module_name.replace("_", "-")
-
-        # Pre-populate React deps in widget.json
-        manifest_path = os.path.join(target_dir, "widget.json")
-        with open(manifest_path) as f:
-            manifest = json.load(f)
-        manifest["tech_stack"]["dependencies"] = [
-            "react>=18.0.0",
-            "react-dom>=18.0.0",
-        ]
-        with open(manifest_path, "w") as f:
-            json.dump(manifest, f, indent=2)
-
-        with open(os.path.join(target_dir, "src", f"{component}.jsx"), "w") as f:
-            f.write(_JS_SRC.format(name=display_name, component=component, css_class=css_class))
-        with open(os.path.join(target_dir, "tests", f"test_{component}.jsx"), "w") as f:
-            f.write(_JS_TEST.format(component=component))
-        with open(os.path.join(target_dir, "examples", "example_usage.jsx"), "w") as f:
-            f.write(_JS_EXAMPLE.format(name=display_name, component=component))
-        with open(os.path.join(target_dir, "examples", "usage_hint.jsx"), "w") as f:
-            f.write(_JS_USAGE_HINT.format(name=display_name, component=component))
+        # Frontend gets a vitest config with happy-dom environment
+        if is_frontend:
+            with open(os.path.join(target_dir, "vitest.config.js"), "w") as f:
+                f.write(_VITEST_FRONTEND)
 
     # ------------------------------------------------------------------ helpers
 
@@ -405,10 +300,7 @@ class JavaScriptEngine(LanguageEngine):
 
     def install_deps(self, path: str, dependencies: list) -> None:
         has_react = self._has_react(dependencies)
-        test_env = self._detect_test_env(path)
-        is_browser = test_env == "browser"
-        coverage_pkg = "@vitest/coverage-istanbul" if is_browser else "@vitest/coverage-v8"
-        log.debug("Installing npm packages (react=%s, env=%s)...", has_react, test_env)
+        log.debug("Installing npm packages (react=%s)...", has_react)
 
         package_json_path = os.path.join(path, "package.json")
 
@@ -418,7 +310,7 @@ class JavaScriptEngine(LanguageEngine):
                 "version": "1.0.0",
                 "type": "module",
                 "dependencies": {},
-                "devDependencies": {"vitest": "^1.0.0", coverage_pkg: "^1.0.0"},
+                "devDependencies": {"vitest": "^1.0.0", "@vitest/coverage-v8": "^1.0.0"},
             }
             if has_react:
                 pkg["devDependencies"].update(_REACT_DEV_DEPS)
@@ -434,10 +326,9 @@ class JavaScriptEngine(LanguageEngine):
                 pkg = json.load(f)
             dev = pkg.setdefault("devDependencies", {})
             changed = False
-            for tool, ver in (("vitest", "^1.0.0"), (coverage_pkg, "^1.0.0")):
-                if tool not in dev and tool not in pkg.get("dependencies", {}):
-                    dev[tool] = ver
-                    changed = True
+            if "vitest" not in dev and "vitest" not in pkg.get("dependencies", {}):
+                dev["vitest"] = "^1.0.0"
+                changed = True
             if has_react:
                 for dep_name, dep_ver in _REACT_DEV_DEPS.items():
                     if dep_name not in dev and dep_name not in pkg.get("dependencies", {}):
@@ -458,45 +349,37 @@ class JavaScriptEngine(LanguageEngine):
     # ------------------------------------------------------------------ tests
 
     @staticmethod
-    def _detect_test_env(path: str) -> str:
-        """Detect which test environment the widget needs from package.json.
-        Returns 'browser', 'dom', or 'node'."""
-        try:
-            with open(os.path.join(path, "package.json")) as f:
-                pkg = json.load(f)
-            all_deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
-            if "@vitest/browser" in all_deps:
-                return "browser"
-            if "happy-dom" in all_deps or "jsdom" in all_deps:
-                env = "happy-dom" if "happy-dom" in all_deps else "jsdom"
-                return env
-            return "node"
-        except Exception:
-            return "node"
+    def _has_vitest_config(path: str) -> bool:
+        """Check if the widget has its own vitest config."""
+        for name in ("vitest.config.js", "vitest.config.ts", "vitest.config.mjs",
+                      "vitest.config.mts"):
+            if os.path.exists(os.path.join(path, name)):
+                return True
+        return False
 
     def run_tests(self, path: str) -> dict:
-        has_react = self._has_react(self._read_deps(path))
-        test_env = self._detect_test_env(path)
-        config_path = os.path.join(path, f"vitest.config.{uuid.uuid4().hex}.js")
+        t = _COVERAGE_THRESHOLD
+        cmd = [
+            "npx", "vitest", "run", "--coverage",
+            f"--coverage.thresholds.statements={t}",
+            f"--coverage.thresholds.branches={t}",
+            f"--coverage.thresholds.functions={t}",
+            f"--coverage.thresholds.lines={t}",
+        ]
+
+        # If no vitest config exists, provide a minimal fallback
+        fallback_config = None
+        if not self._has_vitest_config(path):
+            fallback_config = os.path.join(path, f"vitest.config.{uuid.uuid4().hex}.js")
+            with open(fallback_config, "w") as f:
+                f.write(_VITEST_FALLBACK)
+            cmd.extend(["--config", os.path.basename(fallback_config)])
+
         try:
-            if has_react:
-                vitest_cfg = _VITEST_REACT
-            elif test_env == "browser":
-                vitest_cfg = _VITEST_BROWSER
-            elif test_env in ("happy-dom", "jsdom"):
-                vitest_cfg = _VITEST_DOM.replace("'happy-dom'", f"'{test_env}'")
-            else:
-                vitest_cfg = _VITEST_PLAIN
-            with open(config_path, "w") as f:
-                f.write(vitest_cfg)
-            res = self._run(
-                ["npx", "vitest", "run", "--coverage", "--config", os.path.basename(config_path)],
-                cwd=path,
-                timeout=60,
-            )
+            res = self._run(cmd, cwd=path, timeout=120)
         finally:
-            if os.path.exists(config_path):
-                os.remove(config_path)
+            if fallback_config and os.path.exists(fallback_config):
+                os.remove(fallback_config)
 
         if res.returncode != 0:
             return self._fail(res.stderr or res.stdout)

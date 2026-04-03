@@ -1047,12 +1047,23 @@ def cmd_doctor(args):
         lib_checks.append(("Library", True, LIBRARY_PATH, None))
     groups.append(("Library", lib_checks))
 
+    # --- Cloud registry ---
+    from .cloud import is_available as _cloud_available
+    from .auth import get_registry_url
+    cloud_checks = []
+    url = get_registry_url()
+    if _cloud_available():
+        cloud_checks.append(("Registry", True, url, None))
+    else:
+        cloud_checks.append(("Registry", False, f"unreachable - {url}", "Check network or CARTOGRAPH_REGISTRY_URL"))
+    groups.append(("Cloud", cloud_checks))
+
     # --- Language engines (auto-discovered) ---
     from .languages.registry import _ENGINES
     _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3}
+    lang_checks = []
     for lang_name, engine in sorted(_ENGINES.items(), key=lambda x: _lang_order.get(x[0], 99)):
         available, message = engine.check_available()
-        lang_checks = []
         ev = getattr(engine, "validation_version", None)
         rv = engine.runtime_version() if available else None
         tags = []
@@ -1064,10 +1075,11 @@ def cmd_doctor(args):
         if available:
             lang_checks.append((lang_name, True, f"ready{tag_str}", None))
             for label, installed, detail in engine.check_optional():
-                lang_checks.append((label, installed, detail, "optional"))
+                if not installed:
+                    lang_checks.append((label, False, detail, "optional"))
         else:
             lang_checks.append((lang_name, False, f"not ready{tag_str}", message))
-        groups.append((lang_name.capitalize(), lang_checks))
+    groups.append(("Languages", lang_checks))
 
     # --- Render ---
     use_color = sys.stdout.isatty()

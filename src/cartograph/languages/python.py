@@ -305,9 +305,25 @@ class PythonEngine(LanguageEngine):
     def src_import_pattern(self) -> str | None:
         return r'from src\.|import src\.'
 
+    def _venv_python(self) -> str:
+        """Return the venv python path if a venv was created, else sys.executable."""
+        return getattr(self, "_venv_py", sys.executable)
+
     def install_deps(self, path: str, dependencies: list) -> None:
+        import venv
+        venv_dir = os.path.join(path, ".venv")
+        log.debug("Creating isolated venv at %s", venv_dir)
+        venv.create(venv_dir, with_pip=True, system_site_packages=True)
+
+        # Locate the venv python
+        if os.name == "nt":
+            self._venv_py = os.path.join(venv_dir, "Scripts", "python.exe")
+        else:
+            self._venv_py = os.path.join(venv_dir, "bin", "python")
+
         all_deps = list(dependencies) + ["pytest", "pytest-cov"]
-        log.debug("Installing %d Python package(s)...", len(all_deps))
+        log.debug("Installing %d Python package(s) into venv...", len(all_deps))
+        py = self._venv_python()
         for dep in all_deps:
             dep_name = dep
             if not dep_name:
@@ -319,7 +335,7 @@ class PythonEngine(LanguageEngine):
                 import importlib.util
                 import_name = base_name.replace("-", "_")
                 if importlib.util.find_spec(import_name) is not None:
-                    log.debug("Heavy ML dep '%s' found in environment — skipping install.", dep_name)
+                    log.debug("Heavy ML dep '%s' found in environment - skipping install.", dep_name)
                 else:
                     log.warning(
                         "Heavy ML dep '%s' is not installed and cannot be auto-installed by Cartograph. "
@@ -328,7 +344,7 @@ class PythonEngine(LanguageEngine):
                     )
                 continue
             res = self._run(
-                [sys.executable, "-m", "pip", "install", "-q", dep_name],
+                [py, "-m", "pip", "install", "-q", dep_name],
                 cwd=path,
                 timeout=60,
             )
@@ -343,7 +359,7 @@ class PythonEngine(LanguageEngine):
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         res = self._run(
             [
-                sys.executable, "-m", "pytest", "tests/",
+                self._venv_python(), "-m", "pytest", "tests/",
                 "--cov=src",
                 f"--cov-fail-under={_COVERAGE_THRESHOLD}",
                 "--cov-report=term-missing",
@@ -357,8 +373,24 @@ class PythonEngine(LanguageEngine):
             return self._fail(res.stdout + res.stderr)
         return self._ok()
 
+    def run_example(self, path: str) -> dict:
+        ep = os.path.join(path, "examples", self.example_filename(path))
+        import subprocess
+        res = subprocess.run(
+            [self._venv_python(), ep],
+            cwd=path, capture_output=True, text=True, timeout=60,
+        )
+        if res.returncode != 0:
+            return self._fail(res.stderr or res.stdout)
+        return self._ok()
+
     def cleanup(self, path: str) -> None:
         import shutil
+        # Remove the isolated venv
+        venv_dir = os.path.join(path, ".venv")
+        if os.path.isdir(venv_dir):
+            shutil.rmtree(venv_dir, ignore_errors=True)
+        self._venv_py = None
         for root, dirs, _files in os.walk(path):
             for d in dirs:
                 if d in ("__pycache__", ".pytest_cache"):

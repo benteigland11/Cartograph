@@ -238,7 +238,6 @@ def test_checkin_stamps_validation_block(carto_tmp, installed_widget):
     assert "validation" in data
     v = data["validation"]
     assert "engine_version" in v
-    assert "cartograph_version" in v
     assert "validated_at" in v
     assert isinstance(v["engine_version"], int)
     assert v["engine_version"] >= 1
