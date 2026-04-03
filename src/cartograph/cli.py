@@ -1049,7 +1049,8 @@ def cmd_doctor(args):
 
     # --- Language engines (auto-discovered) ---
     from .languages.registry import _ENGINES
-    for lang_name, engine in sorted(_ENGINES.items()):
+    _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3}
+    for lang_name, engine in sorted(_ENGINES.items(), key=lambda x: _lang_order.get(x[0], 99)):
         available, message = engine.check_available()
         lang_checks = []
         ev = getattr(engine, "validation_version", None)
@@ -1062,6 +1063,8 @@ def cmd_doctor(args):
         tag_str = f"  ({', '.join(tags)})" if tags else ""
         if available:
             lang_checks.append((lang_name, True, f"ready{tag_str}", None))
+            for label, installed, detail in engine.check_optional():
+                lang_checks.append((label, installed, detail, "optional"))
         else:
             lang_checks.append((lang_name, False, f"not ready{tag_str}", message))
         groups.append((lang_name.capitalize(), lang_checks))
@@ -1070,24 +1073,30 @@ def cmd_doctor(args):
     use_color = sys.stdout.isatty()
     green = "\033[32m" if use_color else ""
     red = "\033[31m" if use_color else ""
+    yellow = "\033[33m" if use_color else ""
     reset = "\033[0m" if use_color else ""
 
-    all_checks = [c for _, checks in groups for c in checks]
-    passed = sum(1 for c in all_checks if c[1])
-    total = len(all_checks)
+    required_checks = [c for _, checks in groups for c in checks if c[3] != "optional"]
+    passed = sum(1 for c in required_checks if c[1])
+    total = len(required_checks)
     all_ok = passed == total
 
     print()
     for group_name, checks in groups:
-        all_group_ok = all(c[1] for c in checks)
+        all_group_ok = all(c[1] for c in checks if c[3] != "optional")
         gc = green if all_group_ok else red
         print(f"  {gc}{group_name}{reset}")
         for label, ok, detail, fix in checks:
-            c = green if ok else red
-            mark = "✓" if ok else "✗"
-            print(f"    {c}[{mark}]{reset} {label:<12}  {detail}")
-            if not ok and fix:
-                print(f"          {red}-> {fix}{reset}")
+            if fix == "optional":
+                c = green if ok else yellow
+                mark = "✓" if ok else "i"
+                print(f"    {c}[{mark}]{reset} {label:<12}  {detail}")
+            else:
+                c = green if ok else red
+                mark = "✓" if ok else "✗"
+                print(f"    {c}[{mark}]{reset} {label:<12}  {detail}")
+                if not ok and fix:
+                    print(f"          {red}-> {fix}{reset}")
         print()
 
     if all_ok:

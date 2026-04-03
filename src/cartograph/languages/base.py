@@ -103,6 +103,11 @@ class LanguageEngine:
             )
         return True, ""
 
+    def check_optional(self) -> list[tuple[str, bool, str]]:
+        """Return optional capability checks: [(label, installed, detail), ...].
+        Override per engine. Doctor renders these as info items."""
+        return []
+
     def validate_widget(self, path: str, dependencies: list) -> dict:
         """Source scanning + dep pinning check. Override to add custom steps."""
         errors = []

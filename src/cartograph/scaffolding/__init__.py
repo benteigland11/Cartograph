@@ -115,7 +115,7 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
     from cartograph.languages.base import LanguageEngine as _BaseEngine
     engine = get_engine(normalized_lang)
     if engine and engine.__class__.scaffold is not _BaseEngine.scaffold:
-        engine.scaffold(target_dir, module_name, name, item_id=item_id, gpu_targets=gpu_targets)
+        engine.scaffold(target_dir, module_name, name, item_id=item_id, gpu_targets=gpu_targets, domain=domain)
     else:
         return {"status": "error", "message": f"No scaffold template for language '{normalized_lang}'"}
 

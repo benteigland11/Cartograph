@@ -19,6 +19,41 @@ from .base import LanguageEngine, _dep_bare_name, log
 
 # -- Scaffold templates --------------------------------------------------------
 
+# Plain JS (backend, data, infra, universal, etc.)
+_JS_PLAIN_SRC = '''\
+/**
+ * {name}
+ */
+export function {module}(value) {{
+  return value
+}}
+'''
+
+_JS_PLAIN_TEST = '''\
+import {{ {module} }} from '../src/{module}.js'
+
+test('placeholder', () => {{
+  // TODO: replace with real tests
+  expect({module}('hello')).toBe('hello')
+}})
+'''
+
+_JS_PLAIN_EXAMPLE = '''\
+/**
+ * Example usage of {name}.
+ *
+ * This file must run and exit cleanly with no user input, no network calls,
+ * and no external services or API keys. Use fake/hardcoded data to demonstrate the API.
+ * The widget's own declared dependencies are fine - the validator installs them first.
+ */
+import {{ {module} }} from '../src/{module}.js'
+
+// [TODO] Replace with a realistic call using fake data
+const result = {module}('hello')
+console.log(`Result: ${{result}}`)
+'''
+
+# React/frontend JS
 _JS_SRC = '''\
 /**
  * {name}
@@ -132,6 +167,42 @@ export default {
 }
 """ % (_COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD)
 
+_VITEST_DOM = """\
+export default {
+  test: {
+    include: ['tests/test_*.*'],
+    environment: 'happy-dom',
+    globals: true,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**'],
+      thresholds: { statements: %d, branches: %d, functions: %d, lines: %d },
+    },
+  }
+}
+""" % (_COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD)
+
+_VITEST_BROWSER = """\
+import { defineConfig } from 'vitest/config'
+export default defineConfig({
+  test: {
+    include: ['tests/test_*.*'],
+    globals: true,
+    browser: {
+      enabled: true,
+      provider: 'playwright',
+      name: 'chromium',
+      headless: true,
+    },
+    coverage: {
+      provider: 'istanbul',
+      include: ['src/**'],
+      thresholds: { statements: %d, branches: %d, functions: %d, lines: %d },
+    },
+  }
+})
+""" % (_COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD)
+
 _VITEST_REACT = """\
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
@@ -180,7 +251,41 @@ class JavaScriptEngine(LanguageEngine):
             pass
         return None
 
+    def check_optional(self) -> list[tuple[str, bool, str]]:
+        import subprocess
+        checks = []
+        try:
+            r = subprocess.run(
+                ["npx", "playwright", "--version"],
+                capture_output=True, timeout=15,
+            )
+            installed = r.returncode == 0
+        except Exception:
+            installed = False
+        if installed:
+            checks.append(("playwright", True, "browser widget validation available"))
+        else:
+            checks.append(("playwright", False,
+                           "not installed - browser widgets (Canvas/WebGL) can't be validated"))
+        return checks
+
     def scaffold(self, target_dir, module_name, display_name, **kwargs):
+        domain = kwargs.get("domain", "")
+
+        if domain == "frontend":
+            self._scaffold_react(target_dir, module_name, display_name)
+        else:
+            self._scaffold_plain(target_dir, module_name, display_name)
+
+    def _scaffold_plain(self, target_dir, module_name, display_name):
+        with open(os.path.join(target_dir, "src", f"{module_name}.js"), "w") as f:
+            f.write(_JS_PLAIN_SRC.format(name=display_name, module=module_name))
+        with open(os.path.join(target_dir, "tests", f"test_{module_name}.js"), "w") as f:
+            f.write(_JS_PLAIN_TEST.format(module=module_name))
+        with open(os.path.join(target_dir, "examples", "example_usage.js"), "w") as f:
+            f.write(_JS_PLAIN_EXAMPLE.format(name=display_name, module=module_name))
+
+    def _scaffold_react(self, target_dir, module_name, display_name):
         component = "".join(w.capitalize() for w in module_name.split("_"))
         css_class = module_name.replace("_", "-")
 
@@ -300,7 +405,10 @@ class JavaScriptEngine(LanguageEngine):
 
     def install_deps(self, path: str, dependencies: list) -> None:
         has_react = self._has_react(dependencies)
-        log.debug("Installing npm packages (react=%s)...", has_react)
+        test_env = self._detect_test_env(path)
+        is_browser = test_env == "browser"
+        coverage_pkg = "@vitest/coverage-istanbul" if is_browser else "@vitest/coverage-v8"
+        log.debug("Installing npm packages (react=%s, env=%s)...", has_react, test_env)
 
         package_json_path = os.path.join(path, "package.json")
 
@@ -310,7 +418,7 @@ class JavaScriptEngine(LanguageEngine):
                 "version": "1.0.0",
                 "type": "module",
                 "dependencies": {},
-                "devDependencies": {"vitest": "^1.0.0", "@vitest/coverage-v8": "^1.0.0"},
+                "devDependencies": {"vitest": "^1.0.0", coverage_pkg: "^1.0.0"},
             }
             if has_react:
                 pkg["devDependencies"].update(_REACT_DEV_DEPS)
@@ -326,7 +434,7 @@ class JavaScriptEngine(LanguageEngine):
                 pkg = json.load(f)
             dev = pkg.setdefault("devDependencies", {})
             changed = False
-            for tool, ver in (("vitest", "^1.0.0"), ("@vitest/coverage-v8", "^1.0.0")):
+            for tool, ver in (("vitest", "^1.0.0"), (coverage_pkg, "^1.0.0")):
                 if tool not in dev and tool not in pkg.get("dependencies", {}):
                     dev[tool] = ver
                     changed = True
@@ -349,12 +457,38 @@ class JavaScriptEngine(LanguageEngine):
 
     # ------------------------------------------------------------------ tests
 
+    @staticmethod
+    def _detect_test_env(path: str) -> str:
+        """Detect which test environment the widget needs from package.json.
+        Returns 'browser', 'dom', or 'node'."""
+        try:
+            with open(os.path.join(path, "package.json")) as f:
+                pkg = json.load(f)
+            all_deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+            if "@vitest/browser" in all_deps:
+                return "browser"
+            if "happy-dom" in all_deps or "jsdom" in all_deps:
+                env = "happy-dom" if "happy-dom" in all_deps else "jsdom"
+                return env
+            return "node"
+        except Exception:
+            return "node"
+
     def run_tests(self, path: str) -> dict:
         has_react = self._has_react(self._read_deps(path))
+        test_env = self._detect_test_env(path)
         config_path = os.path.join(path, f"vitest.config.{uuid.uuid4().hex}.js")
         try:
+            if has_react:
+                vitest_cfg = _VITEST_REACT
+            elif test_env == "browser":
+                vitest_cfg = _VITEST_BROWSER
+            elif test_env in ("happy-dom", "jsdom"):
+                vitest_cfg = _VITEST_DOM.replace("'happy-dom'", f"'{test_env}'")
+            else:
+                vitest_cfg = _VITEST_PLAIN
             with open(config_path, "w") as f:
-                f.write(_VITEST_REACT if has_react else _VITEST_PLAIN)
+                f.write(vitest_cfg)
             res = self._run(
                 ["npx", "vitest", "run", "--coverage", "--config", os.path.basename(config_path)],
                 cwd=path,

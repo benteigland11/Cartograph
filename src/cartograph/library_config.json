@@ -18,7 +18,7 @@
   },
 
   "domain_notes": {
-    "frontend": "All appearance values (colors, spacing, typography, shadows) must be exposed as CSS custom properties - hardcoded values lock consumers into your choices. Provide sensible defaults via :root or the component root but every value must be overridable. No inline styles for anything that could vary by theme.",
+    "frontend": "All appearance values (colors, spacing, typography, shadows) must be exposed as CSS custom properties - hardcoded values lock consumers into your choices. Provide sensible defaults via :root or the component root but every value must be overridable. No inline styles for anything that could vary by theme. Testing: if your widget uses DOM APIs (document, window, events), add 'happy-dom' to devDependencies in package.json - the validator will automatically use it as the test environment. If your widget requires Canvas or WebGL, add '@vitest/browser' and 'playwright' to devDependencies instead - note that Playwright must be installed on the system (run 'npx playwright install chromium').",
     "ml": "Widgets must be fully validatable without large ML frameworks. Use framework-free implementations (numpy, scikit-learn, plain Python) or API-based inference (HTTP calls to OpenAI, Anthropic, HuggingFace Inference API). torch, tensorflow, jax, and any GPU-dependent code are not permitted - the validation pipeline cannot install or verify hardware-dependent dependencies. If your logic requires a framework, it belongs in your project, not the library."
   }
 }
