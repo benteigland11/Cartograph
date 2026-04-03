@@ -45,8 +45,8 @@ pip install --no-cache-dir pytest coverage > /dev/null 2>&1
 echo "  installed"
 PASS=$((PASS + 1))
 
-# 4. Setup - generates agent instructions
-check "cartograph setup --write" cartograph setup --write --agent claude
+# 4. Setup - generates agent instructions (auto-detects or uses --agent)
+check "cartograph setup" cartograph setup --agent claude
 
 # 5. Create a widget
 check "cartograph create" cartograph create backend-hello-python \
@@ -67,7 +67,17 @@ else
 fi
 PASS=$((PASS + 1))
 
-# 8. Stats
+# 8. Data directory structure
+DATA_DIR=$(python -c "from cartograph.engine import _user_data_dir; print(_user_data_dir())")
+check "data dir exists" test -d "$DATA_DIR"
+check "widget library exists" test -d "$DATA_DIR/Widget_Library"
+check "global rules dir exists" test -d "$DATA_DIR/rules"
+check "global rules.py exists" test -f "$DATA_DIR/rules/rules.py"
+check "global rules.js exists" test -f "$DATA_DIR/rules/rules.js"
+check "global rules.nim exists" test -f "$DATA_DIR/rules/rules.nim"
+check "rules.py runs clean" python "$DATA_DIR/rules/rules.py" /tmp
+
+# 9. Stats
 check "cartograph stats" cartograph stats
 
 # 9. Status

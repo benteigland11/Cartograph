@@ -879,6 +879,96 @@ def cmd_cloud_proposals(args):
         out(match)
 
 
+def cmd_rules(args):
+    """List or initialize custom validation rules."""
+    action = getattr(args, "action", None)
+
+    if action == "reset":
+        language = getattr(args, "language", None)
+        scope = getattr(args, "scope", "project")
+
+        if not language:
+            err({"error": "Usage: cartograph rules reset --language python [--global]"})
+
+        from .rules import get_template, get_rules_filename
+        filename = get_rules_filename(language)
+        if not filename:
+            err({"error": f"No rules support for language '{language}'"})
+
+        if scope == "global":
+            from .engine import _user_data_dir
+            rules_dir = os.path.join(_user_data_dir(), "rules")
+        else:
+            rules_dir = os.path.join(os.getcwd(), ".cartograph", "rules")
+
+        filepath = os.path.join(rules_dir, filename)
+        if not os.path.exists(filepath):
+            print(f"\n  No rules file at {filepath}. Use `cartograph rules init` to create one.\n")
+            return
+
+        template = get_template(language)
+        with open(filepath, "w") as f:
+            f.write(template)
+
+        print(f"\n  Reset to default template: {filepath}\n")
+        return
+
+    if action == "init":
+        language = getattr(args, "language", None)
+        scope = getattr(args, "scope", "project")
+
+        if not language:
+            err({"error": "Usage: cartograph rules init --language python [--global]"})
+
+        from .rules import get_template, get_rules_filename
+        filename = get_rules_filename(language)
+        if filename is None:
+            err({"error": f"No rules support for language '{language}'"})
+
+        template = get_template(language)
+        if template is None:
+            err({"error": f"No rules template for language '{language}'"})
+
+        if scope == "global":
+            from .engine import _user_data_dir
+            rules_dir = os.path.join(_user_data_dir(), "rules")
+        else:
+            rules_dir = os.path.join(os.getcwd(), ".cartograph", "rules")
+
+        os.makedirs(rules_dir, exist_ok=True)
+        filepath = os.path.join(rules_dir, filename)
+
+        if os.path.exists(filepath):
+            print(f"\n  Rules file already exists: {filepath}")
+            print(f"  Open it in your editor to add or modify checks.\n")
+            return
+
+        with open(filepath, "w") as f:
+            f.write(template)
+
+        print(f"\n  Created: {filepath}")
+        print(f"  Open it in your editor and uncomment or add checks.")
+        print(f"  It runs automatically during `cartograph validate`.\n")
+        return
+
+    # Default: list rules files
+    from .rules import find_rules
+
+    rules = find_rules()
+    if rules:
+        print()
+        for r in rules:
+            print(f"  {r['language']:<14} {r['scope']:<10} {r['path']}")
+        print()
+    else:
+        print("\n  No custom rules found.")
+        print()
+        print("  Initialize one with:")
+        print("    cartograph rules init --language python")
+        print("    cartograph rules init --language python --global")
+        print()
+
+
 def cmd_workflow(args):
     """List or create workflows."""
     name = getattr(args, "name", None)
@@ -1033,31 +1123,77 @@ creates `backend-retry-backoff-python`.
 
 ### Commands
 
-    cartograph search <query> [--domain ...] [--language ...]
-    cartograph inspect <widget_id> [--source] [--reviews] [--version X]
-    cartograph install <widget_id> [--target .] [--version X]
-    cartograph uninstall <widget_id> [--target .]
-    cartograph upgrade <widget_id> [--target .] [--version X]
-    cartograph status [widget_id] [--target .]
-    cartograph rate <widget_id> <score 1-5> [--comment "..."]
+All commands run from your project root. Widgets install to `cg/` in the
+current directory (or the directory specified by `--target`).
 
-    cartograph create <widget_id> --language <lang> --domain <domain>
-    cartograph validate [path] [--lib]
-    cartograph checkin [path] --reason "..." [--bump patch|minor|major] [--publish]
-    cartograph rollback <widget_id> [--version X] [--reason "..."]
-    cartograph delete <widget_id> [--confirm]       also unpublishes from cloud
+**Find and use widgets**
 
-    cartograph cloud publish [widget_id] [path] [--visibility ...] [--governance ...]
-    cartograph cloud unpublish <widget_id> [--confirm]
-    cartograph cloud settings <@handle/widget_id> [--governance open|protected]
-    cartograph cloud sync [--dry-run]
-    cartograph cloud proposals [widget_id] [proposal_id] [--accept] [--reject]
+    search <query> [--domain ...] [--language ...]
+      Search for widgets matching a query.
 
-    cartograph config [key] [value]
-    cartograph login [--token X]
-    cartograph setup [--agent claude|codex|gemini|cursor] [--write]
-    cartograph doctor
-    cartograph stats
+    inspect <widget_id> [--source] [--reviews] [--version X]
+      View a widget's metadata, source code, or reviews.
+
+    install <widget_id> [--target .] [--version X]
+      Install a widget into your project.
+
+    uninstall <widget_id> [--target .]
+      Remove an installed widget from your project.
+
+    upgrade <widget_id> [--target .] [--version X]
+      Update an installed widget to the latest version.
+
+    status [widget_id] [--target .]
+      Check if an installed widget is outdated or locally modified.
+
+    rate <widget_id> <score 1-5> [--comment "..."]
+      Rate an installed widget (1-5). Ratings affect search ranking.
+
+**Create and publish widgets**
+
+    create <widget_id> --language <lang> --domain <domain>
+      Scaffold a new widget with the correct directory structure.
+
+    validate [path] [--lib]
+      Run tests, check for contamination, and verify widget correctness.
+
+    checkin [path] --reason "..." [--bump patch|minor|major] [--publish]
+      Push an edited widget back to the library. Runs validation if needed.
+
+    rollback <widget_id> [--version X] [--reason "..."]
+      Restore a previous version of a widget from history.
+
+    delete <widget_id> [--confirm]
+      Remove a widget from the library and cloud.
+
+**Cloud registry**
+
+    cloud publish [widget_id] [path] [--visibility ...] [--governance ...]
+      Publish a widget to the cloud registry.
+
+    cloud unpublish <widget_id> [--confirm]
+      Remove a widget from the cloud registry.
+
+    cloud sync [--dry-run]
+      Sync local library with cloud. Higher version wins.
+
+    cloud proposals [widget_id] [--accept] [--reject] [--reason "..."]
+      Review community-submitted changes to your published widgets.
+
+**Configuration**
+
+    config [key] [value]
+      View or change settings.
+
+    setup [--agent ...] [--file X] [--print] [--workflow]
+      Write Cartograph instructions to your agent's config file.
+      Auto-detects agent. Appends, never replaces.
+
+    doctor
+      Check system health - library, languages, cloud connectivity.
+
+    stats
+      Show library statistics.
 """
 
 _WORKFLOW_SECTION = """
@@ -1077,6 +1213,27 @@ _AGENT_FILENAMES = {
     "antigravity":  "GEMINI.md",
     "cursor":       os.path.join(".cursor", "rules", "cartograph.mdc"),
 }
+
+_AGENT_GENERIC_FILE = "AGENT.md"
+
+
+def _detect_agent(directory: str) -> tuple[str | None, str | None]:
+    """Auto-detect which AI agent is in use from project files.
+
+    Returns (agent_name, reason) or (None, None) if nothing detected.
+    Detection order matters - first match wins.
+    """
+    if os.path.isdir(os.path.join(directory, ".claude")):
+        return "claude", ".claude/ directory"
+    if os.path.isfile(os.path.join(directory, "CLAUDE.md")):
+        return "claude", "CLAUDE.md"
+    if os.path.isdir(os.path.join(directory, ".cursor")):
+        return "cursor", ".cursor/ directory"
+    if os.path.isfile(os.path.join(directory, "AGENTS.md")):
+        return "codex", "AGENTS.md"
+    if os.path.isfile(os.path.join(directory, "GEMINI.md")):
+        return "gemini", "GEMINI.md"
+    return None, None
 
 
 
@@ -1372,49 +1529,80 @@ def _resolve_workflow(workflow_arg):
 
 
 def cmd_setup(args):
-    agent = args.agent
-    write = args.write
+    agent = getattr(args, "agent", None)
+    print_only = getattr(args, "print", False)
+    custom_file = getattr(args, "file", None)
+    target_dir = os.getcwd()
 
-    if write and not agent:
-        print("\n  --write requires --agent. Example:")
-        print("    cartograph setup --write --agent claude\n")
-        print("  Supported agents: claude, codex, gemini, antigravity, cursor")
-        sys.exit(1)
-
+    # --- Resolve agent ---
+    detected_reason = None
     if not agent:
-        content = _SETUP_INSTRUCTIONS
-        content += _resolve_workflow(getattr(args, "workflow", None))
-        print(content)
-        print("  # To write to a file, run: cartograph setup --write --agent <agent>")
-        return
+        agent, detected_reason = _detect_agent(target_dir)
 
+    if not agent and not custom_file:
+        if print_only:
+            # No agent needed for --print, just show the content
+            agent = None
+        else:
+            print("\n  Could not auto-detect agent (no .claude/, .cursor/, AGENTS.md, or GEMINI.md found).")
+            print()
+            print("  Options:")
+            print("    cartograph setup --agent claude       specify agent explicitly")
+            print("    cartograph setup --file opencode.md   write to a custom file")
+            print()
+            print(f"  Or create a generic AGENT.md:")
+            print(f"    cartograph setup --file AGENT.md")
+            print()
+            return
+
+    # --- Build content ---
     content = _SETUP_INSTRUCTIONS
     content += _resolve_workflow(getattr(args, "workflow", None))
-    filename = _AGENT_FILENAMES[agent]
+
+    # --- Resolve target file ---
+    if custom_file:
+        filename = custom_file
+    elif agent:
+        filename = _AGENT_FILENAMES.get(agent, _AGENT_GENERIC_FILE)
+    else:
+        filename = None
 
     if agent == "cursor":
         content = _cursor_mdc(content)
 
-    if write:
-        target_dir = os.getcwd()
-        filepath = os.path.join(target_dir, filename)
-        parent = os.path.dirname(filepath)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-
-        marker = "## Cartograph"
-        if os.path.exists(filepath):
-            existing = open(filepath).read()
-            if marker in existing:
-                print(f"\n  Cartograph section already exists in {filepath}")
-                print(f"  Remove the existing ## Cartograph section and re-run to replace it.\n")
-                sys.exit(1)
-        with open(filepath, "a") as f:
-            f.write("\n" + content)
-        print(f"\n  Written to {filepath}\n")
-    else:
+    # --- Print mode ---
+    if print_only:
         print(content)
-        print(f"  # Add this to your {filename}, or run: cartograph setup --write")
+        if filename:
+            print(f"  # To write this to {filename}: cartograph setup" +
+                  (f" --agent {agent}" if agent else "") +
+                  (f" --file {custom_file}" if custom_file else ""))
+        return
+
+    # --- Write mode (default) ---
+    filepath = os.path.join(target_dir, filename)
+    parent = os.path.dirname(filepath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    marker = "## Cartograph"
+    if os.path.exists(filepath):
+        with open(filepath) as f:
+            existing = f.read()
+        if marker in existing:
+            print(f"\n  Cartograph section already exists in {filepath}")
+            print(f"  Remove the existing ## Cartograph section and re-run to replace it.\n")
+            sys.exit(1)
+
+    with open(filepath, "a") as f:
+        f.write("\n" + content)
+
+    if detected_reason:
+        print(f"\n  Detected {agent} (found {detected_reason})")
+    print(f"  Appended to {filepath}")
+    if not getattr(args, "workflow", None):
+        print(f"  Tip: add --workflow to include suggested workflow guidelines")
+    print()
 
 
 # ---------------------------------------------------------------------------
@@ -1690,6 +1878,20 @@ def _build_cli() -> AgentCLI:
             ],
         },
         {
+            "name": "rules",
+            "help": "List or initialize custom validation rules",
+            "handler": cmd_rules,
+            "args": [
+                {"name": "action", "nargs": "?", "default": None,
+                 "help": "'init' to create, 'reset' to restore default template, omit to list"},
+                {"name": "--language", "default": None,
+                 "help": "Language for the rules file"},
+                {"name": "--global", "action": "store_const", "const": "global",
+                 "default": "project", "dest": "scope",
+                 "help": "Create as a global rules file"},
+            ],
+        },
+        {
             "name": "workflow",
             "help": "List, view, or create workflows",
             "handler": cmd_workflow,
@@ -1704,12 +1906,16 @@ def _build_cli() -> AgentCLI:
         },
         {
             "name": "setup",
-            "help": "Generate and write agent instructions",
+            "help": "Set up Cartograph for your AI agent (auto-detects and appends)",
             "handler": cmd_setup,
             "args": [
                 {"name": "--agent", "default": None,
-                 "choices": ["claude", "codex", "gemini", "antigravity", "cursor"]},
-                {"name": "--write", "action": "store_true", "default": False},
+                 "choices": ["claude", "codex", "gemini", "antigravity", "cursor"],
+                 "help": "Agent to configure (auto-detected if omitted)"},
+                {"name": "--file", "default": None,
+                 "help": "Write to a custom file instead of the agent default"},
+                {"name": "--print", "action": "store_true", "default": False,
+                 "help": "Print instructions to stdout instead of writing"},
                 {"name": "--workflow", "nargs": "?", "default": None, "const": "default",
                  "help": "Include workflow (default or custom name from workflows/)"},
             ],

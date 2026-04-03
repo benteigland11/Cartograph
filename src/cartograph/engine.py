@@ -42,6 +42,26 @@ def _ensure_library(path: str) -> None:
             dst = os.path.join(path, item)
             if os.path.isdir(src) and not os.path.exists(dst):
                 shutil.copytree(src, dst)
+    _ensure_global_rules()
+
+
+def _ensure_global_rules() -> None:
+    """Create global rules templates for any languages that don't have one yet."""
+    rules_dir = os.path.join(_user_data_dir(), "rules")
+    try:
+        from .rules import _LANGUAGE_RULES, get_template, get_rules_filename
+        os.makedirs(rules_dir, exist_ok=True)
+        for lang in _LANGUAGE_RULES:
+            filename = get_rules_filename(lang)
+            template = get_template(lang)
+            if not filename or not template:
+                continue
+            filepath = os.path.join(rules_dir, filename)
+            if not os.path.exists(filepath):
+                with open(filepath, "w") as f:
+                    f.write(template)
+    except Exception as e:
+        log.debug("Could not create global rules templates: %s", e)
 
 
 def _resolve_library_path() -> str:

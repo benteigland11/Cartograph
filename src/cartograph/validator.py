@@ -238,7 +238,21 @@ def validate_item(carto, path):
             return {"status": "error", "message": "Tests failed. Fix before checkin.",
                     "test_output": test_error[:3000]}
 
-        # 10. Uniqueness check
+        # 10. Custom validation rules
+        from .rules import run_all_rules
+        custom = run_all_rules(path, language)
+        if custom["rules_run"] > 0:
+            if custom["blocks"]:
+                check("Custom rules pass", False,
+                      "Custom rule blocks:\n" + "\n".join(custom["blocks"]))
+                _print_checklist(checklist, errors + custom["blocks"], failed=True)
+                return {"status": "error",
+                        "message": "Custom validation rules failed.",
+                        "blocks": custom["blocks"]}
+            contam_warnings.extend(custom["warnings"])
+            check(f"Custom rules pass ({custom['rules_run']} rules)", True)
+
+        # 11. Uniqueness check
         current_hash = carto._calculate_implementation_hash(path)
         duplicate = next((w for w in carto.widgets
                           if w.get("implementation_hash") == current_hash

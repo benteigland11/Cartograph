@@ -23,72 +23,100 @@ Do not edit installed widget files directly - local edits are overwritten on
 update. Wrap or extend in your own code instead.
 
 ### Commands
-`<arg>` = required  `[arg]` = optional  defaults shown where relevant
+`<arg>` = required  `[arg]` = optional
+
+All commands run from your project root. Widgets install to `cg/` in the
+current directory (or the directory specified by `--target`).
 
 **Find and use widgets**
 
-    cartograph search <query>
-        [--domain backend|data|ml|security|infra|frontend|universal]
-        [--language python|javascript|typescript|nim]
+    cartograph search <query> [--domain ...] [--language ...]
+      Search for widgets matching a query.
 
-    cartograph inspect <widget_id>
-        [--source]         include source files
-        [--reviews]        include review comments
-        [--all-versions]   list full version history
-        [--version X]      inspect a specific version
+    cartograph inspect <widget_id> [--source] [--reviews] [--version X]
+      View a widget's metadata, source code, or reviews.
 
     cartograph install <widget_id> [--target .] [--version X]
+      Install a widget into your project.
+
     cartograph uninstall <widget_id> [--target .]
+      Remove an installed widget from your project.
+
     cartograph upgrade <widget_id> [--target .] [--version X]
+      Update an installed widget to the latest version.
+
     cartograph status [widget_id] [--target .]
-    cartograph rate <widget_id> <score 1-5> [--comment "..."] [--target .]
+      Check if an installed widget is outdated or locally modified.
+
+    cartograph rate <widget_id> <score 1-5> [--comment "..."]
+      Rate an installed widget (1-5). Ratings affect search ranking.
 
 **Create and publish widgets**
 
-    cartograph create <widget_id>
-        --language python|javascript|typescript|nim    REQUIRED
-        --domain backend|data|ml|security|infra|frontend|universal  REQUIRED
-        [--name "Display Name"] [--target .]
+    cartograph create <widget_id> --language <lang> --domain <domain>
+      Scaffold a new widget with the correct directory structure.
 
-    cartograph validate [path] [--lib]   path defaults to .
-    cartograph checkin [path]            path defaults to .
-        --reason "what changed and why"  REQUIRED
-        [--bump patch|minor|major]       defaults to minor
-        [--publish]                      also publish to cloud
+    cartograph validate [path] [--lib]
+      Run tests, check for contamination, and verify widget correctness.
+
+    cartograph checkin [path] --reason "..." [--bump patch|minor|major] [--publish]
+      Push an edited widget back to the library. Runs validation if needed.
 
     cartograph rollback <widget_id> [--version X] [--reason "..."]
-    cartograph delete <widget_id> [--confirm]       also unpublishes from cloud
+      Restore a previous version of a widget from history.
+
+    cartograph delete <widget_id> [--confirm]
+      Remove a widget from the library and cloud.
 
 **Cloud registry**
 
-    cartograph cloud publish [widget_id] [path]
-        [--lib]                          publish from library by ID
-        [--visibility public|private]    override default visibility
-        [--governance open|protected]    override default governance
+    cartograph cloud publish [widget_id] [path] [--visibility ...] [--governance ...]
+      Publish a widget to the cloud registry.
+
     cartograph cloud unpublish <widget_id> [--confirm]
-    cartograph cloud settings <@handle/widget_id>
-        [--governance open|protected]    change governance model
-    cartograph cloud sync [--dry-run]    sync library with cloud (higher version wins)
-    cartograph cloud proposals [widget_id] [proposal_id]
-        [--accept] [--reject] [--reason "..."]
+      Remove a widget from the cloud registry.
+
+    cartograph cloud sync [--dry-run]
+      Sync local library with cloud. Higher version wins.
+
+    cartograph cloud proposals [widget_id] [--accept] [--reject] [--reason "..."]
+      Review community-submitted changes to your published widgets.
 
 **Library transfer**
 
-    cartograph export [--output file.zip]     default: cartograph-library.zip
-    cartograph import <file.zip> [--force]    --force overwrites existing files
+    cartograph export [--output file.zip]
+      Export the widget library as a zip for backup or transfer.
+
+    cartograph import <file.zip> [--force]
+      Import a widget library from a zip. --force overwrites existing files.
+
+**Custom validation rules**
+
+    cartograph rules
+      List all active rules files.
+
+    cartograph rules init --language <lang> [--global]
+      Create a rules file from a template. Edit it in your editor to add
+      checks. Runs automatically during `cartograph validate`.
+      Per-project: .cartograph/rules/   Global: <data_dir>/rules/
 
 **Configuration**
 
-    cartograph config                      show all settings
-    cartograph config <key>                get a setting
-    cartograph config <key> <value>        set a setting
+    cartograph config [key] [value]
+      View or change settings.
 
-    Keys: auto-publish, visibility, governance, cloud, show-unavailable
+    cartograph setup [--agent ...] [--file X] [--print] [--workflow]
+      Write Cartograph instructions to your agent's config file.
+      Auto-detects agent. Appends, never replaces.
 
 **Library and account**
 
     cartograph stats
+      Show library statistics.
+
     cartograph doctor
+      Check system health - library, languages, cloud connectivity.
+
     cartograph login [--token X]
     cartograph logout
     cartograph whoami
