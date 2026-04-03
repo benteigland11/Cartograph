@@ -1620,7 +1620,7 @@ def cmd_setup(args):
             if workflow_marker in existing:
                 print(f"  Workflow section is already included.")
             print(f"  Remove the existing ## Cartograph section and re-run to replace it.\n")
-            sys.exit(1)
+            return
 
     with open(filepath, "a") as f:
         f.write("\n" + content)

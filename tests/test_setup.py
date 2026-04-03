@@ -118,7 +118,7 @@ def test_setup_appends_not_replaces(tmp_path):
 
 
 def test_setup_duplicate_detection(tmp_path):
-    """Running setup twice should fail with 'already exists' message."""
+    """Running setup twice should succeed with 'already exists' message."""
     import subprocess
     os.makedirs(tmp_path / ".claude")
     # First run
@@ -131,7 +131,7 @@ def test_setup_duplicate_detection(tmp_path):
         ["python", "-m", "cartograph", "setup"],
         capture_output=True, text=True, cwd=str(tmp_path),
     )
-    assert result.returncode != 0
+    assert result.returncode == 0
     assert "already exists" in result.stdout
 
 
