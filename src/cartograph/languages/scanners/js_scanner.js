@@ -440,15 +440,25 @@ function scanFile(filename) {
   const inTests = filename.includes('/tests/') || filename.includes('\\tests\\')
   const inExamples = filename.includes('/examples/') || filename.includes('\\examples\\')
 
-  detectMemberCall(
-    tokens,
-    'console',
-    new Set(['log', 'warn', 'error', 'debug', 'info', 'trace']),
-    'console_log',
-    member => `console.${member}() call - remove debug output from src/`,
-    findings,
-    filename
-  )
+  if (!inExamples) {
+    const consoleSeverity = inTests ? 'warning' : undefined
+    const consoleFindings = []
+    detectMemberCall(
+      tokens,
+      'console',
+      new Set(['log', 'warn', 'error', 'debug', 'info', 'trace']),
+      'console_log',
+      member => inTests
+        ? `console.${member}() in test - consider removing debug output`
+        : `console.${member}() call - remove debug output from src/`,
+      consoleFindings,
+      filename
+    )
+    for (const f of consoleFindings) {
+      if (consoleSeverity) f.severity = consoleSeverity
+      findings.push(f)
+    }
+  }
 
   detectMemberCall(
     tokens,

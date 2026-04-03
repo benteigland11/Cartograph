@@ -188,6 +188,50 @@ def _write(path, content):
         f.write(content)
 
 
+def _make_nim_widget(base, widget_id, name, version, domain, tags,
+                     description, nimble_name, src_name, src_content,
+                     test_content, example_content):
+    """Scaffold a minimal Nim widget directory under *base*."""
+    wdir = os.path.join(base, widget_id)
+    os.makedirs(wdir, exist_ok=True)
+    manifest = {
+        "meta": {"id": widget_id, "name": name, "version": version,
+                 "tags": tags, "domain": domain},
+        "description": description,
+        "tech_stack": {"language": "nim", "dependencies": []},
+    }
+    _write(os.path.join(wdir, "widget.json"), json.dumps(manifest, indent=2))
+    _write(os.path.join(wdir, f"{nimble_name}.nimble"),
+           f'version = "0.1.0"\nauthor = "Test"\ndescription = "{name}"\n'
+           f'license = "MIT"\nsrcDir = "src"\nrequires "nim >= 2.0.0"\n')
+    _write(os.path.join(wdir, "src", src_name), src_content)
+    _write(os.path.join(wdir, "tests", f"test_{nimble_name}.nim"), test_content)
+    _write(os.path.join(wdir, "examples", "example_usage.nim"), example_content)
+    return wdir
+
+
+def _make_js_widget(base, widget_id, name, version, domain, tags,
+                    description, src_name, src_content,
+                    test_content, example_content):
+    """Scaffold a minimal JS widget directory under *base*."""
+    wdir = os.path.join(base, widget_id)
+    os.makedirs(wdir, exist_ok=True)
+    manifest = {
+        "meta": {"id": widget_id, "name": name, "version": version,
+                 "tags": tags, "domain": domain},
+        "description": description,
+        "tech_stack": {"language": "javascript", "dependencies": []},
+    }
+    _write(os.path.join(wdir, "widget.json"), json.dumps(manifest, indent=2))
+    pkg = {"name": widget_id, "version": "0.1.0", "type": "module",
+           "scripts": {"test": "vitest run"}}
+    _write(os.path.join(wdir, "package.json"), json.dumps(pkg, indent=2))
+    _write(os.path.join(wdir, "src", src_name), src_content)
+    _write(os.path.join(wdir, "tests", f"test_{src_name}"), test_content)
+    _write(os.path.join(wdir, "examples", "example_usage.js"), example_content)
+    return wdir
+
+
 def _make_widget(base, widget_id, name, version, domain, language, tags,
                  description, dependencies, src_name, src_content,
                  test_content, example_content):
@@ -251,6 +295,22 @@ def fixture_dir(tmp_path_factory):
         [],
         "auth_middleware.py", _AUTH_MIDDLEWARE_SRC,
         _AUTH_MIDDLEWARE_TEST, _AUTH_MIDDLEWARE_EXAMPLE,
+    )
+    _make_nim_widget(
+        lib, "universal-add-nim", "Nim Add", "1.0.0", "universal",
+        ["math", "add"], "A simple add function.",
+        "add", "add_lib.nim",
+        'func add*(a, b: int): int = a + b\n',
+        'import std/unittest\nimport add_lib\nsuite "add":\n  test "1+1": check add(1,1) == 2\n',
+        'import add_lib\necho add(2, 3)\n',
+    )
+    _make_js_widget(
+        lib, "data-sum-javascript", "JS Sum", "1.0.0", "data",
+        ["math", "sum"], "A simple sum function.",
+        "sum.js",
+        'export function sum(a, b) { return a + b; }\n',
+        'import { sum } from "../src/sum.js";\nif (sum(1,1) !== 2) throw new Error("fail");\n',
+        'import { sum } from "../src/sum.js";\nconsole.log(sum(2, 3));\n',
     )
 
     return root

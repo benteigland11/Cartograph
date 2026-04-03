@@ -35,6 +35,8 @@ def _copy_widget(source_path, dest_path):
             shutil.copy2(path, dest_path)
     for csproj in glob.glob(os.path.join(source_path, "*.csproj")):
         shutil.copy2(csproj, dest_path)
+    for nimble in glob.glob(os.path.join(source_path, "*.nimble")):
+        shutil.copy2(nimble, dest_path)
 
 
 def _widget_dir(target_dir, widget_id):

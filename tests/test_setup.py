@@ -182,7 +182,7 @@ def test_setup_with_workflow(tmp_path):
     )
     assert result.returncode == 0
     content = (tmp_path / "CLAUDE.md").read_text()
-    assert "Suggested workflow" in content
+    assert "### Workflow" in content
 
 
 def test_setup_without_workflow_shows_tip(tmp_path):

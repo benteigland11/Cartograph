@@ -116,7 +116,21 @@ _REACT_DEV_DEPS = {
     "esbuild": "^0.20.0",
 }
 
-_VITEST_PLAIN = "export default { test: { include: ['tests/test_*.*'], globals: true } }\n"
+_COVERAGE_THRESHOLD = 80
+
+_VITEST_PLAIN = """\
+export default {
+  test: {
+    include: ['tests/test_*.*'],
+    globals: true,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**'],
+      thresholds: { statements: %d, branches: %d, functions: %d, lines: %d },
+    },
+  }
+}
+""" % (_COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD)
 
 _VITEST_REACT = """\
 import { defineConfig } from 'vitest/config'
@@ -127,9 +141,14 @@ export default defineConfig({
     include: ['tests/test_*.*'],
     environment: 'jsdom',
     globals: true,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**'],
+      thresholds: { statements: %d, branches: %d, functions: %d, lines: %d },
+    },
   }
 })
-"""
+""" % (_COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD, _COVERAGE_THRESHOLD)
 
 
 class JavaScriptEngine(LanguageEngine):
@@ -291,7 +310,7 @@ class JavaScriptEngine(LanguageEngine):
                 "version": "1.0.0",
                 "type": "module",
                 "dependencies": {},
-                "devDependencies": {"vitest": "^1.0.0"},
+                "devDependencies": {"vitest": "^1.0.0", "@vitest/coverage-v8": "^1.0.0"},
             }
             if has_react:
                 pkg["devDependencies"].update(_REACT_DEV_DEPS)
@@ -307,9 +326,10 @@ class JavaScriptEngine(LanguageEngine):
                 pkg = json.load(f)
             dev = pkg.setdefault("devDependencies", {})
             changed = False
-            if "vitest" not in dev and "vitest" not in pkg.get("dependencies", {}):
-                dev["vitest"] = "^1.0.0"
-                changed = True
+            for tool, ver in (("vitest", "^1.0.0"), ("@vitest/coverage-v8", "^1.0.0")):
+                if tool not in dev and tool not in pkg.get("dependencies", {}):
+                    dev[tool] = ver
+                    changed = True
             if has_react:
                 for dep_name, dep_ver in _REACT_DEV_DEPS.items():
                     if dep_name not in dev and dep_name not in pkg.get("dependencies", {}):
@@ -336,7 +356,7 @@ class JavaScriptEngine(LanguageEngine):
             with open(config_path, "w") as f:
                 f.write(_VITEST_REACT if has_react else _VITEST_PLAIN)
             res = self._run(
-                ["npx", "vitest", "run", "--config", os.path.basename(config_path)],
+                ["npx", "vitest", "run", "--coverage", "--config", os.path.basename(config_path)],
                 cwd=path,
                 timeout=60,
             )
@@ -389,9 +409,10 @@ class JavaScriptEngine(LanguageEngine):
     # ------------------------------------------------------------------ cleanup
 
     def cleanup(self, path: str) -> None:
-        nm = os.path.join(path, "node_modules")
-        if os.path.exists(nm):
-            shutil.rmtree(nm, ignore_errors=True)
+        for dirname in ("node_modules", "coverage"):
+            d = os.path.join(path, dirname)
+            if os.path.exists(d):
+                shutil.rmtree(d, ignore_errors=True)
 
 
 class TypeScriptEngine(JavaScriptEngine):

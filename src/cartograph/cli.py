@@ -1180,6 +1180,19 @@ current directory (or the directory specified by `--target`).
     cloud proposals [widget_id] [--accept] [--reject] [--reason "..."]
       Review community-submitted changes to your published widgets.
 
+**Custom validation rules**
+
+    rules
+      List all active rules files.
+
+    rules init --language <lang> [--global]
+      Create a rules file from a template. Edit it in your editor to add
+      checks. Runs automatically during `cartograph validate`.
+      Per-project: .cartograph/rules/   Global: <data_dir>/rules/
+
+    rules reset --language <lang> [--global]
+      Restore a rules file to its default template.
+
 **Configuration**
 
     config [key] [value]
@@ -1197,12 +1210,17 @@ current directory (or the directory specified by `--target`).
 """
 
 _WORKFLOW_SECTION = """
-### Suggested workflow
+### Workflow
+
+Think in terms of widgets. Need to add capability, search for a widget.
+
+If you are adding a feature always consider whether it can be added into an existing widget. If not, consider if it could be added as a new widget.
+Only project specific wiring should not be made into widgets.
 
 1. Plan what components you need before building
 2. Search the library before writing new logic
-3. Install widgets, then write glue code to connect them - don't edit widget source directly
-4. If you do edit a widget, only do so if you intend to check it back in as an improvement
+3. Install widgets, then write glue code to connect them. Don't edit widget source directly for this step.
+4. If you do edit a widget, only do so if you intend to check it back in as an improvement for the general logic of the widget.
 5. Validate before checking in, check in before publishing
 """
 
@@ -1586,11 +1604,21 @@ def cmd_setup(args):
         os.makedirs(parent, exist_ok=True)
 
     marker = "## Cartograph"
+    workflow_marker = "### Workflow"
     if os.path.exists(filepath):
         with open(filepath) as f:
             existing = f.read()
         if marker in existing:
+            # Section exists - check if user is just adding workflow
+            workflow_content = _resolve_workflow(getattr(args, "workflow", None))
+            if workflow_content and workflow_marker not in existing:
+                with open(filepath, "a") as f:
+                    f.write("\n" + workflow_content)
+                print(f"\n  Added workflow to existing Cartograph section in {filepath}")
+                return
             print(f"\n  Cartograph section already exists in {filepath}")
+            if workflow_marker in existing:
+                print(f"  Workflow section is already included.")
             print(f"  Remove the existing ## Cartograph section and re-run to replace it.\n")
             sys.exit(1)
 

@@ -440,10 +440,10 @@ _TEMPLATE_NIM = """\
 ##
 ## RUNNING EXTRA TESTS
 ## -------------------
-## Cartograph runs your widget's tests with its own flags. If you want more
-## from testament (--megatest, custom patterns, etc), call it again from
-## here via execCmdEx. Tests will run twice - once Cartograph's way (the
-## quality guarantee), once yours (your preferences).
+## Cartograph runs your widget's tests via nimble test. If you want to use
+## testament (--megatest, custom patterns, etc), call it from here via
+## execCmdEx. Tests will run twice - once Cartograph's way (the quality
+## guarantee), once yours (your preferences).
 ##
 ##   let res = execCmdEx("testament --megatest pattern tests/")
 ##   if res.exitCode != 0:

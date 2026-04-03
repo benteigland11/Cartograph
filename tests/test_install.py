@@ -69,3 +69,35 @@ def test_uninstall_not_installed(fresh_carto):
     carto, target = fresh_carto
     result = carto.uninstall("http-client", target)
     assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Language-specific file preservation on install
+# ---------------------------------------------------------------------------
+
+def test_install_python_has_init(fresh_carto):
+    """Python widget install should include src/__init__.py."""
+    carto, target = fresh_carto
+    result = carto.install("http-client", target)
+    assert result.get("status") == "success"
+    widget_dir = result["installed_at"]
+    assert os.path.exists(os.path.join(widget_dir, "src", "__init__.py"))
+
+
+def test_install_nim_has_nimble(fresh_carto):
+    """Nim widget install should include the .nimble file."""
+    carto, target = fresh_carto
+    result = carto.install("universal-add-nim", target)
+    assert result.get("status") == "success"
+    widget_dir = result["installed_at"]
+    nimble_files = [f for f in os.listdir(widget_dir) if f.endswith(".nimble")]
+    assert len(nimble_files) == 1, f"Expected 1 .nimble file, found: {nimble_files}"
+
+
+def test_install_js_has_package_json(fresh_carto):
+    """JS widget install should include package.json."""
+    carto, target = fresh_carto
+    result = carto.install("data-sum-javascript", target)
+    assert result.get("status") == "success"
+    widget_dir = result["installed_at"]
+    assert os.path.exists(os.path.join(widget_dir, "package.json"))

@@ -191,12 +191,14 @@ proc scanFile(filename: string): seq[Finding] =
 
     # --- Checks ---
 
-    # echo detection
+    # echo detection - block in src/, warn in tests, allow in examples
     if code.startsWith("echo ") or code.startsWith("echo(") or code == "echo":
-      result.add(Finding(
-        file: filename, kind: "echo", line: lineNo,
-        detail: "echo call - remove debug output from src/",
-        severity: "error"))
+      if not inExamples:
+        result.add(Finding(
+          file: filename, kind: "echo", line: lineNo,
+          detail: if inTests: "echo in test - consider removing debug output"
+                  else: "echo call - remove debug output from src/",
+          severity: if inTests: "warning" else: "error"))
 
     # quit detection
     if code.startsWith("quit") and (code.len == 4 or code[4] in {'(', ' '}):
