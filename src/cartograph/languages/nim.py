@@ -81,9 +81,9 @@ class NimEngine(LanguageEngine):
         "global": "{.global.} found in src/ - widgets must not use global mutable state:",
         "main_module": "when isMainModule found in src/ - widgets are libraries, not executables:",
         "os_specific": "OS-specific when defined() found in src/ - widgets must validate on all platforms:",
-        "risky_import": "Risky stdlib imports found in src/ - flagged for review:",
     }
     scanner_warning_messages = {
+        "risky_import": "Stdlib I/O or network imports found in src/ - ensure no hardcoded paths, URLs, or commands:",
         "abs_path": "Absolute paths found in src/ - widgets must be portable:",
         "credential": "Possible credentials found in src/ - remove before checkin:",
         "hardcoded_url": "Hardcoded URLs found in src/ - consider making these configurable:",

@@ -204,24 +204,32 @@ class LanguageEngine:
 
             for line_no, line in enumerate(code.splitlines(), 1):
                 loc = f"{rel}:{line_no}"
+                stripped = line.strip()
+                is_comment = stripped.startswith("//") or stripped.startswith("#")
                 if is_src:
-                    if abs_path_re.search(line):
-                        blocks.append(f"Absolute path in {loc}: {line.strip()}")
+                    if not is_comment and abs_path_re.search(line):
+                        blocks.append(f"Absolute path in {loc}: {stripped}")
                     if credential_re.search(line):
-                        blocks.append(f"Possible credential in {loc}: {line.strip()}")
+                        blocks.append(f"Possible credential in {loc}: {stripped}")
                     if url_re.search(line):
-                        warnings.append(f"Hardcoded URL in {loc}: {line.strip()}")
-                    if ip_re.search(line):
-                        blocks.append(f"Hardcoded IP in {loc}: {line.strip()}")
+                        warnings.append(f"Hardcoded URL in {loc}: {stripped}")
+                    m_ip = ip_re.search(line)
+                    if m_ip:
+                        octets = m_ip.group().strip("\"'").split(":")[0].split(".")
+                        if any(len(o) >= 2 for o in octets):
+                            blocks.append(f"Hardcoded IP in {loc}: {stripped}")
                     if number_re.match(line):
-                        warnings.append(f"Hardcoded value in {loc}: {line.strip()} - consider making this a parameter")
+                        warnings.append(f"Hardcoded value in {loc}: {stripped} - consider making this a parameter")
                 else:
                     if credential_re.search(line):
-                        warnings.append(f"Possible credential in test {loc} - verify it's fake: {line.strip()}")
+                        warnings.append(f"Possible credential in test {loc} - verify it's fake: {stripped}")
                     if url_re.search(line):
-                        warnings.append(f"Hardcoded URL in test {loc} - verify it's not project-specific: {line.strip()}")
-                    if ip_re.search(line):
-                        warnings.append(f"Hardcoded IP in test {loc} - verify it's not project-specific: {line.strip()}")
+                        warnings.append(f"Hardcoded URL in test {loc} - verify it's not project-specific: {stripped}")
+                    m_ip = ip_re.search(line)
+                    if m_ip:
+                        octets = m_ip.group().strip("\"'").split(":")[0].split(".")
+                        if any(len(o) >= 2 for o in octets):
+                            warnings.append(f"Hardcoded IP in test {loc} - verify it's not project-specific: {stripped}")
 
         return {"blocks": blocks, "warnings": warnings}
 

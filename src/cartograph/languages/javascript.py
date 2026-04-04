@@ -138,7 +138,6 @@ class JavaScriptEngine(LanguageEngine):
         "console_log": "console.log() found in src/ - remove debug output before checkin:",
         "process_exit": "process.exit() found in src/ - widgets must not exit the process:",
         "eval": "eval() found in src/ - dynamic code execution is a security risk:",
-        "risky_import": "Risky imports found in src/ - flagged for review:",
     }
     import_pattern = r"from\s+['\"]\.\.?/src/"
     manifest_patterns = ["package.json"]
@@ -231,6 +230,7 @@ class JavaScriptEngine(LanguageEngine):
         "env_var": "Environment variable access found in src/ - verify it's not project-specific:",
         "unlisted_import": "Unlisted imports found in src/ - add to dependencies or remove:",
         "sleep": "Sleep/blocking calls found - widgets must not block the caller:",
+        "risky_import": "Node.js I/O or network imports found in src/ - ensure no hardcoded paths, URLs, or commands:",
     }
 
     def validate_widget(self, path: str, dependencies: list) -> dict:
@@ -437,7 +437,13 @@ class TypeScriptEngine(JavaScriptEngine):
     aliases = ["ts"]
     file_ext = "ts"
 
-    def scaffold(self, target_dir, module_name, display_name, **_):
+    def scaffold(self, target_dir, module_name, display_name, **kwargs):
+        # Let JS scaffold handle package.json and vitest config (domain branching for happy-dom)
+        super().scaffold(target_dir, module_name, display_name, **kwargs)
+        # Overwrite JS source files with TypeScript equivalents
+        os.remove(os.path.join(target_dir, "src", f"{module_name}.js"))
+        os.remove(os.path.join(target_dir, "tests", f"test_{module_name}.js"))
+        os.remove(os.path.join(target_dir, "examples", "example_usage.js"))
         with open(os.path.join(target_dir, "src", f"{module_name}.ts"), "w") as f:
             f.write(_TS_SRC.format(name=display_name, module=module_name))
         with open(os.path.join(target_dir, "tests", f"test_{module_name}.ts"), "w") as f:

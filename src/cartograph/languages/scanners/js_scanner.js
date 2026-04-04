@@ -408,7 +408,11 @@ function detectStringContamination(tokens, filename, findings, inTests) {
         addFinding(findings, filename, 'hardcoded_url', tok.line, `hardcoded URL "${value.substring(0, 60)}"`, 'warning')
       }
       if (IP_RE.test(value)) {
-        addFinding(findings, filename, 'hardcoded_ip', tok.line, `hardcoded IP "${value}"`, inTests ? 'warning' : 'block')
+        // Skip single-digit-only patterns like "1.2.3.4" which are indistinguishable from version strings
+        const octets = value.split(':')[0].split('.')
+        if (octets.some(o => o.length >= 2)) {
+          addFinding(findings, filename, 'hardcoded_ip', tok.line, `hardcoded IP "${value}"`, inTests ? 'warning' : 'block')
+        }
       }
 
       let assignmentHead = ''

@@ -296,17 +296,11 @@ def list_widgets(top_k: int = 500) -> dict:
 
 
 def list_my_widgets() -> list[dict]:
-    """Return the authenticated user's cloud widgets, or empty list on failure."""
-    profile = whoami()
-    if "error" in profile:
+    """Return the authenticated user's cloud widgets (public and private), or empty list on failure."""
+    result = _get("/v1/auth/my-widgets")
+    if "error" in result:
         return []
-    handle = profile.get("owner", "")
-    if not handle:
-        return []
-    all_w = list_widgets()
-    if "error" in all_w:
-        return []
-    return [w for w in all_w.get("widgets", []) if w.get("owner") == handle]
+    return result.get("widgets", [])
 
 
 def _delete(path: str) -> dict:

@@ -165,14 +165,16 @@ class PythonEngine(LanguageEngine):
             # Line-level checks (abs paths, credentials, URLs, IPs)
             for line_no, line in enumerate(code.splitlines(), 1):
                 loc = f"{rel}:{line_no}"
+                stripped = line.strip()
+                is_comment = stripped.startswith("#")
                 if is_src:
-                    if self._ABS_PATH_RE.search(line):
-                        blocks.append(f"Absolute path in {loc}: {line.strip()}")
+                    if not is_comment and self._ABS_PATH_RE.search(line):
+                        blocks.append(f"Absolute path in {loc}: {stripped}")
                     if self._CREDENTIAL_RE.search(line):
-                        blocks.append(f"Possible credential in {loc}: {line.strip()}")
+                        blocks.append(f"Possible credential in {loc}: {stripped}")
                 else:
                     if self._CREDENTIAL_RE.search(line):
-                        warnings.append(f"Possible credential in test {loc} - verify it's fake: {line.strip()}")
+                        warnings.append(f"Possible credential in test {loc} - verify it's fake: {stripped}")
 
             for m in self._URL_RE.finditer(code):
                 line_no = code[:m.start()].count("\n") + 1
@@ -180,10 +182,14 @@ class PythonEngine(LanguageEngine):
 
             for m in self._IP_RE.finditer(code):
                 line_no = code[:m.start()].count("\n") + 1
-                if is_src:
-                    blocks.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
-                else:
-                    warnings.append(f"Hardcoded IP in test {rel}:{line_no} - verify it's not project-specific: {m.group()}")
+                # Only flag if at least one octet has 2+ digits - single-digit-only
+                # patterns like "1.2.3.4" are indistinguishable from version strings.
+                octets = m.group().strip("\"'").split(":")[0].split(".")
+                if any(len(o) >= 2 for o in octets):
+                    if is_src:
+                        blocks.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
+                    else:
+                        warnings.append(f"Hardcoded IP in test {rel}:{line_no} - verify it's not project-specific: {m.group()}")
 
             # AST-based checks
             try:
@@ -331,17 +337,19 @@ class PythonEngine(LanguageEngine):
             # Normalise: strip version specifiers to get the base package name
             base_name = dep_name.split("[")[0].split("==")[0].split(">=")[0].split("<=")[0].split("!=")[0].strip().lower()
             if base_name in _HEAVY_ML_DEPS:
-                # Check if it's already importable in the current environment
+                # Heavy ML frameworks (torch, tensorflow, jax, etc.) are not auto-installed
+                # by Cartograph because they are large, hardware-dependent, and may require
+                # specific CUDA versions. They must be pre-installed in the user's environment.
+                # With system_site_packages=True, the venv inherits them automatically.
                 import importlib.util
                 import_name = base_name.replace("-", "_")
-                if importlib.util.find_spec(import_name) is not None:
-                    log.debug("Heavy ML dep '%s' found in environment - skipping install.", dep_name)
-                else:
-                    log.warning(
-                        "Heavy ML dep '%s' is not installed and cannot be auto-installed by Cartograph. "
-                        "Install it manually in your environment before running validation.",
-                        dep_name,
+                if importlib.util.find_spec(import_name) is None:
+                    raise RuntimeError(
+                        f"'{dep_name}' is a heavy ML framework that must be pre-installed before "
+                        f"validation. Install it in your environment first, then re-run validation.\n"
+                        f"  pip install {dep_name}"
                     )
+                log.debug("Heavy ML dep '%s' found in environment - skipping install.", dep_name)
                 continue
             res = self._run(
                 [py, "-m", "pip", "install", "-q", dep_name],

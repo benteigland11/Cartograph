@@ -781,3 +781,70 @@ class TestBaseFallback:
             result = engine.scan_contamination(wdir, {"language": "base"})
 
         assert any("could not read source file" in b.lower() for b in result["blocks"])
+
+    def test_abs_path_in_comment_not_flagged(self, tmp_path):
+        result = self._scan(tmp_path, '// Example: x = "/home/user/.config/app"\n')
+        assert not any("Absolute path" in b for b in result["blocks"])
+
+    def test_version_string_not_flagged_as_ip(self, tmp_path):
+        # "1.2.3.4" style version strings should not trigger IP detection
+        result = self._scan(tmp_path, 'VERSION = "1.2.3.4"\n')
+        assert not any("IP" in b for b in result["blocks"])
+
+    def test_real_ip_still_caught(self, tmp_path):
+        # An actual IP with multi-digit octets must still be blocked
+        result = self._scan(tmp_path, 'host = "192.168.1.50"\n')
+        assert any("IP" in b for b in result["blocks"])
+
+    def test_credential_in_comment_still_caught(self, tmp_path):
+        # Credentials left in comments (even as examples) must be flagged
+        result = self._scan(tmp_path, '// api_key = "sk-abc123verylongkey"\n')
+        assert any("credential" in b.lower() for b in result["blocks"])
+
+
+class TestNimRiskyImportIsWarning:
+    def test_std_os_is_warning_not_error(self, tmp_path):
+        result = _scan(tmp_path, "nim", "nim", "import std/os\nproc f*() = discard\n")
+        assert not any("risky" in b.lower() for b in result["blocks"])
+        assert any("risky" in w.lower() or "i/o" in w.lower() or "network" in w.lower()
+                   for w in result["warnings"])
+
+    def test_std_httpclient_is_warning_not_error(self, tmp_path):
+        result = _scan(tmp_path, "nim", "nim", "import std/httpclient\nproc f*() = discard\n")
+        assert not any("risky" in b.lower() for b in result["blocks"])
+        assert any("risky" in w.lower() or "i/o" in w.lower() or "network" in w.lower()
+                   for w in result["warnings"])
+
+
+class TestPythonAbsPathCommentExclusion:
+    def test_abs_path_in_comment_not_flagged(self, tmp_path):
+        from cartograph.languages.python import PythonEngine
+        wdir = _make_widget(tmp_path, "python", "mod.py",
+                            '# Example: path = "/home/user/.config"\ndef f(): pass\n')
+        engine = PythonEngine()
+        result = engine.scan_contamination(wdir, {"dependencies": []})
+        assert not any("Absolute path" in b for b in result["blocks"])
+
+    def test_abs_path_in_code_still_caught(self, tmp_path):
+        from cartograph.languages.python import PythonEngine
+        wdir = _make_widget(tmp_path, "python", "mod.py",
+                            'path = "/home/user/.config/app"\n')
+        engine = PythonEngine()
+        result = engine.scan_contamination(wdir, {"dependencies": []})
+        assert any("Absolute path" in b for b in result["blocks"])
+
+    def test_version_string_not_flagged_as_ip(self, tmp_path):
+        from cartograph.languages.python import PythonEngine
+        wdir = _make_widget(tmp_path, "python", "mod.py",
+                            'VERSION = "1.2.3.4"\n')
+        engine = PythonEngine()
+        result = engine.scan_contamination(wdir, {"dependencies": []})
+        assert not any("IP" in b for b in result["blocks"])
+
+    def test_credential_in_comment_still_caught(self, tmp_path):
+        from cartograph.languages.python import PythonEngine
+        wdir = _make_widget(tmp_path, "python", "mod.py",
+                            '# api_key = "sk-abc123verylongkey"\ndef f(): pass\n')
+        engine = PythonEngine()
+        result = engine.scan_contamination(wdir, {"dependencies": []})
+        assert any("credential" in b.lower() for b in result["blocks"])

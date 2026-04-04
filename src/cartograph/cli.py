@@ -808,8 +808,11 @@ def cmd_cloud_settings(args):
 
     owner, wid = _parse_cloud_id(args.widget_id)
 
+    visibility = getattr(args, "visibility", None)
+    governance = getattr(args, "governance", None)
+
     # If no flags, show current settings
-    if not args.governance:
+    if not governance and not visibility:
         result = cloud.inspect(owner, wid)
         if "error" in result:
             err(result)
@@ -818,13 +821,25 @@ def cmd_cloud_settings(args):
         print(f"\n  @{owner}/{wid}")
         print(f"    governance   {gov}")
         print(f"    visibility   {vis}")
-        print(f"\n  Use --governance open|protected to change.\n")
+        print(f"\n  Use --governance open|protected or --visibility public|private to change.\n")
         return
 
-    result = cloud.update_widget(owner, wid, governance=args.governance)
+    kwargs = {}
+    if governance:
+        kwargs["governance"] = governance
+    if visibility:
+        kwargs["visibility"] = visibility
+
+    result = cloud.update_widget(owner, wid, **kwargs)
     if "error" in result:
         err(result)
-    print(f"\n  Updated @{owner}/{wid}: governance = {args.governance}\n")
+
+    changed = []
+    if governance:
+        changed.append(f"governance = {governance}")
+    if visibility:
+        changed.append(f"visibility = {visibility}")
+    print(f"\n  Updated @{owner}/{wid}: {', '.join(changed)}\n")
 
 
 def cmd_cloud_proposals(args):
@@ -980,11 +995,13 @@ def cmd_workflow(args):
     if not name:
         # List available workflows
         print("\n  Available workflows:")
-        print(f"    default        (built-in)")
+        print(f"    {'default':<14} (built-in)")
         if os.path.isdir(workflows_dir):
             for f in sorted(os.listdir(workflows_dir)):
                 if f.endswith(".md"):
-                    print(f"    {f[:-3]}")
+                    wf_name = f[:-3]
+                    wf_path = os.path.join(workflows_dir, f)
+                    print(f"    {wf_name:<14} {wf_path}")
         print(f"\n  Use with: cartograph setup --workflow <name>\n")
         return
 
@@ -1886,6 +1903,8 @@ def _build_cli() -> AgentCLI:
                 {"name": "widget_id", "help": "Widget ID (@handle/widget-id)"},
                 {"name": "--governance", "default": None, "choices": ["open", "protected"],
                  "help": "Set governance model"},
+                {"name": "--visibility", "default": None, "choices": ["public", "private"],
+                 "help": "Set visibility"},
             ],
         },
         {
