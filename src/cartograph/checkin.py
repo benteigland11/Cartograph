@@ -121,6 +121,15 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
                 "message": f"Version conflict: local is v{local_version} but library is v{library_version}. "
                            f"Install the latest version first, apply your changes, then checkin."
             }
+        # --- No-op guard: block if nothing has changed ---
+        current_hash = carto._calculate_implementation_hash(path)
+        library_hash = widget_record.get("implementation_hash")
+        if library_hash and current_hash == library_hash:
+            return {
+                "status": "error",
+                "message": f"{item_id} v{library_version} is already in the library with identical content. "
+                           f"Make your changes before checking in."
+            }
 
     # --- Contamination scan ---
     scan = _scan_contamination(path)
