@@ -66,7 +66,7 @@ _PARAM_NO_DEFAULT_RE = re.compile(
 )
 
 _ECHO_RE = re.compile(r'\becho\s*\(')
-_RESOLUTION_RE = re.compile(r'\$f[nas]\s*=')
+_RESOLUTION_RE = re.compile(r'(?:^|;)\s*\$f[nas]\s*=')
 _INCLUDE_RE = re.compile(r'^\s*include\s*<', re.MULTILINE)
 
 
