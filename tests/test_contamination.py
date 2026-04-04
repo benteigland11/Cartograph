@@ -850,3 +850,67 @@ class TestPythonAbsPathCommentExclusion:
         engine = PythonEngine()
         result = engine.scan_contamination(wdir, {"dependencies": []})
         assert any("credential" in b.lower() for b in result["blocks"])
+
+
+class TestOpenSCADContamination:
+    """OpenSCAD-specific contamination checks."""
+
+    def _scan(self, tmp_path, src_content):
+        from cartograph.languages.openscad import OpenSCADEngine
+        wdir = tmp_path / "widget"
+        (wdir / "src").mkdir(parents=True)
+        (wdir / "tests").mkdir()
+        (wdir / "examples").mkdir()
+        (wdir / "src" / "mod.scad").write_text(src_content)
+        engine = OpenSCADEngine()
+        return engine.scan_contamination(str(wdir), {"dependencies": []})
+
+    # --- top-level geometry ---
+
+    def test_top_level_cube_blocks(self, tmp_path):
+        result = self._scan(tmp_path, 'module m(w=10) { cube([w,w,w]); }\ncube([5,5,5]);\n')
+        assert any("top-level geometry" in b.lower() for b in result["blocks"])
+
+    def test_top_level_sphere_blocks(self, tmp_path):
+        result = self._scan(tmp_path, 'module m(r=5) { sphere(r); }\nsphere(r=3);\n')
+        assert any("top-level geometry" in b.lower() for b in result["blocks"])
+
+    def test_geometry_inside_module_is_clean(self, tmp_path):
+        result = self._scan(tmp_path, 'module m(w=10) { cube([w,w,w]); }\n')
+        assert not any("top-level geometry" in b.lower() for b in result["blocks"])
+
+    # --- parameters without defaults ---
+
+    def test_param_without_default_blocks(self, tmp_path):
+        result = self._scan(tmp_path, 'module m(width, height=10) { cube([width,height,5]); }\n')
+        assert any("no default" in b.lower() for b in result["blocks"])
+        assert any("width" in b for b in result["blocks"])
+
+    def test_all_params_have_defaults_is_clean(self, tmp_path):
+        result = self._scan(tmp_path, 'module m(width=20, height=10) { cube([width,height,5]); }\n')
+        assert not any("no default" in b.lower() for b in result["blocks"])
+
+    def test_no_params_is_clean(self, tmp_path):
+        result = self._scan(tmp_path, 'module m() { cube([10,10,10]); }\n')
+        assert not any("no default" in b.lower() for b in result["blocks"])
+
+    # --- parameter unit comments ---
+
+    def test_param_without_unit_comment_warns(self, tmp_path):
+        result = self._scan(tmp_path, 'module m(width=20, height=10) { cube([width,height,5]); }\n')
+        assert any("unit comment" in w.lower() for w in result["warnings"])
+
+    def test_multiline_params_with_comments_clean(self, tmp_path):
+        src = 'module m(\n    width  = 20,  // mm\n    height = 10   // mm\n) { cube([width,height,5]); }\n'
+        result = self._scan(tmp_path, src)
+        assert not any("unit comment" in w.lower() for w in result["warnings"])
+
+    # --- existing checks still work ---
+
+    def test_absolute_path_blocks(self, tmp_path):
+        result = self._scan(tmp_path, 'module m(w=10) { cube([w,w,w]); }\nuse </abs/path/lib.scad>\n')
+        assert any("absolute path" in b.lower() for b in result["blocks"])
+
+    def test_credential_blocks(self, tmp_path):
+        result = self._scan(tmp_path, 'module m(w=10) { cube([w,w,w]); }\napi_key = "sk-secret123abc";\n')
+        assert any("credential" in b.lower() for b in result["blocks"])

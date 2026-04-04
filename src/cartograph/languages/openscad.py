@@ -12,6 +12,179 @@ from .base import LanguageEngine
 log = logging.getLogger("cartograph")
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_STL_EMPTY_BYTES = 84  # 80-byte header + 4-byte triangle count = minimum binary STL
+
+
+def _split_params(params_str: str) -> list[str]:
+    """Split a module parameter list by commas, respecting nested brackets.
+    e.g. 'pos=[0,0,0], size=[10,10,10]' -> ['pos=[0,0,0]', 'size=[10,10,10]']"""
+    params = []
+    depth = 0
+    current = []
+    for ch in params_str:
+        if ch in "([":
+            depth += 1
+            current.append(ch)
+        elif ch in ")]":
+            depth -= 1
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            params.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        params.append("".join(current).strip())
+    return [p for p in params if p]
+
+def _stl_has_geometry(path: str) -> bool:
+    """Return True if the STL file contains at least one triangle."""
+    try:
+        return os.path.getsize(path) > _STL_EMPTY_BYTES
+    except OSError:
+        return False
+
+
+# Statements that are invalid at top level in src/ files.
+# Everything here belongs inside a module — not at the file root.
+_GEOMETRY_CALLS_RE = re.compile(
+    r'^(?![ \t]*//)[ \t]*'
+    r'(?:cube|sphere|cylinder|polyhedron|square|circle|polygon|text|'
+    r'linear_extrude|rotate_extrude|import|surface|'
+    r'union|difference|intersection|hull|minkowski|mirror|scale|rotate|translate|color|'
+    r'render|projection|offset|'
+    r'if|for|let)\s*[\(\;]',
+    re.MULTILINE,
+)
+
+# Module parameter with no default: "ident" or "ident ," but NOT "ident = value"
+_PARAM_NO_DEFAULT_RE = re.compile(
+    r'(?<![=\w])(\b[a-zA-Z_]\w*)\s*(?=[,\)](?!\s*=))',
+)
+
+_ECHO_RE = re.compile(r'\becho\s*\(')
+_RESOLUTION_RE = re.compile(r'\$f[nas]\s*=')
+_INCLUDE_RE = re.compile(r'^\s*include\s*<', re.MULTILINE)
+
+
+def _check_top_level_geometry(content: str, rel: str) -> list[str]:
+    """Block geometry calls written outside any module in a src/ file."""
+    blocks = []
+    depth = 0  # brace depth — 0 means top level
+    lines = content.splitlines()
+    for line_no, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("//"):
+            continue
+        depth_before = depth
+        depth += stripped.count("{") - stripped.count("}")
+        depth = max(depth, 0)
+        if depth_before == 0 and _GEOMETRY_CALLS_RE.match(line):
+            blocks.append(
+                f"Top-level geometry in src/ at line {line_no}: {stripped!r} — "
+                f"wrap all geometry in a module"
+            )
+    return blocks
+
+
+def _check_params_have_defaults(content: str, rel: str) -> list[str]:
+    """Block module parameters that have no default value."""
+    blocks = []
+    # Find each module signature: module name(...) {
+    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(([^)]*)\)', content):
+        module_name = m.group(1)
+        params_str = m.group(2).strip()
+        line_no = content[: m.start()].count("\n") + 1
+        if not params_str:
+            continue
+        for param in _split_params(params_str):
+            if "=" not in param:
+                blocks.append(
+                    f"{rel}:{line_no}: parameter '{param}' in module '{module_name}' "
+                    f"has no default — all parameters must have defaults"
+                )
+    return blocks
+
+
+def _check_param_unit_comments(content: str, rel: str) -> list[str]:
+    """Warn when module parameters lack inline unit comments (// mm, // degrees, etc.)."""
+    warnings = []
+    lines = content.splitlines()
+    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(([^)]*)\)', content, re.DOTALL):
+        module_name = m.group(1)
+        params_str = m.group(2).strip()
+        if not params_str:
+            continue
+        sig_start_line = content[: m.start(2)].count("\n")
+        sig_end_line = content[: m.end(2)].count("\n")
+        sig_lines = lines[sig_start_line: sig_end_line + 1]
+        for param in _split_params(params_str):
+            param_name = param.split("=")[0].strip()
+            if not param_name:
+                continue
+            # Find the line in the signature that declares this parameter
+            for i, sig_line in enumerate(sig_lines):
+                if re.search(rf'\b{re.escape(param_name)}\s*[=,)]', sig_line):
+                    if "//" not in sig_line:
+                        line_no = sig_start_line + i + 1
+                        warnings.append(
+                            f"{rel}:{line_no}: parameter '{param_name}' in module '{module_name}' "
+                            f"has no unit comment — add // mm, // degrees, etc."
+                        )
+                    break
+    return warnings
+
+
+def _parse_openscad_year(version_str: str) -> int | None:
+    """Extract the release year from an openscad --version string.
+    e.g. 'OpenSCAD version 2021.01.31' -> 2021. Returns None if unparseable."""
+    m = re.search(r'\b(20\d{2})\b', version_str)
+    return int(m.group(1)) if m else None
+
+
+def _bosl2_installed() -> bool:
+    """Check common OpenSCAD library paths for BOSL2."""
+    import platform
+    home = os.path.expanduser("~")
+    candidates = []
+    system = platform.system()
+    if system == "Linux":
+        candidates = [
+            os.path.join(home, ".local", "share", "OpenSCAD", "libraries", "BOSL2"),
+            "/usr/share/openscad/libraries/BOSL2",
+        ]
+    elif system == "Darwin":
+        candidates = [
+            os.path.join(home, "Documents", "OpenSCAD", "libraries", "BOSL2"),
+            os.path.join(home, "Library", "Application Support", "OpenSCAD", "libraries", "BOSL2"),
+        ]
+    else:  # Windows
+        candidates = [
+            os.path.join(home, "Documents", "OpenSCAD", "libraries", "BOSL2"),
+            os.path.join(os.environ.get("APPDATA", ""), "OpenSCAD", "libraries", "BOSL2"),
+        ]
+    return any(os.path.isdir(p) for p in candidates)
+
+
+def _bosl2_detail() -> str:
+    import platform
+    home = os.path.expanduser("~")
+    system = platform.system()
+    if system == "Linux":
+        path = os.path.join(home, ".local", "share", "OpenSCAD", "libraries", "BOSL2")
+    elif system == "Darwin":
+        path = os.path.join(home, "Documents", "OpenSCAD", "libraries", "BOSL2")
+    else:
+        path = os.path.join(home, "Documents", "OpenSCAD", "libraries", "BOSL2")
+    if _bosl2_installed():
+        return "found"
+    return f"not found — clone github.com/revarbat/BOSL2 into {path}"
+
+
+# ---------------------------------------------------------------------------
 # Scaffold templates
 # ---------------------------------------------------------------------------
 
@@ -36,10 +209,12 @@ module {module}(
 
 _SCAD_TEST = """\
 // Tests for {module}
-// Each render call must produce a non-empty mesh and exit with code 0.
+// Cartograph validates by rendering this file to a non-empty STL.
+// Use assert() to enforce geometry contracts — a failing assert causes a
+// non-zero exit and fails validation with a descriptive message.
 use <../src/{module}.scad>
 
-// Test: default parameters
+// Test: default parameters render without error
 {module}();
 
 // Test: custom dimensions
@@ -47,6 +222,19 @@ use <../src/{module}.scad>
 
 // Test: minimum viable dimensions
 {module}(width = 1, height = 1, depth = 1);
+
+// Test: assert geometry contracts (OpenSCAD 2021+)
+// Use assert() to validate parameter relationships and computed values.
+// Example: assert that width must be positive
+module test_contracts() {{
+    w = 20;
+    h = 10;
+    assert(w > 0, "width must be positive");
+    assert(h > 0, "height must be positive");
+    assert(w >= h, "width should be >= height for this shape");
+    {module}(width = w, height = h);
+}}
+test_contracts();
 """
 
 _SCAD_EXAMPLE = """\
@@ -74,6 +262,20 @@ class OpenSCADEngine(LanguageEngine):
     # OpenSCAD: no package manager. Dependencies declared in widget.json
     # are treated like heavy ML deps — must be pre-installed by the user.
 
+    def check_available(self) -> tuple[bool, str]:
+        """Require openscad binary AND version >= 2021 (needed for assert())."""
+        if not shutil.which("openscad") and not shutil.which("openscad.cmd"):
+            return False, "openscad not found - Install OpenSCAD 2021.01+ at openscad.org"
+        ver = self.runtime_version() or ""
+        year = _parse_openscad_year(ver)
+        if year is not None and year < 2021:
+            return False, f"OpenSCAD 2021.01+ required for assert() — found {ver.strip()}"
+        return True, ""
+
+    def check_optional(self) -> list[tuple[str, bool, str]]:
+        """Surface BOSL2 availability as an informational doctor check."""
+        return [("BOSL2", _bosl2_installed(), _bosl2_detail())]
+
     def scaffold(self, target_dir, module_name, display_name, **kwargs):
         with open(os.path.join(target_dir, "src", f"{module_name}.scad"), "w") as f:
             f.write(_SCAD_SRC.format(module=module_name, name=display_name))
@@ -87,7 +289,7 @@ class OpenSCADEngine(LanguageEngine):
 
     def runtime_version(self) -> str | None:
         try:
-            res = self._run(["openscad", "--version"], timeout=10)
+            res = self._run(["openscad", "--version"], cwd=tempfile.gettempdir(), timeout=10)
             if res and res.returncode == 0:
                 out = (res.stdout or res.stderr or "").strip()
                 return out or None
@@ -106,7 +308,7 @@ class OpenSCADEngine(LanguageEngine):
             )
 
     def run_tests(self, path: str) -> dict:
-        """Render each test_*.scad to a temp STL. Passes if all exit 0."""
+        """Render each test_*.scad to a temp STL. Passes if exit 0 and mesh is non-empty."""
         test_files = _glob.glob(os.path.join(path, "tests", "test_*.scad"))
         if not test_files:
             return self._fail("No test files found in tests/ — add at least one test_*.scad")
@@ -125,6 +327,10 @@ class OpenSCADEngine(LanguageEngine):
                     errors.append(
                         f"{os.path.basename(test_file)}: {(res.stderr or res.stdout or '').strip()}"
                     )
+                elif not _stl_has_geometry(tmp.name):
+                    errors.append(
+                        f"{os.path.basename(test_file)}: rendered successfully but produced an empty mesh"
+                    )
             except FileNotFoundError:
                 return self._fail("openscad not found — install OpenSCAD (openscad.org)")
             finally:
@@ -136,7 +342,7 @@ class OpenSCADEngine(LanguageEngine):
         return self._ok()
 
     def run_example(self, path: str) -> dict:
-        """Render examples/example_usage.scad to a temp STL."""
+        """Render examples/example_usage.scad to a temp STL. Mesh must be non-empty."""
         ep = os.path.join(path, "examples", self.example_filename())
         if not os.path.exists(ep):
             return self._fail("examples/example_usage.scad not found")
@@ -147,6 +353,8 @@ class OpenSCADEngine(LanguageEngine):
             res = self._run(["openscad", "-o", tmp.name, ep], cwd=path, timeout=60)
             if res.returncode != 0:
                 return self._fail((res.stderr or res.stdout or "").strip())
+            if not _stl_has_geometry(tmp.name):
+                return self._fail("example rendered successfully but produced an empty mesh")
             return self._ok()
         except FileNotFoundError:
             return self._fail("openscad not found — install OpenSCAD (openscad.org)")
@@ -157,8 +365,11 @@ class OpenSCADEngine(LanguageEngine):
     def scan_contamination(self, path: str, tech_stack: dict) -> dict:
         """
         OpenSCAD contamination checks:
-          blocks : absolute paths in include<>/use<>, credential-like strings
-          warnings: hardcoded URLs, unlisted external libraries
+          blocks : absolute paths, credentials, top-level geometry/control-flow in src/,
+                   module parameters without defaults, include<> in src/, echo() in src/,
+                   global resolution variables ($fn/$fa/$fs) in src/
+          warnings: hardcoded URLs, unlisted external libraries, parameters without
+                    unit comments
         """
         blocks = []
         warnings = []
@@ -194,6 +405,34 @@ class OpenSCADEngine(LanguageEngine):
                 content = open(filepath, encoding="utf-8", errors="replace").read()
             except Exception:
                 continue
+
+            if is_src:
+                blocks.extend(_check_top_level_geometry(content, rel))
+                blocks.extend(_check_params_have_defaults(content, rel))
+                warnings.extend(_check_param_unit_comments(content, rel))
+                # include <> executes the whole file on inclusion — use <> only
+                for m in _INCLUDE_RE.finditer(content):
+                    line_no = content[: m.start()].count("\n") + 1
+                    blocks.append(
+                        f"{rel}:{line_no}: use include<> in src/ — use use<> instead "
+                        f"(include executes the full file on import)"
+                    )
+                # $fn/$fa/$fs override the consumer's resolution settings globally
+                for line_no, line in enumerate(content.splitlines(), 1):
+                    stripped = line.strip()
+                    if stripped.startswith("//"):
+                        continue
+                    # Strip inline comment before pattern matching
+                    code_part = line.split("//")[0]
+                    if _RESOLUTION_RE.search(code_part):
+                        blocks.append(
+                            f"{rel}:{line_no}: global resolution variable ($fn/$fa/$fs) in src/ — "
+                            f"expose as a module parameter instead"
+                        )
+                    if _ECHO_RE.search(code_part):
+                        blocks.append(
+                            f"{rel}:{line_no}: echo() in src/ — remove debug output before checkin"
+                        )
 
             for m in _ABS_INCLUDE_RE.finditer(content):
                 inc = m.group(1).strip()

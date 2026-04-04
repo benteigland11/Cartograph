@@ -1102,7 +1102,7 @@ def cmd_doctor(args):
 
     # --- Language engines (auto-discovered) ---
     from .languages.registry import _ENGINES
-    _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3}
+    _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3, "openscad": 4}
     lang_checks = []
     for lang_name, engine in sorted(_ENGINES.items(), key=lambda x: _lang_order.get(x[0], 99)):
         available, message = engine.check_available()
@@ -1838,7 +1838,7 @@ def _build_cli() -> AgentCLI:
                 {"name": "widget_id"},
                 {"name": "--language", "required": True, "choices": supported_languages()},
                 {"name": "--domain", "required": True,
-                 "choices": ["backend", "data", "ml", "security", "infra", "frontend", "universal"]},
+                 "choices": sorted(__import__('cartograph.validator', fromlist=['VALID_DOMAINS']).VALID_DOMAINS)},
                 {"name": "--name", "default": None, "help": "Human-readable display name"},
                 {"name": "--target", "default": ".", "help": "Where to create the widget (default: .)"},
             ],

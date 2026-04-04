@@ -41,6 +41,7 @@ These are requirements. Validation fails if any are not met.
 | Python | Yes | 80% | pytest-cov (--cov-fail-under) |
 | JavaScript/TypeScript | Yes | 80% | @vitest/coverage-v8 |
 | Nim | No | N/A | No stdlib coverage tool exists |
+| OpenSCAD | No | N/A | Render passes = validation passes |
 
 Nim coverage would require compiling via `--debugger:native` and running `gcov`/`lcov` on the generated C code. This produces C-level line coverage, not Nim source-level coverage. Decided it was too unreliable and confusing to impose on widget authors.
 
@@ -76,20 +77,23 @@ Python uses AST parsing. JS uses a token-based parser. Nim uses line-based scann
 
 ### Fails validation if found (src/ only unless noted)
 
-| Pattern | Python | JS | Nim | Notes |
-|---------|--------|----|-----|-------|
-| Debug output (print/echo/console.log) | Yes (AST, src/ only) | Yes (src/ block, tests/ warn, examples/ allow) | Yes (src/ block, tests/ warn, examples/ allow) | |
-| Process exit (sys.exit/process.exit/quit) | Yes (AST) | Yes | Yes | |
-| Sleep/blocking calls | Yes (AST) | Yes | Yes | Tests/examples: warn if > 1s |
-| Absolute paths in strings | Yes | Yes | Yes | /home/, /Users/, C:\ |
-| Hardcoded credentials | Yes | Yes | Yes | api_key, secret_key, password, etc. In tests: warning |
-| Hardcoded IPs | Yes | Yes | Yes | N.N.N.N pattern. In tests: warning |
-| eval() | No | Yes | N/A | JS-specific |
-| C FFI pragmas ({.importc.}, {.compile.}) | N/A | N/A | Yes | Nim-specific |
-| Global mutable state ({.global.}) | N/A | N/A | Yes | Nim-specific |
-| when isMainModule | N/A | N/A | Yes | Widgets are libraries |
-| OS-specific when defined() | N/A | N/A | Yes | Platform portability |
-| Risky stdlib imports | N/A | Yes (fs, child_process, etc.) | Yes (os, osproc, etc.) | Python does not block these |
+| Pattern | Python | JS | Nim | OpenSCAD | Notes |
+|---------|--------|----|-----|----------|-------|
+| Debug output (print/echo/console.log) | Yes (AST, src/ only) | Yes (src/ block, tests/ warn, examples/ allow) | Yes (src/ block, tests/ warn, examples/ allow) | Yes (echo(), src/ only) | |
+| Process exit (sys.exit/process.exit/quit) | Yes (AST) | Yes | Yes | N/A | Not a concept in OpenSCAD |
+| Sleep/blocking calls | Yes (AST) | Yes | Yes | N/A | Not a concept in OpenSCAD |
+| Absolute paths in strings | Yes | Yes | Yes | Yes (in include<>/use<>) | /home/, /Users/, C:\ |
+| Hardcoded credentials | Yes | Yes | Yes | Yes | api_key, secret_key, password, etc. |
+| Hardcoded IPs | Yes | Yes | Yes | No | N.N.N.N pattern |
+| eval() | No | Yes | N/A | N/A | JS-specific |
+| C FFI pragmas ({.importc.}, {.compile.}) | N/A | N/A | Yes | N/A | Nim-specific |
+| Global mutable state ({.global.}) | N/A | N/A | Yes | N/A | Nim-specific |
+| when isMainModule | N/A | N/A | Yes | N/A | Nim-specific |
+| OS-specific when defined() | N/A | N/A | Yes | N/A | Nim-specific |
+| Risky stdlib imports | N/A | Yes (fs, child_process, etc.) | Yes (os, osproc, etc.) | N/A | Python does not block these |
+| Top-level geometry/control flow | N/A | N/A | N/A | Yes (src/ only) | Bleeds into consumer's scene |
+| include<> | N/A | N/A | N/A | Yes (src/ only) | Executes full file on import; use use<> |
+| Global resolution ($fn/$fa/$fs) | N/A | N/A | N/A | Yes (src/ only) | Steals consumer's quality settings |
 
 ### Warnings (overridable)
 
@@ -103,6 +107,31 @@ Python uses AST parsing. JS uses a token-based parser. Nim uses line-based scann
 | Top-level mutable state | No | No | Yes | `var` at module level |
 | Credentials in tests | Yes | Yes | Yes | "verify it's fake" |
 
+### OpenSCAD
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| Renders to non-empty STL | exit non-zero or STL <= 84 bytes | subprocess (openscad -o tmp.stl) |
+| No top-level geometry or control flow in src/ | present | regex + brace-depth tracker |
+| All module parameters have defaults | any param missing `= value` | regex, bracket-aware split |
+| No `include <>` in src/ | present | regex (use `use <>` instead) |
+| No `echo()` in src/ | present | regex, comment-aware |
+| No `$fn`/`$fa`/`$fs` assignments in src/ | present | regex, comment-aware |
+
+**Coverage:** None enforced. Render passes = validation passes (same as Nim).
+
+**Native scanner:** Python fallback (OpenSCAD has no file I/O — cannot write a scanner in the language itself).
+
+**Contamination scanner scope:** src/ only for structural checks. All files checked for absolute paths and credentials.
+
+### Warnings (OpenSCAD)
+
+| Pattern | Notes |
+|---------|-------|
+| Hardcoded URLs in src/ | Excludes localhost, example.com |
+| Unlisted library in use<> | Not declared in widget.json dependencies |
+| Module parameters without unit comments | Add `// mm`, `// degrees`, etc. |
+
 ## Decisions and Known Limitations
 
 **Why no risky import blocking for Python?**
@@ -113,6 +142,18 @@ Nim's compilation model (compiles to C, links native) means more things can go w
 
 **Why line-based scanning for Nim instead of AST?**
 The line-based scanner uses only stdlib and has no compiler dependencies. If false positives become a problem, AST parsing via `compiler/parser` can be revisited.
+
+**Why no top-level variables in OpenSCAD src/?**
+A widget is a module definition. Variables assigned at the top level of a .scad file bleed into every file that `use`s it, polluting the consumer's namespace. Same principle as "no global state" in Python/Nim widgets. Everything belongs inside a module.
+
+**Why block `include <>` in OpenSCAD src/?**
+`include <>` executes the entire included file as if it were pasted in - variables, geometry, and all. `use <>` only imports module definitions. A widget should never have side effects on include; `use <>` is always the right choice in library code.
+
+**Why block `$fn`/`$fa`/`$fs` in OpenSCAD src/?**
+These are global resolution settings. A widget setting `$fn = 100` in src/ overrides the consumer's quality settings for their entire scene. Expose resolution as a module parameter instead (`fn = 32`) so consumers control it.
+
+**Why is the OpenSCAD top-level check depth-based instead of AST?**
+OpenSCAD has no stdlib parser accessible from Python. A brace-depth tracker catches all practical cases (bare geometry, `if`/`for`/`let` blocks). Known limitation: geometry inside a top-level `if` where the `{` and `}` are on separate lines is caught; single-line `if(true) cube(...)` without braces is not currently detected.
 
 **Why tests run twice if users want custom test flags?**
 Custom rules can call the test runner again with their preferred flags (testament --megatest, pytest --benchmark, etc.). Tests run once our way (the quality guarantee), once their way (their preferences). This avoids the complexity of flag merging and keeps the base validation clean.

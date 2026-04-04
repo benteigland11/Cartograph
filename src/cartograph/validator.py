@@ -17,7 +17,7 @@ log = logging.getLogger("cartograph")
 
 
 VALID_DOMAINS = frozenset([
-    "backend", "data", "ml", "security", "infra", "frontend", "universal"
+    "backend", "data", "ml", "security", "infra", "frontend", "universal", "modeling"
 ])
 
 
