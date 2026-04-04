@@ -804,12 +804,14 @@ class TestBaseFallback:
 
 class TestNimRiskyImportIsWarning:
     def test_std_os_is_warning_not_error(self, tmp_path):
+        _skip_if_missing("nim")
         result = _scan(tmp_path, "nim", "nim", "import std/os\nproc f*() = discard\n")
         assert not any("risky" in b.lower() for b in result["blocks"])
         assert any("risky" in w.lower() or "i/o" in w.lower() or "network" in w.lower()
                    for w in result["warnings"])
 
     def test_std_httpclient_is_warning_not_error(self, tmp_path):
+        _skip_if_missing("nim")
         result = _scan(tmp_path, "nim", "nim", "import std/httpclient\nproc f*() = discard\n")
         assert not any("risky" in b.lower() for b in result["blocks"])
         assert any("risky" in w.lower() or "i/o" in w.lower() or "network" in w.lower()

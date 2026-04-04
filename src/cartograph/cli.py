@@ -137,19 +137,38 @@ def cmd_search(args):
 
     cloud_base_ids = {_base_id(w) for w in cloud_widgets}
 
-    seen = {}
+    # Deduplicate: cloud version wins for widgets present in both.
+    seen_cloud = {}
     for w in cloud_widgets:
-        seen[_base_id(w)] = w
+        seen_cloud[_base_id(w)] = w
+    seen_local = {}
     for w in local_widgets:
         bid = _base_id(w)
-        if bid not in seen:
-            seen[bid] = w
+        if bid not in seen_cloud:
+            seen_local[bid] = w
 
-    combined = sorted(seen.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
+    local_sorted = sorted(seen_local.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
+    cloud_sorted = sorted(seen_cloud.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
+
+    # Local fills first (up to all slots it has), cloud gets the remainder.
+    # Cloud is capped at half of top_k to prevent it from burying local results.
+    # If one source is empty, the other fills all slots.
+    _CLOUD_CAP = args.top_k // 2
+    if local_sorted and cloud_sorted:
+        local_take = min(len(local_sorted), args.top_k)
+        cloud_take = min(len(cloud_sorted), args.top_k - local_take, _CLOUD_CAP)
+    elif local_sorted:
+        local_take = min(len(local_sorted), args.top_k)
+        cloud_take = 0
+    else:
+        local_take = 0
+        cloud_take = min(len(cloud_sorted), args.top_k)
+
+    combined = local_sorted[:local_take] + cloud_sorted[:cloud_take]
 
     merged = {
-        "local_count": sum(1 for w in combined if _base_id(w) not in cloud_base_ids),
-        "cloud_count": sum(1 for w in combined if _base_id(w) in cloud_base_ids),
+        "local_count": local_take,
+        "cloud_count": cloud_take,
         "widgets": combined,
     }
     if cloud.get("error"):

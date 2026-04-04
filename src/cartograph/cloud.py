@@ -155,6 +155,38 @@ def is_available() -> bool:
         return False
 
 
+def _validate_widgets(widgets: list, context: str = "") -> list:
+    """
+    Validate widget objects returned by the cloud registry.
+
+    Required fields (widget is dropped if missing or wrong type):
+      - id      (str, format "@owner/widget-id") — used for dedup and lookup
+      - version (str, semver)                    — used for sync and upgrade logic
+
+    Expected fields (used by CLI with .get() defaults, should be present for full UX):
+      - name, domain, language, description, tags, rating, owner, install_count
+
+    Optional/additive fields (passed through untouched — registry may add freely):
+      - relevance_score  defaults to 0 if absent in search results
+      - stale, deprecated, last_updated, or any future annotations
+
+    Malformed widgets are dropped with a warning log rather than failing the
+    whole response. A broken registry is the registry owner's problem.
+    """
+    valid = []
+    for w in widgets:
+        wid = w.get("id", "")
+        ver = w.get("version", "")
+        if not isinstance(wid, str) or not wid:
+            log.warning("Cloud%s: dropping widget missing 'id': %s", f" ({context})" if context else "", w)
+            continue
+        if not isinstance(ver, str) or not ver:
+            log.warning("Cloud%s: dropping widget '%s' missing 'version'", f" ({context})" if context else "", wid)
+            continue
+        valid.append(w)
+    return valid
+
+
 def search(query: str, domain_filter: str | None = None,
            language_filter: str | None = None, top_k: int = 10) -> dict:
     """
@@ -174,7 +206,10 @@ def search(query: str, domain_filter: str | None = None,
     if "error" in result:
         return {"widgets": [], "source": "cloud", "error": result["error"]}
 
-    return {"widgets": result.get("widgets", []), "source": "cloud"}
+    widgets = _validate_widgets(result.get("widgets", []), context="search")
+    for w in widgets:
+        w.setdefault("relevance_score", 0)
+    return {"widgets": widgets, "source": "cloud"}
 
 
 def search_users(query: str, top_k: int = 20) -> dict:
@@ -300,7 +335,7 @@ def list_my_widgets() -> list[dict]:
     result = _get("/v1/auth/my-widgets")
     if "error" in result:
         return []
-    return result.get("widgets", [])
+    return _validate_widgets(result.get("widgets", []), context="my-widgets")
 
 
 def _delete(path: str) -> dict:
