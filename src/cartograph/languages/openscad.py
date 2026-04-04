@@ -90,12 +90,26 @@ def _check_top_level_geometry(content: str, rel: str) -> list[str]:
     return blocks
 
 
+def _strip_line_comments(content: str) -> str:
+    """Remove // line comments from content, preserving line structure."""
+    lines = []
+    for line in content.splitlines():
+        idx = line.find("//")
+        lines.append(line[:idx] if idx != -1 else line)
+    return "\n".join(lines)
+
+
 def _check_params_have_defaults(content: str, rel: str) -> list[str]:
-    """Block module parameters that have no default value."""
+    """Block public module parameters that have no default value.
+    Private modules (name starting with _) are exempt — they are internal
+    helpers always called with positional arguments."""
     blocks = []
-    # Find each module signature: module name(...) {
-    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(([^)]*)\)', content):
+    # Strip comments so parentheses in comments don't confuse the regex
+    clean = _strip_line_comments(content)
+    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(([^)]*)\)', clean, re.DOTALL):
         module_name = m.group(1)
+        if module_name.startswith("_"):
+            continue  # private helper — defaults not required
         params_str = m.group(2).strip()
         line_no = content[: m.start()].count("\n") + 1
         if not params_str:
@@ -113,8 +127,11 @@ def _check_param_unit_comments(content: str, rel: str) -> list[str]:
     """Warn when module parameters lack inline unit comments (// mm, // degrees, etc.)."""
     warnings = []
     lines = content.splitlines()
-    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(([^)]*)\)', content, re.DOTALL):
+    clean = _strip_line_comments(content)
+    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(([^)]*)\)', clean, re.DOTALL):
         module_name = m.group(1)
+        if module_name.startswith("_"):
+            continue  # private helper — unit comments not required
         params_str = m.group(2).strip()
         if not params_str:
             continue
