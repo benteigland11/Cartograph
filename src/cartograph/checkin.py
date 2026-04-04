@@ -152,7 +152,10 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     if is_update:
         parts = version.split(".")
         if len(parts) == 3:
-            major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+            try:
+                major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+            except ValueError:
+                return {"status": "error", "message": f"Cannot bump malformed version '{version}'. Fix widget.json meta.version to X.Y.Z first."}
             if version_bump == "major":
                 major, minor, patch = major + 1, 0, 0
             elif version_bump == "minor":
@@ -161,7 +164,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
                 patch += 1
             new_version = f"{major}.{minor}.{patch}"
         else:
-            new_version = version
+            return {"status": "error", "message": f"Cannot bump malformed version '{version}'. Fix widget.json meta.version to X.Y.Z first."}
     else:
         new_version = version
 

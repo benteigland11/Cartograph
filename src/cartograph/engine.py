@@ -310,8 +310,14 @@ class Cartograph:
                 # Trend: compare latest version's average to lifetime
                 # Need at least 2 versions with reviews to show a trend
                 if len(v_averages) >= 2:
-                    # Find the latest version by semver-ish sort
-                    latest_v = sorted(v_averages.keys())[-1]
+                    # Find the latest version by semver sort (not lexicographic)
+                    def _semver_key(v):
+                        try:
+                            parts = v.split(".")
+                            return tuple(int(p) for p in parts) if len(parts) == 3 else (0, 0, 0)
+                        except (ValueError, AttributeError):
+                            return (0, 0, 0)
+                    latest_v = sorted(v_averages.keys(), key=_semver_key)[-1]
                     latest_avg = v_averages[latest_v]
                     if latest_avg > avg_rating + 0.3:
                         trend = "up"

@@ -467,14 +467,19 @@ def cmd_login(args):
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
-            id_token = params.get("id_token", [""])[0]
+            def _first(key):
+                val = params.get(key, "")
+                if isinstance(val, list):
+                    return val[0] if val else ""
+                return val or ""
+            id_token = _first("id_token")
             if id_token:
                 received["id_token"] = id_token
-                received["refresh_token"] = params.get("refresh_token", [""])[0]
-                received["signing_key"] = params.get("signing_key", [""])[0]
-                received["handle"] = params.get("handle", [""])[0]
-                received["client_id"] = params.get("client_id", [""])[0]
-                received["client_secret"] = params.get("client_secret", [""])[0]
+                received["refresh_token"] = _first("refresh_token")
+                received["signing_key"] = _first("signing_key")
+                received["handle"] = _first("handle")
+                received["client_id"] = _first("client_id")
+                received["client_secret"] = _first("client_secret")
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
