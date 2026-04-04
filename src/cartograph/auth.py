@@ -23,8 +23,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-import sys as _sys
-
 log = logging.getLogger("cartograph")
 
 _DEFAULT_REGISTRY_URL = "https://api.cartograph.tools"

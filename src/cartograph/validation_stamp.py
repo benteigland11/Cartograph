@@ -16,8 +16,6 @@ watched_patterns, cartograph version tracking, and test result storage.
 import logging
 
 from cg.infra_file_stamp_python.src.file_stamp import (
-    collect_files as _collect_files,
-    fingerprint as _fingerprint,
     write_stamp as _write_stamp,
     read_stamp as _read_stamp,
     is_stamp_valid as _is_stamp_valid,

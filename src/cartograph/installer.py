@@ -97,8 +97,6 @@ def _install_from_cloud(widget_id, dest_path, owner_hint=None):
 
 def install(carto, widget_id, target_dir, version=None):
     """Install a widget into target_dir/cg/widget_id."""
-    from .engine import REPO_DIR
-
     # Strip @owner/ prefix if present (cloud widget IDs are namespaced)
     owner_hint = None
     if widget_id.startswith("@"):
