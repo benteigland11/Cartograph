@@ -256,10 +256,21 @@ test_contracts();
 
 _SCAD_EXAMPLE = """\
 // Example usage of {name}
+// Open in OpenSCAD and enable View > Customizer to adjust parameters interactively.
 use <../src/{module}.scad>
 
-// Render with example parameters — edit to show a realistic use case
-{module}(width = 30, height = 15, depth = 8);
+/* [Parameters] */
+// [TODO] Replace with your module's actual parameters and sensible ranges.
+// Slider syntax: value; // [min:step:max]
+// Dropdown syntax: "option"; // [option1, option2, option3]
+width  = 20;  // [1:1:100]
+height = 10;  // [1:1:100]
+depth  = 5;   // [1:1:50]
+
+/* [Hidden] */
+$fn = 32;  // preview resolution — increase for final render
+
+{module}(width = width, height = height, depth = depth);
 """
 
 
@@ -411,12 +422,12 @@ class OpenSCADEngine(LanguageEngine):
         example_files = _glob.glob(os.path.join(path, "examples", "*.scad"))
 
         all_files = (
-            [(f, True) for f in src_files]
-            + [(f, False) for f in test_files]
-            + [(f, False) for f in example_files]
+            [(f, True, False) for f in src_files]
+            + [(f, False, False) for f in test_files]
+            + [(f, False, True) for f in example_files]
         )
 
-        for filepath, is_src in all_files:
+        for filepath, is_src, is_example in all_files:
             rel = os.path.relpath(filepath, path)
             try:
                 content = open(filepath, encoding="utf-8", errors="replace").read()
@@ -475,6 +486,13 @@ class OpenSCADEngine(LanguageEngine):
                     blocks.append(f"Possible credential in {rel}:{line_no}: {stripped}")
                 if is_src and _URL_RE.search(line):
                     warnings.append(f"Hardcoded URL in {rel}:{line_no}: {stripped}")
+
+            # Customizer annotations make modeling examples interactive in the OpenSCAD GUI
+            if is_example and "/* [" not in content:
+                warnings.append(
+                    f"{rel}: no Customizer annotations found — add /* [Section] */ blocks "
+                    f"with parameter ranges so users can tweak values in View > Customizer"
+                )
 
         return {"blocks": blocks, "warnings": warnings}
 
