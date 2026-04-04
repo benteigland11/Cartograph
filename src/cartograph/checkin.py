@@ -28,6 +28,7 @@ import logging
 import os
 import shutil
 
+from .engine import semver_key as _semver_key
 from .languages import get_engine
 from .scaffolding import _library_notes as _canonical_library_notes
 from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_FILE
@@ -150,21 +151,19 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     # --- Version bump (only on updates, not first checkin) ---
     version = meta.get("version", "1.0.0")
     if is_update:
-        parts = version.split(".")
-        if len(parts) == 3:
-            try:
-                major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
-            except ValueError:
-                return {"status": "error", "message": f"Cannot bump malformed version '{version}'. Fix widget.json meta.version to X.Y.Z first."}
-            if version_bump == "major":
-                major, minor, patch = major + 1, 0, 0
-            elif version_bump == "minor":
-                minor, patch = minor + 1, 0
-            elif version_bump == "patch":
-                patch += 1
-            new_version = f"{major}.{minor}.{patch}"
-        else:
+        try:
+            from packaging.version import Version as _Version
+            parsed = _Version(version)
+            major, minor, patch = parsed.major, parsed.minor, parsed.micro
+        except Exception:
             return {"status": "error", "message": f"Cannot bump malformed version '{version}'. Fix widget.json meta.version to X.Y.Z first."}
+        if version_bump == "major":
+            major, minor, patch = major + 1, 0, 0
+        elif version_bump == "minor":
+            minor, patch = minor + 1, 0
+        elif version_bump == "patch":
+            patch += 1
+        new_version = f"{major}.{minor}.{patch}"
     else:
         new_version = version
 

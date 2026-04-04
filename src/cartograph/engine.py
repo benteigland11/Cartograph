@@ -9,6 +9,25 @@ import logging
 
 log = logging.getLogger("cartograph")
 
+
+def semver_key(v: str):
+    """Return a sort key for a semver string using packaging.Version.
+    Falls back to (0, 0, 0) for malformed strings so comparisons never crash.
+    Use this everywhere versions need to be compared or sorted."""
+    try:
+        from packaging.version import Version
+        return Version(v)
+    except Exception:
+        try:
+            from packaging.version import Version
+            return Version("0.0.0")
+        except Exception:
+            parts = str(v).split(".")
+            try:
+                return tuple(int(p) for p in parts[:3])
+            except (ValueError, AttributeError):
+                return (0, 0, 0)
+
 # Package directory (src/cartograph/) — two levels up is the repo root in dev
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(os.path.dirname(PACKAGE_DIR))
@@ -310,14 +329,7 @@ class Cartograph:
                 # Trend: compare latest version's average to lifetime
                 # Need at least 2 versions with reviews to show a trend
                 if len(v_averages) >= 2:
-                    # Find the latest version by semver sort (not lexicographic)
-                    def _semver_key(v):
-                        try:
-                            parts = v.split(".")
-                            return tuple(int(p) for p in parts) if len(parts) == 3 else (0, 0, 0)
-                        except (ValueError, AttributeError):
-                            return (0, 0, 0)
-                    latest_v = sorted(v_averages.keys(), key=_semver_key)[-1]
+                    latest_v = sorted(v_averages.keys(), key=semver_key)[-1]
                     latest_avg = v_averages[latest_v]
                     if latest_avg > avg_rating + 0.3:
                         trend = "up"

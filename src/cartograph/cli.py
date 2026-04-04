@@ -1456,7 +1456,7 @@ def cmd_stats(args):
 def cmd_sync(args):
     """Reconcile local library with cloud. Local newer → push, cloud newer → download."""
     from . import cloud, auth
-    from packaging.version import Version, InvalidVersion
+    from .engine import semver_key as _semver_key
 
     if not auth.is_authenticated():
         err({"error": "Not authenticated. Run: cartograph login"})
@@ -1480,11 +1480,7 @@ def cmd_sync(args):
         print("\n  Nothing to sync — library and cloud are both empty.\n")
         return
 
-    def _ver(s):
-        try:
-            return Version(s)
-        except (InvalidVersion, TypeError):
-            return Version("0.0.0")
+    _ver = _semver_key
 
     actions = []  # (widget_id, action, detail)
     for wid in all_ids:

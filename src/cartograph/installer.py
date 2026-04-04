@@ -150,8 +150,18 @@ def install(carto, widget_id, target_dir, version=None):
     return _install_from_cloud(widget_id, dest_path, owner_hint=owner_hint)
 
 
+def _upgrade_backup_path(widget_id: str) -> str:
+    """Return the path to the single-slot upgrade backup for widget_id."""
+    from .engine import _user_data_dir
+    return os.path.join(_user_data_dir(), "upgrade-backup", widget_id)
+
+
 def upgrade(carto, widget_id, target_dir, version=None):
-    """Upgrade an installed widget to the latest (or specific) version."""
+    """Upgrade an installed widget to the latest (or specific) version.
+
+    Backs up the current installation before removing it. If the new install
+    fails, the backup is restored so the widget is never left in a broken state.
+    """
     dest_path = _widget_dir(target_dir, widget_id)
     if not os.path.exists(dest_path):
         return {"error": f"'{widget_id}' not found at {dest_path}. Install it first."}
@@ -164,16 +174,38 @@ def upgrade(carto, widget_id, target_dir, version=None):
     except Exception:
         pass
 
+    # Back up current installation to a single-slot holding area
+    backup_path = _upgrade_backup_path(widget_id)
+    try:
+        if os.path.exists(backup_path):
+            shutil.rmtree(backup_path)
+        shutil.copytree(dest_path, backup_path)
+    except Exception as e:
+        return {"error": f"Could not create upgrade backup: {e}"}
+
     # Remove old copy
     result = uninstall(carto, widget_id, target_dir)
     if "error" in result:
+        shutil.rmtree(backup_path, ignore_errors=True)
         return result
 
-    # Install new copy (install won't bump install count again for updates)
+    # Install new copy
     result = install(carto, widget_id, target_dir, version=version)
     if "error" in result:
+        # Restore from backup
+        try:
+            shutil.copytree(backup_path, dest_path)
+        except Exception as restore_err:
+            result["restore_error"] = str(restore_err)
+            result["backup_path"] = backup_path
+        else:
+            result["restored"] = True
+            result["restored_version"] = old_version
+        shutil.rmtree(backup_path, ignore_errors=True)
         return result
 
+    # Success — clean up backup
+    shutil.rmtree(backup_path, ignore_errors=True)
     result["previous_version"] = old_version
     return result
 
