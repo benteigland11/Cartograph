@@ -349,10 +349,11 @@ def _auto_push_if_published(checkin_result: dict) -> None:
     profile = cloud.whoami()
     handle = profile.get("owner", "")
     if not handle:
+        print("  → Auto-push skipped: could not resolve cloud owner.")
         return
     remote = cloud.inspect(handle, widget_id)
     if remote.get("error"):
-        return  # not published — nothing to sync
+        return  # not published — nothing to sync, this is the normal case
     print(f"  → Widget exists on cloud (v{remote.get('version', '?')}), pushing v{checkin_result.get('version', '?')}...")
     push_result = cloud.push(widget_path, widget_id)
     if push_result.get("error"):
