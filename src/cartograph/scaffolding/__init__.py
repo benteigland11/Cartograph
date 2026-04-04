@@ -34,7 +34,7 @@ def _library_notes(language: str, domain: str = "") -> dict:
         notes["domain"] = domain_note
     return notes
 
-_VALID_DOMAINS = {"backend", "data", "ml", "security", "infra", "frontend", "universal"}
+_VALID_DOMAINS = {"backend", "data", "ml", "security", "infra", "frontend", "universal", "modeling"}
 
 
 def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
