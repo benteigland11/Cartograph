@@ -60,6 +60,7 @@ _HEAVY_ML_DEPS = {
 class PythonEngine(LanguageEngine):
     name = "python"
     validation_version = 1
+    file_ext = "py"
 
     def runtime_version(self) -> str | None:
         v = sys.version_info

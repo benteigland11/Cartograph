@@ -78,3 +78,10 @@ def available_languages() -> set[str]:
     """Return languages whose toolchain is installed on this machine."""
     return {name for name, engine in _ENGINES.items()
             if engine.supported and engine.check_available()[0]}
+
+
+def allowed_extensions() -> set[str]:
+    """Return all file extensions used by registered language engines.
+    Used by the cloud registry to validate widget zip contents — automatically
+    includes any new language without cloud-side changes."""
+    return {engine.file_ext for engine in _ENGINES.values() if engine.file_ext}
