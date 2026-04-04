@@ -36,57 +36,76 @@ def installed_widget(carto_tmp, tmp_path):
     return result["installed_at"]
 
 
+@pytest.fixture
+def modified_widget(installed_widget):
+    """Install http-client and make a real source change so the hash differs.
+    Uses a comment-only change to avoid triggering contamination warnings."""
+    src = os.path.join(installed_widget, "src")
+    py_files = [f for f in os.listdir(src) if f.endswith(".py") and not f.startswith("__")]
+    target = os.path.join(src, py_files[0])
+    with open(target, "a") as f:
+        f.write("\n# improved error handling\n")
+    return installed_widget
+
+
 # ---------------------------------------------------------------------------
 # Basic checkin
 # ---------------------------------------------------------------------------
 
-def test_checkin_clean_widget(carto_tmp, installed_widget):
-    result = carto_tmp.checkin(installed_widget, reason="Added retry logic")
+def test_checkin_clean_widget(carto_tmp, modified_widget):
+    result = carto_tmp.checkin(modified_widget, reason="Added retry logic")
     assert result["status"] == "success"
     assert result["action"] == "updated"
     assert result["version"] > "1.2.0"   # bumped from fixture version
 
 
-def test_checkin_bumps_version_minor(carto_tmp, installed_widget):
-    result = carto_tmp.checkin(installed_widget, reason="Minor fix", version_bump="minor")
+def test_checkin_bumps_version_minor(carto_tmp, modified_widget):
+    result = carto_tmp.checkin(modified_widget, reason="Minor fix", version_bump="minor")
     assert result["status"] == "success"
     # 1.2.0 → 1.3.0
     assert result["version"] == "1.3.0"
 
 
-def test_checkin_bumps_version_patch(carto_tmp, installed_widget):
-    result = carto_tmp.checkin(installed_widget, reason="Patch", version_bump="patch")
+def test_checkin_bumps_version_patch(carto_tmp, modified_widget):
+    result = carto_tmp.checkin(modified_widget, reason="Patch", version_bump="patch")
     assert result["version"] == "1.2.1"
 
 
-def test_checkin_bumps_version_major(carto_tmp, installed_widget):
-    result = carto_tmp.checkin(installed_widget, reason="Breaking change", version_bump="major")
+def test_checkin_bumps_version_major(carto_tmp, modified_widget):
+    result = carto_tmp.checkin(modified_widget, reason="Breaking change", version_bump="major")
     assert result["version"] == "2.0.0"
 
 
-def test_checkin_leaves_source_intact(carto_tmp, installed_widget):
-    result = carto_tmp.checkin(installed_widget, reason="Test")
+def test_checkin_leaves_source_intact(carto_tmp, modified_widget):
+    result = carto_tmp.checkin(modified_widget, reason="Test")
     assert result["status"] == "success", f"Checkin failed: {result}"
-    assert os.path.isdir(installed_widget), "Source dir must be left in place after checkin"
-    assert os.path.exists(os.path.join(installed_widget, "widget.json"))
+    assert os.path.isdir(modified_widget), "Source dir must be left in place after checkin"
+    assert os.path.exists(os.path.join(modified_widget, "widget.json"))
 
 
-def test_checkin_archives_old_version(carto_tmp, installed_widget):
+def test_checkin_archives_old_version(carto_tmp, modified_widget):
     widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
     old_version = widget["version"]
-    carto_tmp.checkin(installed_widget, reason="Update")
+    carto_tmp.checkin(modified_widget, reason="Update")
     history = os.path.join(widget["path"], "history", old_version)
     assert os.path.isdir(history), f"Expected history archive at {history}"
 
 
-def test_checkin_writes_changelog(carto_tmp, installed_widget):
+def test_checkin_writes_changelog(carto_tmp, modified_widget):
     widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
-    carto_tmp.checkin(installed_widget, reason="Fixed timeout")
+    carto_tmp.checkin(modified_widget, reason="Fixed timeout")
     changelog_path = os.path.join(widget["path"], "changelog.json")
     assert os.path.exists(changelog_path)
     with open(changelog_path) as f:
         log = json.load(f)
     assert log[0]["reason"] == "Fixed timeout"
+
+
+def test_checkin_blocks_identical_content(carto_tmp, installed_widget):
+    """Checking in with no changes must fail — prevents silent version inflation."""
+    result = carto_tmp.checkin(installed_widget, reason="no changes")
+    assert result["status"] == "error"
+    assert "identical content" in result["message"]
 
 
 def test_checkin_missing_path_errors(carto_tmp):
@@ -196,16 +215,16 @@ def test_create_stamps_library_notes(carto_tmp, tmp_path):
     assert "pytest" in notes["language"]
 
 
-def test_checkin_restores_library_notes_if_edited(carto_tmp, installed_widget):
+def test_checkin_restores_library_notes_if_edited(carto_tmp, modified_widget):
     # Agent tampers with library_notes in the installed copy
-    manifest_path = os.path.join(installed_widget, "widget.json")
+    manifest_path = os.path.join(modified_widget, "widget.json")
     with open(manifest_path) as f:
         data = json.load(f)
     data["library_notes"] = {"general": "do whatever", "language": "anything goes"}
     with open(manifest_path, "w") as f:
         json.dump(data, f)
 
-    carto_tmp.checkin(installed_widget, reason="Tampered notes test")
+    carto_tmp.checkin(modified_widget, reason="Tampered notes test")
 
     # Library copy should have canonical notes, not the tampered ones
     widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
@@ -216,9 +235,9 @@ def test_checkin_restores_library_notes_if_edited(carto_tmp, installed_widget):
     assert "pytest" in notes.get("language", "")
 
 
-def test_checkin_fails_if_library_notes_restore_fails(carto_tmp, installed_widget):
+def test_checkin_fails_if_library_notes_restore_fails(carto_tmp, modified_widget):
     with patch("cartograph.checkin._canonical_library_notes", side_effect=RuntimeError("boom")):
-        result = carto_tmp.checkin(installed_widget, reason="library notes strictness")
+        result = carto_tmp.checkin(modified_widget, reason="library notes strictness")
     assert result["status"] == "error"
     assert "boom" in result["message"].lower() or "invalid" in result["message"].lower()
 
@@ -227,8 +246,8 @@ def test_checkin_fails_if_library_notes_restore_fails(carto_tmp, installed_widge
 # Validation version stamped into widget.json
 # ---------------------------------------------------------------------------
 
-def test_checkin_stamps_validation_block(carto_tmp, installed_widget):
-    result = carto_tmp.checkin(installed_widget, reason="Version stamp test")
+def test_checkin_stamps_validation_block(carto_tmp, modified_widget):
+    result = carto_tmp.checkin(modified_widget, reason="Version stamp test")
     assert result["status"] == "success"
 
     widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
@@ -243,9 +262,9 @@ def test_checkin_stamps_validation_block(carto_tmp, installed_widget):
     assert v["engine_version"] >= 1
 
 
-def test_checkin_stamps_correct_engine_version(carto_tmp, installed_widget):
+def test_checkin_stamps_correct_engine_version(carto_tmp, modified_widget):
     from cartograph.languages.python import PythonEngine
-    result = carto_tmp.checkin(installed_widget, reason="Engine version check")
+    result = carto_tmp.checkin(modified_widget, reason="Engine version check")
     assert result["status"] == "success"
 
     widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
@@ -255,9 +274,9 @@ def test_checkin_stamps_correct_engine_version(carto_tmp, installed_widget):
     assert data["validation"]["engine_version"] == PythonEngine.validation_version
 
 
-def test_checkin_stamps_runtime_version(carto_tmp, installed_widget):
+def test_checkin_stamps_runtime_version(carto_tmp, modified_widget):
     import sys
-    result = carto_tmp.checkin(installed_widget, reason="Runtime stamp test")
+    result = carto_tmp.checkin(modified_widget, reason="Runtime stamp test")
     assert result["status"] == "success"
 
     widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
@@ -304,12 +323,12 @@ def test_rollback_restores_old_version(carto_tmp, installed_widget):
     assert "# v2 change" not in content
 
 
-def test_rollback_records_reason_in_changelog(carto_tmp, installed_widget):
+def test_rollback_records_reason_in_changelog(carto_tmp, modified_widget):
     """Rollback reason should appear in the changelog."""
     widget = next(w for w in carto_tmp.widgets if w["id"] == "http-client")
     old_version = widget["version"]
 
-    carto_tmp.checkin(installed_widget, reason="setup")
+    carto_tmp.checkin(modified_widget, reason="setup")
 
     from cartograph.checkin import restore
     restore(carto_tmp, "http-client", old_version, "broke prod")
