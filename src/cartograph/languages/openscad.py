@@ -60,11 +60,6 @@ _GEOMETRY_CALLS_RE = re.compile(
     re.MULTILINE,
 )
 
-# Module parameter with no default: "ident" or "ident ," but NOT "ident = value"
-_PARAM_NO_DEFAULT_RE = re.compile(
-    r'(?<![=\w])(\b[a-zA-Z_]\w*)\s*(?=[,\)](?!\s*=))',
-)
-
 _ECHO_RE = re.compile(r'\becho\s*\(')
 _RESOLUTION_RE = re.compile(r'(?:^|;)\s*\$f[nas]\s*=')
 _INCLUDE_RE = re.compile(r'^\s*include\s*<', re.MULTILINE)
@@ -99,19 +94,36 @@ def _strip_line_comments(content: str) -> str:
     return "\n".join(lines)
 
 
+def _extract_module_signatures(content: str) -> list[tuple[str, str, int, int, int]]:
+    """Return all module signatures with bracket-aware param extraction.
+    Handles function-call defaults like x = max(1, 5) correctly — [^)]* regex
+    would stop at the inner ) and lose subsequent parameters.
+    Returns list of (module_name, params_str, line_no, params_start_pos, params_end_pos)."""
+    clean = _strip_line_comments(content)
+    results = []
+    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(', clean):
+        start = m.end()
+        depth, i = 1, start
+        while i < len(clean) and depth > 0:
+            if clean[i] == "(":
+                depth += 1
+            elif clean[i] == ")":
+                depth -= 1
+            i += 1
+        params_str = clean[start : i - 1].strip()
+        line_no = content[:m.start()].count("\n") + 1
+        results.append((m.group(1), params_str, line_no, start, i - 1))
+    return results
+
+
 def _check_params_have_defaults(content: str, rel: str) -> list[str]:
     """Block public module parameters that have no default value.
     Private modules (name starting with _) are exempt — they are internal
     helpers always called with positional arguments."""
     blocks = []
-    # Strip comments so parentheses in comments don't confuse the regex
-    clean = _strip_line_comments(content)
-    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(([^)]*)\)', clean, re.DOTALL):
-        module_name = m.group(1)
+    for module_name, params_str, line_no, _, _ in _extract_module_signatures(content):
         if module_name.startswith("_"):
-            continue  # private helper — defaults not required
-        params_str = m.group(2).strip()
-        line_no = content[: m.start()].count("\n") + 1
+            continue
         if not params_str:
             continue
         for param in _split_params(params_str):
@@ -127,22 +139,18 @@ def _check_param_unit_comments(content: str, rel: str) -> list[str]:
     """Warn when module parameters lack inline unit comments (// mm, // degrees, etc.)."""
     warnings = []
     lines = content.splitlines()
-    clean = _strip_line_comments(content)
-    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(([^)]*)\)', clean, re.DOTALL):
-        module_name = m.group(1)
+    for module_name, params_str, _, params_start, params_end in _extract_module_signatures(content):
         if module_name.startswith("_"):
-            continue  # private helper — unit comments not required
-        params_str = m.group(2).strip()
+            continue
         if not params_str:
             continue
-        sig_start_line = content[: m.start(2)].count("\n")
-        sig_end_line = content[: m.end(2)].count("\n")
-        sig_lines = lines[sig_start_line: sig_end_line + 1]
+        sig_start_line = content[:params_start].count("\n")
+        sig_end_line = content[:params_end].count("\n")
+        sig_lines = lines[sig_start_line : sig_end_line + 1]
         for param in _split_params(params_str):
             param_name = param.split("=")[0].strip()
             if not param_name:
                 continue
-            # Find the line in the signature that declares this parameter
             for i, sig_line in enumerate(sig_lines):
                 if re.search(rf'\b{re.escape(param_name)}\s*[=,)]', sig_line):
                     if "//" not in sig_line:
@@ -163,10 +171,9 @@ def _parse_openscad_year(version_str: str) -> int | None:
 
 
 def _bosl2_installed() -> bool:
-    """Check common OpenSCAD library paths for BOSL2."""
+    """Check common OpenSCAD library paths for BOSL2, including OPENSCADPATH env var."""
     import platform
     home = os.path.expanduser("~")
-    candidates = []
     system = platform.system()
     if system == "Linux":
         candidates = [
@@ -183,6 +190,10 @@ def _bosl2_installed() -> bool:
             os.path.join(home, "Documents", "OpenSCAD", "libraries", "BOSL2"),
             os.path.join(os.environ.get("APPDATA", ""), "OpenSCAD", "libraries", "BOSL2"),
         ]
+    # Also check OPENSCADPATH — users with non-standard installs set this
+    for entry in os.environ.get("OPENSCADPATH", "").split(os.pathsep):
+        if entry:
+            candidates.append(os.path.join(entry, "BOSL2"))
     return any(os.path.isdir(p) for p in candidates)
 
 
@@ -229,6 +240,9 @@ _SCAD_TEST = """\
 // Cartograph validates by rendering this file to a non-empty STL.
 // Use assert() to enforce geometry contracts — a failing assert causes a
 // non-zero exit and fails validation with a descriptive message.
+//
+// NOTE: if your src module uses include<> for a library (e.g. BOSL2), change
+// the line below from use<> to include<> so the library constants propagate.
 use <../src/{module}.scad>
 
 // Test: default parameters render without error
@@ -257,6 +271,9 @@ test_contracts();
 _SCAD_EXAMPLE = """\
 // Example usage of {name}
 // Open in OpenSCAD and enable View > Customizer to adjust parameters interactively.
+//
+// NOTE: if your src module uses include<> for a library (e.g. BOSL2), change
+// the line below from use<> to include<> so the library constants propagate.
 use <../src/{module}.scad>
 
 /* [Parameters] */
@@ -301,8 +318,36 @@ class OpenSCADEngine(LanguageEngine):
         return True, ""
 
     def check_optional(self) -> list[tuple[str, bool, str]]:
-        """Surface BOSL2 availability as an informational doctor check."""
-        return [("BOSL2", _bosl2_installed(), _bosl2_detail())]
+        """Verify BOSL2 is installed AND that OpenSCAD can actually resolve it.
+        Directory existence is necessary but not sufficient — the library path
+        must be in OpenSCAD's search path for use<BOSL2/...> to resolve."""
+        if not _bosl2_installed():
+            return [("BOSL2", False, _bosl2_detail())]
+        # Render a minimal file that imports BOSL2 to confirm it's truly usable
+        src = "use <BOSL2/std.scad>\nsphere(r=1, $fn=4);\n"
+        with tempfile.NamedTemporaryFile(suffix=".scad", mode="w", delete=False) as f:
+            f.write(src)
+            scad_path = f.name
+        tmp_stl = scad_path.replace(".scad", ".stl")
+        try:
+            res = self._run(
+                ["openscad", "-o", tmp_stl, scad_path],
+                cwd=tempfile.gettempdir(),
+                timeout=15,
+            )
+            if res and res.returncode == 0 and _stl_has_geometry(tmp_stl):
+                return [("BOSL2", True, "found and usable")]
+            return [(
+                "BOSL2", False,
+                f"directory found but OpenSCAD cannot resolve BOSL2/std.scad — "
+                f"check your library path. To install: {_bosl2_detail().replace('not found — ', '')}",
+            )]
+        except Exception:
+            return [("BOSL2", False, "directory found but render test failed")]
+        finally:
+            for p in [scad_path, tmp_stl]:
+                if os.path.exists(p):
+                    os.unlink(p)
 
     def scaffold(self, target_dir, module_name, display_name, **kwargs):
         with open(os.path.join(target_dir, "src", f"{module_name}.scad"), "w") as f:
@@ -438,13 +483,30 @@ class OpenSCADEngine(LanguageEngine):
                 blocks.extend(_check_top_level_geometry(content, rel))
                 blocks.extend(_check_params_have_defaults(content, rel))
                 warnings.extend(_check_param_unit_comments(content, rel))
-                # include <> executes the whole file on inclusion — use <> only
+                # include <> of LOCAL files executes the whole file — use <> only.
+                # External library includes (e.g. BOSL2/std.scad) are allowed when
+                # the library is declared in dependencies; their constants are
+                # intentionally global and consumers of BOSL2 widgets expect them.
                 for m in _INCLUDE_RE.finditer(content):
                     line_no = content[: m.start()].count("\n") + 1
-                    blocks.append(
-                        f"{rel}:{line_no}: use include<> in src/ — use use<> instead "
-                        f"(include executes the full file on import)"
+                    # Extract the path inside the angle brackets
+                    rest = content[m.end():]
+                    close = rest.find(">")
+                    inc_path = rest[:close].strip() if close != -1 else ""
+                    is_local = inc_path.startswith(".") or inc_path.startswith("/") or (
+                        len(inc_path) > 1 and inc_path[1] == ":"
                     )
+                    lib_name = inc_path.split("/")[0].lower()
+                    is_declared_dep = lib_name in declared_deps
+                    if is_local or not is_declared_dep:
+                        blocks.append(
+                            f"{rel}:{line_no}: found include<{inc_path}> in src/ — "
+                            + (
+                                "use use<> instead (include executes the full file on import)"
+                                if is_local or not inc_path
+                                else f"declare {lib_name} in widget.json dependencies to use include<> with it"
+                            )
+                        )
                 # $fn/$fa/$fs override the consumer's resolution settings globally
                 for line_no, line in enumerate(content.splitlines(), 1):
                     stripped = line.strip()

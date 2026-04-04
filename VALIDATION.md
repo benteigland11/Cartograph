@@ -92,7 +92,7 @@ Python uses AST parsing. JS uses a token-based parser. Nim uses line-based scann
 | OS-specific when defined() | N/A | N/A | Yes | N/A | Nim-specific |
 | Risky stdlib imports | N/A | Yes (fs, child_process, etc.) | Yes (os, osproc, etc.) | N/A | Python does not block these |
 | Top-level geometry/control flow | N/A | N/A | N/A | Yes (src/ only) | Bleeds into consumer's scene |
-| include<> | N/A | N/A | N/A | Yes (src/ only) | Executes full file on import; use use<> |
+| include<> | N/A | N/A | N/A | Yes (src/ local only) | Executes full file on import; use use<>. External declared deps allowed. |
 | Global resolution ($fn/$fa/$fs) | N/A | N/A | N/A | Yes (src/ only) | Steals consumer's quality settings |
 
 ### Warnings (overridable)
@@ -131,6 +131,7 @@ Python uses AST parsing. JS uses a token-based parser. Nim uses line-based scann
 | Hardcoded URLs in src/ | Excludes localhost, example.com |
 | Unlisted library in use<> | Not declared in widget.json dependencies |
 | Module parameters without unit comments | Add `// mm`, `// degrees`, etc. |
+| Missing Customizer annotations in examples | Add `/* [Section] */` blocks with value ranges |
 
 ## Decisions and Known Limitations
 
@@ -146,11 +147,16 @@ The line-based scanner uses only stdlib and has no compiler dependencies. If fal
 **Why no top-level variables in OpenSCAD src/?**
 A widget is a module definition. Variables assigned at the top level of a .scad file bleed into every file that `use`s it, polluting the consumer's namespace. Same principle as "no global state" in Python/Nim widgets. Everything belongs inside a module.
 
-**Why block `include <>` in OpenSCAD src/?**
-`include <>` executes the entire included file as if it were pasted in - variables, geometry, and all. `use <>` only imports module definitions. A widget should never have side effects on include; `use <>` is always the right choice in library code.
+**Why block `include <>` for local files in OpenSCAD src/?**
+`include <>` executes the entire included file as if it were pasted in - variables, geometry, and all. `use <>` only imports module definitions. A widget should never use `include <>` on local relative paths; `use <>` is always the right choice for local library code.
+
+Exception: `include <ExternalLib/file.scad>` is allowed when the library is declared in `widget.json` dependencies (e.g. `include <BOSL2/std.scad>`). External libraries like BOSL2 require `include` to expose their constants (`CENTER`, `UP`, etc.) and this is intentional — consumers of a BOSL2 widget expect those constants to be in scope.
 
 **Why block `$fn`/`$fa`/`$fs` in OpenSCAD src/?**
 These are global resolution settings. A widget setting `$fn = 100` in src/ overrides the consumer's quality settings for their entire scene. Expose resolution as a module parameter instead (`fn = 32`) so consumers control it.
+
+**Why does the BOSL2 doctor check render a test file instead of just checking the directory?**
+Directory existence is not sufficient — OpenSCAD's library search path must also include the parent directory. A user could clone BOSL2 to the right location but have a stale `OPENSCADPATH` that shadows it, or the clone could be corrupt. The check renders `use <BOSL2/std.scad> sphere(r=1, $fn=4);` to a temp STL — if it produces geometry, BOSL2 is genuinely usable. `OPENSCADPATH` is also checked for non-standard installs.
 
 **Why is the OpenSCAD top-level check depth-based instead of AST?**
 OpenSCAD has no stdlib parser accessible from Python. A brace-depth tracker catches all practical cases (bare geometry, `if`/`for`/`let` blocks). Known limitation: geometry inside a top-level `if` where the `{` and `}` are on separate lines is caught; single-line `if(true) cube(...)` without braces is not currently detected.

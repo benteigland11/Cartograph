@@ -48,3 +48,13 @@ def sign_stamp(stamp: dict) -> str:
     return hmac.new(_signing_key(), _canonical(stamp), hashlib.sha256).hexdigest()
 
 
+# Fields the cloud registry requires in every published stamp.
+# Defined here so the CLI and cloud stay in sync automatically.
+STAMP_REQUIRED_FIELDS: frozenset[str] = frozenset({
+    "fingerprint",
+    "language",
+    "validated_at",
+    "engine_version",
+})
+
+
