@@ -3,7 +3,7 @@
 [![Tests](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml/badge.svg)](https://github.com/benteigland11/Cartograph/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/cartograph-cli?cacheSeconds=60)](https://pypi.org/project/cartograph-cli/)
 
-A reusable code registry for AI agents. Search, install, create, validate, and check in reusable code modules across projects. Only requires Python. Other languages in the repo are native validation scanners for their respective widget types.
+A local first reusable code registry for AI agents. Search, install, create, validate, and check in code modules across projects. Only requires Python. Other languages in the repo are native validation scanners for their respective widget types. The tool is designed to use the languages you have installed.
 
 ## Why Cartograph
 
