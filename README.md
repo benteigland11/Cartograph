@@ -139,13 +139,13 @@ cartograph whoami
 - **Nim**: nimble, std/unittest, native Nim scanner, stdlib-aware import checking
 - **OpenSCAD**: renders to STL, non-empty mesh check, Python contamination scanner (OpenSCAD has no file I/O). Requires 2021.01+ for `assert()` support. BOSL2 optional.
 
-Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD is the documented exception — it has no file I/O capability, so contamination scanning falls back to Python.
+Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD is the documented exception. It has no file I/O capability, so contamination scanning falls back to Python.
 
 ## Cloud registry
 
 The CLI is built around a local registry on your machine. It also supports an optional cloud registry for sharing widgets across teams or publicly.
 
-The hosted registry is in early development. The local engine is production-ready and does not depend on cloud availability. If the registry is down or unreachable, everything local continues to work.
+The hosted registry is in early development. The local engine is more ready and does not depend on cloud availability. If the registry is down or unreachable, everything local continues to work.
 
 To point at your own registry instance:
 
