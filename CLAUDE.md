@@ -19,6 +19,7 @@ creates `backend-retry-backoff-python`.
     ml         machine learning utilities (must be framework-free)
     security   auth, encryption, scanning
     infra      CLI tools, file ops, system utilities
+    modeling   3D geometry, CAD, parametric design (OpenSCAD)
     universal  language-agnostic, cross-domain
 
 ### Commands
