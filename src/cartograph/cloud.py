@@ -257,10 +257,14 @@ def push(widget_path: str, widget_id: str, visibility: str = "public",
 
     zip_bytes = _zip_widget(widget_path)
 
+    # Send allowed extensions so the cloud can validate dynamically
+    # instead of maintaining a hardcoded whitelist per language.
+    from .languages.registry import allowed_extensions
     fields = {
         "widget_id": widget_id,
         "visibility": visibility,
         "stamp": json.dumps(signed_stamp),
+        "allowed_extensions": json.dumps(sorted(allowed_extensions())),
     }
     if governance:
         fields["governance"] = governance
@@ -523,9 +527,11 @@ def propose(widget_path: str, owner_handle: str, widget_id: str,
 
     zip_bytes = _zip_widget(widget_path)
 
+    from .languages.registry import allowed_extensions
     fields = {
         "reason": reason,
         "stamp": json.dumps(signed_stamp),
+        "allowed_extensions": json.dumps(sorted(allowed_extensions())),
     }
 
     return _post_multipart(
