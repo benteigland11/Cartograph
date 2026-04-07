@@ -78,8 +78,8 @@ class PythonEngine(LanguageEngine):
                 missing.append(tool)
         if missing:
             return False, (
-                f"Python engine requires {' and '.join(missing)} — "
-                f"run 'cartograph doctor' for setup instructions"
+                f"Python engine requires {' and '.join(missing)} - "
+                f"install with: pip install {' '.join(missing)}"
             )
         return True, ""
 
