@@ -5,11 +5,33 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 
 from .base import LanguageEngine
 
+# Import block_walker widget — installed at cg/universal_block_walker_python/.
+# Dogfooded for OpenSCAD's parameter splitting, comment stripping, and module
+# block extraction so we don't maintain a parallel implementation here.
+_WIDGET_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "cg",
+                            "universal_block_walker_python")
+if _WIDGET_PATH not in sys.path:
+    sys.path.insert(0, _WIDGET_PATH)
+from src.block_walker import (  # noqa: E402
+    split_at_depth as _split_at_depth,
+    strip_comments as _strip_comments_raw,
+    extract_blocks as _extract_blocks_raw,
+    CommentSyntax as _CommentSyntax,
+)
+
 log = logging.getLogger("cartograph")
+
+# OpenSCAD comment/string syntax for the block_walker widget
+_SCAD_SYNTAX = _CommentSyntax(
+    line_comments=("//",),
+    block_comments=(("/*", "*/"),),
+    string_delims=('"',),
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,24 +79,7 @@ def _resolve_openscad_binary() -> str | None:
 def _split_params(params_str: str) -> list[str]:
     """Split a module parameter list by commas, respecting nested brackets.
     e.g. 'pos=[0,0,0], size=[10,10,10]' -> ['pos=[0,0,0]', 'size=[10,10,10]']"""
-    params = []
-    depth = 0
-    current = []
-    for ch in params_str:
-        if ch in "([":
-            depth += 1
-            current.append(ch)
-        elif ch in ")]":
-            depth -= 1
-            current.append(ch)
-        elif ch == "," and depth == 0:
-            params.append("".join(current).strip())
-            current = []
-        else:
-            current.append(ch)
-    if current:
-        params.append("".join(current).strip())
-    return [p for p in params if p]
+    return _split_at_depth(params_str, delimiter=",", syntax=_SCAD_SYNTAX)
 
 def _stl_has_geometry(path: str) -> bool:
     """Return True if the STL file contains at least one triangle."""
@@ -122,33 +127,28 @@ def _check_top_level_geometry(content: str, rel: str) -> list[str]:
 
 
 def _strip_line_comments(content: str) -> str:
-    """Remove // line comments from content, preserving line structure."""
-    lines = []
-    for line in content.splitlines():
-        idx = line.find("//")
-        lines.append(line[:idx] if idx != -1 else line)
-    return "\n".join(lines)
+    """Remove comments from content, preserving line structure."""
+    return _strip_comments_raw(content, syntax=_SCAD_SYNTAX)
 
 
 def _extract_module_signatures(content: str) -> list[tuple[str, str, int, int, int]]:
     """Return all module signatures with bracket-aware param extraction.
-    Handles function-call defaults like x = max(1, 5) correctly — [^)]* regex
-    would stop at the inner ) and lose subsequent parameters.
+    Handles function-call defaults like x = max(1, 5) correctly.
     Returns list of (module_name, params_str, line_no, params_start_pos, params_end_pos)."""
     clean = _strip_line_comments(content)
+    blocks = _extract_blocks_raw(clean, r'\bmodule\s+\w+', "(", ")",
+                                  syntax=_SCAD_SYNTAX)
     results = []
-    for m in re.finditer(r'\bmodule\s+(\w+)\s*\(', clean):
-        start = m.end()
-        depth, i = 1, start
-        while i < len(clean) and depth > 0:
-            if clean[i] == "(":
-                depth += 1
-            elif clean[i] == ")":
-                depth -= 1
-            i += 1
-        params_str = clean[start : i - 1].strip()
-        line_no = content[:m.start()].count("\n") + 1
-        results.append((m.group(1), params_str, line_no, start, i - 1))
+    for block in blocks:
+        # Extract module name from the matched entry text
+        name_match = re.search(r'\bmodule\s+(\w+)', block.name)
+        if not name_match:
+            continue
+        module_name = name_match.group(1)
+        # Line number from the original (unstripped) content
+        line_no = block.line
+        results.append((module_name, block.body.strip(), line_no,
+                         block.body_start, block.body_end))
     return results
 
 
