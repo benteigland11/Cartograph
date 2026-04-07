@@ -357,8 +357,8 @@ proc scanFile(filename: string): seq[Finding] =
                 else: "possible credential assignment",
         severity: if inTests: "warning" else: "block"))
 
-    # Hardcoded URLs (warning)
-    if "\"http://" in rawLine or "\"https://" in rawLine:
+    # Hardcoded URLs (warning, src/ only - tests use mock URLs all the time)
+    if not inTests and ("\"http://" in rawLine or "\"https://" in rawLine):
       if not ("localhost" in rawLine or "127.0.0.1" in rawLine or
               "example.com" in rawLine or ".test/" in rawLine or
               ".test\"" in rawLine or ".test:" in rawLine):
@@ -408,8 +408,10 @@ proc scanFile(filename: string): seq[Finding] =
         detail: "environment variable access - verify it is not project-specific",
         severity: "warning"))
 
-    # Hardcoded values: let/const with numeric literals
-    if code.startsWith("let ") or code.startsWith("const "):
+    # Hardcoded values: let/const with numeric literals (src/ only)
+    # Tests legitimately have expected values, fixtures, and constants -
+    # nudging consumers to parameterize them is noise.
+    if not inTests and (code.startsWith("let ") or code.startsWith("const ")):
       let eqPos = code.find(" = ")
       if eqPos >= 0:
         let afterKeyword = code.split(" ", 1)[1].strip()
@@ -440,7 +442,8 @@ proc scanFile(filename: string): seq[Finding] =
                 detail: varName & " = \"" & strVal[0 ..< min(strVal.len, 60)] & "\" - consider making this a parameter",
                 severity: "warning"))
 
-    if topLevelSection and code.startsWith("var ") and "{.global.}" notin code:
+    # Top-level var (src/ only) - tests can have helper state at module scope
+    if not inTests and topLevelSection and code.startsWith("var ") and "{.global.}" notin code:
       let afterKeyword = code[4 .. ^1].strip()
       let splitters = [' ', ':', '=', '*']
       var endPos = afterKeyword.len

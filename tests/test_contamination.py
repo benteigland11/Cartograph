@@ -582,6 +582,38 @@ class TestNimSpecific:
         assert any("top-level mutable state" in w.lower() or "top-level" in w.lower()
                    for w in result["warnings"])
 
+    def test_hardcoded_value_in_test_file_not_warned(self, tmp_path):
+        """Test files legitimately have expected values and fixtures -
+        hardcoded value warnings should be src/ only."""
+        clean_src = "proc hello*(): string =\n  \"ok\"\n"
+        test_code = ("import std/unittest\n"
+                     "let expected = 42\n"
+                     "const FIXTURE = \"abc\"\n"
+                     "suite \"x\":\n  test \"y\":\n    check 1 == 1\n")
+        result = _scan(tmp_path, "nim", "nim", clean_src, test_code=test_code)
+        assert not any("hardcoded" in w.lower() for w in result["warnings"]), \
+            f"hardcoded values in test files should not warn: {result['warnings']}"
+
+    def test_hardcoded_url_in_test_file_not_warned(self, tmp_path):
+        """Test files often use mock URLs - URL warnings should be src/ only."""
+        clean_src = "proc hello*(): string =\n  \"ok\"\n"
+        test_code = ('import std/unittest\n'
+                     'let url = "https://api.mocksite.com/v1"\n'
+                     'suite "x":\n  test "y":\n    check 1 == 1\n')
+        result = _scan(tmp_path, "nim", "nim", clean_src, test_code=test_code)
+        assert not any("hardcoded url" in w.lower() for w in result["warnings"]), \
+            f"hardcoded URLs in test files should not warn: {result['warnings']}"
+
+    def test_top_level_var_in_test_file_not_warned(self, tmp_path):
+        """Test files often have top-level helper state."""
+        clean_src = "proc hello*(): string =\n  \"ok\"\n"
+        test_code = ('import std/unittest\n'
+                     'var counter = 0\n'
+                     'suite "x":\n  test "y":\n    counter.inc; check counter == 1\n')
+        result = _scan(tmp_path, "nim", "nim", clean_src, test_code=test_code)
+        assert not any("top-level" in w.lower() for w in result["warnings"]), \
+            f"top-level vars in test files should not warn: {result['warnings']}"
+
     def test_nim_stdlib_list_complete(self):
         """Verify the scanner's nimStdlib covers all modules shipped with nim."""
         import subprocess, re as _re
