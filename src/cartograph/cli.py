@@ -1625,7 +1625,7 @@ def cmd_setup(args):
             print()
             print("  Options:")
             print("    cartograph setup --agent claude       specify agent explicitly")
-            print("    cartograph setup --file opencode.md   write to a custom file")
+            print("    cartograph setup --file instructions.md   write to a custom file")
             print()
             print(f"  Or create a generic AGENT.md:")
             print(f"    cartograph setup --file AGENT.md")
@@ -1835,12 +1835,20 @@ def _build_cli() -> AgentCLI:
             "help": "Scaffold a new widget",
             "handler": cmd_create,
             "args": [
-                {"name": "widget_id"},
-                {"name": "--language", "required": True, "choices": supported_languages()},
+                {"name": "widget_id",
+                 "help": "Widget slug (e.g. 'retry-backoff'). The --domain prefix and "
+                         "--language suffix are added automatically, producing IDs like "
+                         "'backend-retry-backoff-python'."},
+                {"name": "--language", "required": True, "choices": supported_languages(),
+                 "help": "Implementation language. Determines scaffold templates and validation engine."},
                 {"name": "--domain", "required": True,
-                 "choices": sorted(__import__('cartograph.validator', fromlist=['VALID_DOMAINS']).VALID_DOMAINS)},
-                {"name": "--name", "default": None, "help": "Human-readable display name"},
-                {"name": "--target", "default": ".", "help": "Where to create the widget (default: .)"},
+                 "choices": sorted(__import__('cartograph.validator', fromlist=['VALID_DOMAINS']).VALID_DOMAINS),
+                 "help": "Widget domain. Becomes the prefix in the widget ID and influences scaffold notes."},
+                {"name": "--name", "default": None,
+                 "help": "Optional display name for widget.json (e.g. 'Retry with Backoff'). "
+                         "Defaults to the title-cased slug."},
+                {"name": "--target", "default": ".",
+                 "help": "Project root to create the widget under (widget lands in <target>/cg/<widget_id>/). Default: ."},
             ],
         },
         {
