@@ -1,7 +1,7 @@
 """
 Shared fixtures for Cartograph tests.
 
-All test data is generated in a session-scoped temp directory — no on-disk
+All test data is generated in a session-scoped temp directory - no on-disk
 fixtures directory required.
 """
 import json
@@ -12,6 +12,32 @@ import pytest
 
 # Ensure the repo root is on the path so 'cartograph' package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+
+# ---------------------------------------------------------------------------
+# Auto-apply language markers to parametrized tests
+# ---------------------------------------------------------------------------
+# Maps language strings (as they appear in parametrize args) to pytest marks.
+# This lets `pytest -m openscad` run just openscad tests without touching
+# every @pytest.mark.parametrize call.
+
+_LANG_MARKS = {
+    "python": pytest.mark.python,
+    "javascript": pytest.mark.javascript,
+    "nim": pytest.mark.nim,
+    "openscad": pytest.mark.openscad,
+}
+
+
+def pytest_collection_modifyitems(items):
+    """Add language markers to parametrized tests based on their param values."""
+    for item in items:
+        # Check parametrize callspec for a 'lang' or 'language' param
+        if hasattr(item, "callspec"):
+            for param_name in ("lang", "language"):
+                val = item.callspec.params.get(param_name)
+                if val and val in _LANG_MARKS:
+                    item.add_marker(_LANG_MARKS[val])
 
 
 # ---------------------------------------------------------------------------

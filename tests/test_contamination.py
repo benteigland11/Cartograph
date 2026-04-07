@@ -359,6 +359,7 @@ class TestContaminationStandard:
 # 2. LANGUAGE-SPECIFIC TESTS - checks unique to each engine
 # ---------------------------------------------------------------------------
 
+@pytest.mark.python
 class TestPythonSpecific:
     """Python-only validation and contamination checks."""
 
@@ -439,6 +440,7 @@ class TestPythonSpecific:
         assert any("credential" in b.lower() for b in result["blocks"])
 
 
+@pytest.mark.javascript
 class TestJSSpecific:
     """JavaScript-only validation and contamination checks."""
 
@@ -511,6 +513,7 @@ class TestJSSpecific:
         assert any("sleep" in b.lower() for b in result["blocks"])
 
 
+@pytest.mark.nim
 class TestNimSpecific:
     """Nim-only validation and contamination checks."""
 
@@ -834,6 +837,7 @@ class TestBaseFallback:
         assert any("credential" in b.lower() for b in result["blocks"])
 
 
+@pytest.mark.nim
 class TestNimRiskyImportIsWarning:
     def test_std_os_is_warning_not_error(self, tmp_path):
         _skip_if_missing("nim")
@@ -850,6 +854,7 @@ class TestNimRiskyImportIsWarning:
                    for w in result["warnings"])
 
 
+@pytest.mark.python
 class TestPythonAbsPathCommentExclusion:
     def test_abs_path_in_comment_not_flagged(self, tmp_path):
         from cartograph.languages.python import PythonEngine
@@ -884,6 +889,7 @@ class TestPythonAbsPathCommentExclusion:
         assert any("credential" in b.lower() for b in result["blocks"])
 
 
+@pytest.mark.openscad
 class TestOpenSCADContamination:
     """OpenSCAD-specific contamination checks."""
 
