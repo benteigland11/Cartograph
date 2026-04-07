@@ -119,3 +119,70 @@ def test_nim_runtime_version():
 def test_base_engine_runtime_version_is_none():
     engine = LanguageEngine()
     assert engine.runtime_version() is None
+
+
+# ---------------------------------------------------------------------------
+# OpenSCAD binary resolution
+# ---------------------------------------------------------------------------
+# Regression: on Windows the OpenSCAD installer does not add openscad to PATH,
+# so shutil.which returns None even though the binary exists at the standard
+# install location. The resolver must fall back to those known paths.
+
+@pytest.mark.openscad
+def test_openscad_resolver_uses_path(monkeypatch):
+    from cartograph.languages import openscad as scad_mod
+    monkeypatch.setattr(scad_mod.shutil, "which",
+                        lambda name: "/usr/bin/openscad" if name == "openscad" else None)
+    monkeypatch.delenv("OPENSCAD_BINARY", raising=False)
+    assert scad_mod._resolve_openscad_binary() == "/usr/bin/openscad"
+
+
+@pytest.mark.openscad
+def test_openscad_resolver_returns_none_when_missing(monkeypatch):
+    from cartograph.languages import openscad as scad_mod
+    monkeypatch.setattr(scad_mod.shutil, "which", lambda name: None)
+    monkeypatch.setattr(scad_mod.os.path, "isfile", lambda p: False)
+    monkeypatch.delenv("OPENSCAD_BINARY", raising=False)
+    assert scad_mod._resolve_openscad_binary() is None
+
+
+@pytest.mark.openscad
+def test_openscad_resolver_windows_install_dir_fallback(monkeypatch):
+    """Windows installer puts openscad.exe in C:\\Program Files\\OpenSCAD but
+    does not add it to PATH. shutil.which returns None; resolver must still find it."""
+    from cartograph.languages import openscad as scad_mod
+    monkeypatch.setattr(scad_mod.shutil, "which", lambda name: None)
+    monkeypatch.setattr(scad_mod.os, "name", "nt")
+    expected = r"C:\Program Files\OpenSCAD\openscad.exe"
+    monkeypatch.setattr(scad_mod.os.path, "isfile", lambda p: p == expected)
+    monkeypatch.delenv("OPENSCAD_BINARY", raising=False)
+    assert scad_mod._resolve_openscad_binary() == expected
+
+
+@pytest.mark.openscad
+def test_openscad_resolver_honors_env_override(monkeypatch, tmp_path):
+    """OPENSCAD_BINARY env var lets users point at a nonstandard install."""
+    from cartograph.languages import openscad as scad_mod
+    fake = tmp_path / "openscad"
+    fake.write_text("")
+    monkeypatch.setattr(scad_mod.shutil, "which", lambda name: None)
+    monkeypatch.setattr(scad_mod.os, "name", "posix")
+    monkeypatch.setenv("OPENSCAD_BINARY", str(fake))
+    assert scad_mod._resolve_openscad_binary() == str(fake)
+
+
+@pytest.mark.openscad
+def test_openscad_check_available_windows_hint(monkeypatch):
+    """When openscad is missing on Windows, the error must mention the PATH issue."""
+    from cartograph.languages import openscad as scad_mod
+    monkeypatch.setattr(scad_mod.shutil, "which", lambda name: None)
+    monkeypatch.setattr(scad_mod.os.path, "isfile", lambda p: False)
+    monkeypatch.setattr(scad_mod.os, "name", "nt")
+    monkeypatch.delenv("OPENSCAD_BINARY", raising=False)
+    engine = scad_mod.OpenSCADEngine()
+    # Bypass the per-instance cache for this test
+    if hasattr(engine, "_openscad_bin_cache"):
+        del engine._openscad_bin_cache
+    ok, msg = engine.check_available()
+    assert not ok
+    assert "PATH" in msg or "OPENSCAD_BINARY" in msg

@@ -18,6 +18,42 @@ log = logging.getLogger("cartograph")
 _STL_EMPTY_BYTES = 84  # 80-byte header + 4-byte triangle count = minimum binary STL
 
 
+def _resolve_openscad_binary() -> str | None:
+    """Find the openscad executable.
+
+    The Windows installer does NOT add OpenSCAD to PATH by default, so
+    `shutil.which` alone misses standard installations. We probe PATH first
+    (covers Linux/macOS and Windows-with-PATH), then fall back to the known
+    Windows install locations.
+    """
+    # PATH lookup (works on all platforms when openscad is on PATH)
+    for name in ("openscad", "openscad.exe", "openscad.cmd"):
+        found = shutil.which(name)
+        if found:
+            return found
+
+    # Windows fallback: probe standard install directories
+    if os.name == "nt":
+        candidates = [
+            r"C:\Program Files\OpenSCAD\openscad.exe",
+            r"C:\Program Files (x86)\OpenSCAD\openscad.exe",
+        ]
+        # Also honor a user-provided override env var
+        override = os.environ.get("OPENSCAD_BINARY")
+        if override:
+            candidates.insert(0, override)
+        for path in candidates:
+            if os.path.isfile(path):
+                return path
+
+    # Unix override env var (mainly for nonstandard installs / CI)
+    override = os.environ.get("OPENSCAD_BINARY")
+    if override and os.path.isfile(override):
+        return override
+
+    return None
+
+
 def _split_params(params_str: str) -> list[str]:
     """Split a module parameter list by commas, respecting nested brackets.
     e.g. 'pos=[0,0,0], size=[10,10,10]' -> ['pos=[0,0,0]', 'size=[10,10,10]']"""
@@ -297,24 +333,32 @@ class OpenSCADEngine(LanguageEngine):
     file_ext = "scad"
     aliases = ["scad"]
 
-    toolchain = {
-        "openscad": "Install OpenSCAD 2021.01+ - openscad.org",
-    }
-
     # No native scanner — contamination is simple enough for pure Python
     scanner_runner = None
 
     # OpenSCAD: no package manager. Dependencies declared in widget.json
     # are treated like heavy ML deps — must be pre-installed by the user.
 
+    def _binary(self) -> str | None:
+        """Cached resolver for the openscad executable path."""
+        if not hasattr(self, "_openscad_bin_cache"):
+            self._openscad_bin_cache = _resolve_openscad_binary()
+        return self._openscad_bin_cache
+
     def check_available(self) -> tuple[bool, str]:
         """Require openscad binary AND version >= 2021 (needed for assert())."""
-        if not shutil.which("openscad") and not shutil.which("openscad.cmd"):
-            return False, "openscad not found - Install OpenSCAD 2021.01+ at openscad.org"
+        if not self._binary():
+            hint = "Install OpenSCAD 2021.01+ at openscad.org"
+            if os.name == "nt":
+                hint += (
+                    " (Windows: the installer does not add openscad to PATH; either"
+                    " add C:\\Program Files\\OpenSCAD to PATH or set OPENSCAD_BINARY)"
+                )
+            return False, f"openscad not found - {hint}"
         ver = self.runtime_version() or ""
         year = _parse_openscad_year(ver)
         if year is not None and year < 2021:
-            return False, f"OpenSCAD 2021.01+ required for assert() — found {ver.strip()}"
+            return False, f"OpenSCAD 2021.01+ required for assert() - found {ver.strip()}"
         return True, ""
 
     def check_optional(self) -> list[tuple[str, bool, str]]:
@@ -324,6 +368,9 @@ class OpenSCADEngine(LanguageEngine):
         if not _bosl2_installed():
             return [("BOSL2", False, _bosl2_detail())]
         # Render a minimal file that imports BOSL2 to confirm it's truly usable
+        binary = self._binary()
+        if not binary:
+            return [("BOSL2", False, "openscad not found - cannot verify BOSL2")]
         src = "use <BOSL2/std.scad>\nsphere(r=1, $fn=4);\n"
         with tempfile.NamedTemporaryFile(suffix=".scad", mode="w", delete=False) as f:
             f.write(src)
@@ -331,7 +378,7 @@ class OpenSCADEngine(LanguageEngine):
         tmp_stl = scad_path.replace(".scad", ".stl")
         try:
             res = self._run(
-                ["openscad", "-o", tmp_stl, scad_path],
+                [binary, "-o", tmp_stl, scad_path],
                 cwd=tempfile.gettempdir(),
                 timeout=15,
             )
@@ -361,8 +408,11 @@ class OpenSCADEngine(LanguageEngine):
         return "example_usage.scad"
 
     def runtime_version(self) -> str | None:
+        binary = self._binary()
+        if not binary:
+            return None
         try:
-            res = self._run(["openscad", "--version"], cwd=tempfile.gettempdir(), timeout=10)
+            res = self._run([binary, "--version"], cwd=tempfile.gettempdir(), timeout=10)
             if res and res.returncode == 0:
                 out = (res.stdout or res.stderr or "").strip()
                 return out or None
@@ -386,13 +436,17 @@ class OpenSCADEngine(LanguageEngine):
         if not test_files:
             return self._fail("No test files found in tests/ — add at least one test_*.scad")
 
+        binary = self._binary()
+        if not binary:
+            return self._fail("openscad not found - install OpenSCAD 2021.01+ or set OPENSCAD_BINARY")
+
         errors = []
         for test_file in sorted(test_files):
             tmp = tempfile.NamedTemporaryFile(suffix=".stl", delete=False)
             tmp.close()
             try:
                 res = self._run(
-                    ["openscad", "-o", tmp.name, test_file],
+                    [binary, "-o", tmp.name, test_file],
                     cwd=path,
                     timeout=60,
                 )
@@ -420,17 +474,21 @@ class OpenSCADEngine(LanguageEngine):
         if not os.path.exists(ep):
             return self._fail("examples/example_usage.scad not found")
 
+        binary = self._binary()
+        if not binary:
+            return self._fail("openscad not found - install OpenSCAD 2021.01+ or set OPENSCAD_BINARY")
+
         tmp = tempfile.NamedTemporaryFile(suffix=".stl", delete=False)
         tmp.close()
         try:
-            res = self._run(["openscad", "-o", tmp.name, ep], cwd=path, timeout=60)
+            res = self._run([binary, "-o", tmp.name, ep], cwd=path, timeout=60)
             if res.returncode != 0:
                 return self._fail((res.stderr or res.stdout or "").strip())
             if not _stl_has_geometry(tmp.name):
                 return self._fail("example rendered successfully but produced an empty mesh")
             return self._ok()
         except FileNotFoundError:
-            return self._fail("openscad not found — install OpenSCAD (openscad.org)")
+            return self._fail("openscad not found - install OpenSCAD (openscad.org)")
         finally:
             if os.path.exists(tmp.name):
                 os.unlink(tmp.name)
