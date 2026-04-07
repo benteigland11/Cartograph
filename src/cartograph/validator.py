@@ -16,9 +16,18 @@ import sys
 log = logging.getLogger("cartograph")
 
 
-VALID_DOMAINS = frozenset([
-    "backend", "data", "ml", "security", "infra", "frontend", "universal", "modeling"
-])
+def _load_domains() -> frozenset:
+    """Load valid domains from library_config.json - single source of truth."""
+    config_path = os.path.join(os.path.dirname(__file__), "library_config.json")
+    try:
+        with open(config_path) as f:
+            return frozenset(json.load(f)["domains"].keys())
+    except Exception:
+        # Fallback if config is missing/broken - should never happen in production
+        return frozenset(["backend", "data", "ml", "security", "infra",
+                          "frontend", "universal", "modeling"])
+
+VALID_DOMAINS = _load_domains()
 
 
 def validate_item(carto, path):
