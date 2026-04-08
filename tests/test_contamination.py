@@ -607,6 +607,26 @@ class TestNimSpecific:
         assert not any("hardcoded url" in w.lower() for w in result["warnings"]), \
             f"hardcoded URLs in test files should not warn: {result['warnings']}"
 
+    def test_local_src_module_import_from_tests_not_warned(self, tmp_path):
+        """A test file importing a local widget src/ module is not an unlisted
+        external dep — the scanner must allowlist filenames found in src/.
+        Regression for the user-reported false positive on test_rotate_frame.nim
+        importing rotate_frame_lib (which lives at src/rotate_frame_lib.nim)."""
+        # src module name matches what tests/ will import
+        src_code = "func rotate*(x: int): int = x + 1\n"
+        test_code = ("import std/unittest\n"
+                     "import rotate_frame_lib\n"
+                     "suite \"r\":\n  test \"t\":\n    check rotate(1) == 2\n")
+        # Use _make_widget directly so we control the src filename
+        wdir = _make_widget(tmp_path, "nim", "rotate_frame_lib.nim", src_code,
+                            test_code=test_code)
+        engine = NimEngine()
+        result = engine.scan_contamination(wdir, {"language": "nim", "dependencies": []})
+        unlisted = [w for w in result["warnings"]
+                    if "rotate_frame_lib" in w and "unlisted" in w.lower()]
+        assert not unlisted, \
+            f"local src/ module should not warn as unlisted: {result['warnings']}"
+
     def test_top_level_var_in_test_file_not_warned(self, tmp_path):
         """Test files often have top-level helper state."""
         clean_src = "proc hello*(): string =\n  \"ok\"\n"

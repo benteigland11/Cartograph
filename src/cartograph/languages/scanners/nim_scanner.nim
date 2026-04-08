@@ -121,7 +121,25 @@ proc loadDeclaredDeps(): HashSet[string] =
   except:
     discard
 
+proc loadLocalModules(): HashSet[string] =
+  ## Walk src/ for .nim files and return their bare module names (lowercased).
+  ## A widget's tests/ and examples/ commonly import these as local modules
+  ## (e.g. `import rotate_frame_lib` from a tests/ file). They are part of
+  ## the widget itself, not external dependencies, so the unlisted-import
+  ## check must allowlist them.
+  result = initHashSet[string]()
+  try:
+    if dirExists("src"):
+      for kind, path in walkDir("src"):
+        if kind == pcFile and path.endsWith(".nim"):
+          let bare = splitFile(path).name.toLower()
+          if bare.len > 0:
+            result.incl(bare)
+  except:
+    discard
+
 let declaredDeps = loadDeclaredDeps()
+let localModules = loadLocalModules()
 
 proc isInCode(line: string): bool =
   ## Returns false if the line is a comment-only line.
@@ -287,7 +305,7 @@ proc scanFile(filename: string): seq[Finding] =
             detail: "import " & modName & " - prefer std/" & modName,
             severity: "warning"))
         if modName.len > 0 and fullMod notin nimStdlib and modName.toLower() notin nimStdlib:
-          if modName.toLower() notin declaredDeps:
+          if modName.toLower() notin declaredDeps and modName.toLower() notin localModules:
             result.add(Finding(
               file: filename, kind: "unlisted_import", line: lineNo,
               detail: "import " & modName & " - not in widget.json dependencies",
