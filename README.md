@@ -138,8 +138,9 @@ cartograph whoami
 - **JavaScript/TypeScript**: vitest, native JS scanner, React component support
 - **Nim**: nimble, std/unittest, native Nim scanner, stdlib-aware import checking
 - **OpenSCAD**: renders to STL, non-empty mesh check, Python contamination scanner (OpenSCAD has no file I/O). Requires 2021.01+ for `assert()` support. BOSL2 optional.
+- **SystemVerilog**: Icarus Verilog (iverilog + vvp), `-g2012` mode. Enforces `always_comb`/`always_ff` (legacy `always @(...)` blocked). Contamination scanner checks vendor primitives, simulation-only constructs (`initial`, `#delay`, `$display`), blocking/non-blocking assignment misuse, and hardcoded constants. Vendor primitives allowed when the vendor library is declared as a dependency.
 
-Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD is the documented exception. It has no file I/O capability, so contamination scanning falls back to Python.
+Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD and SystemVerilog use Python-based scanners since neither language has general-purpose file I/O suitable for static analysis tooling.
 
 ## Cloud registry
 
@@ -164,4 +165,4 @@ pytest
 
 The widget library lives in your platform's user data directory. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
-Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad) are installed correctly.
+Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog) are installed correctly.

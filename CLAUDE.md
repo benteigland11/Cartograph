@@ -20,6 +20,7 @@ creates `backend-retry-backoff-python`.
     security   auth, encryption, scanning
     infra      CLI tools, file ops, system utilities
     modeling   3D geometry, CAD, parametric design (OpenSCAD)
+    rtl        register-transfer level hardware design (SystemVerilog)
     universal  language-agnostic, cross-domain
 
 ### Commands

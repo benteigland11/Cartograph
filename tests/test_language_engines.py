@@ -20,6 +20,8 @@ def test_registry_case_insensitive():
 def test_registry_aliases():
     assert get_engine("js") is get_engine("javascript")
     assert get_engine("ts") is get_engine("typescript")
+    assert get_engine("sv") is get_engine("systemverilog")
+    assert get_engine("verilog") is get_engine("systemverilog")
 
 
 def test_registry_unknown_returns_none():
@@ -32,6 +34,7 @@ def test_supported_languages():
     assert "python" in langs
     assert "javascript" in langs
     assert "nim" in langs
+    assert "systemverilog" in langs
 
 
 def test_python_engine_run_tests_pass(tmp_path):
@@ -114,6 +117,17 @@ def test_nim_runtime_version():
     rv = engine.runtime_version()
     assert rv is not None
     assert rv.startswith("nim ")
+
+
+@pytest.mark.systemverilog
+def test_sv_runtime_version():
+    engine = get_engine("systemverilog")
+    available, _ = engine.check_available()
+    if not available:
+        pytest.skip("iverilog not installed")
+    rv = engine.runtime_version()
+    assert rv is not None
+    assert "Icarus Verilog" in rv or "iverilog" in rv.lower()
 
 
 def test_base_engine_runtime_version_is_none():

@@ -26,6 +26,7 @@ _LANG_MARKS = {
     "javascript": pytest.mark.javascript,
     "nim": pytest.mark.nim,
     "openscad": pytest.mark.openscad,
+    "systemverilog": pytest.mark.systemverilog,
 }
 
 

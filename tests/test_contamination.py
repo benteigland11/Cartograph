@@ -25,6 +25,7 @@ import pytest
 from cartograph.languages.python import PythonEngine
 from cartograph.languages.javascript import JavaScriptEngine
 from cartograph.languages.nim import NimEngine
+from cartograph.languages.systemverilog import SystemVerilogEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
 
@@ -72,6 +73,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None):
         "python": PythonEngine,
         "javascript": JavaScriptEngine,
         "nim": NimEngine,
+        "systemverilog": SystemVerilogEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies)
@@ -92,6 +94,13 @@ CLEAN = {
     "python":     ("def hello():\n    return 'world'\n", "", None),
     "javascript": ("function hello() { return 'world' }\n", "", None),
     "nim":        ("proc hello*(): string =\n  \"world\"\n", "", None),
+    "systemverilog": ("module clean #(parameter int W = 8)(\n"
+                      "    input logic clk, input logic rst_n,\n"
+                      "    input logic [W-1:0] d_in, output logic [W-1:0] d_out\n"
+                      ");\n    always_ff @(posedge clk) begin\n"
+                      "        if (!rst_n) d_out <= '0;\n"
+                      "        else d_out <= d_in;\n"
+                      "    end\nendmodule\n", "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -99,6 +108,7 @@ ABS_PATH_SRC = {
     "python":     'LOG = "/home/user/logs/app.log"\n',
     "javascript": "const LOG = '/home/user/logs/app.log'\n",
     "nim":        'let logDir = "/home/user/logs/app"\n',
+    "systemverilog": 'module m; localparam string P = "/home/user/data"; endmodule\n',
 }
 
 # Check 2: Credentials in src/ -> block
@@ -106,6 +116,7 @@ CREDENTIAL_SRC = {
     "python":     'api_key = "sk-abc123verylongkey"\n',
     "javascript": "const api_key = 'sk-abc123verylongkey'\n",
     "nim":        'let api_key = "sk-abc123verylongkey"\n',
+    "systemverilog": 'module m;\nlocalparam string api_key = "sk-abc123verylongkey";\nendmodule\n',
 }
 
 # Check 2b: Credentials in tests/ -> warning (not block)
@@ -113,6 +124,7 @@ CREDENTIAL_TEST = {
     "python":     'password = "fake_test_password_123"\n',
     "javascript": "const password = 'fake_test_password_123'\n",
     "nim":        'let password = "fake_test_password_123"\n',
+    "systemverilog": 'module m;\npassword = "fake_test_password_123";\nendmodule\n',
 }
 
 # Check 3: Hardcoded URLs -> block
@@ -120,6 +132,7 @@ URL_SRC = {
     "python":     'API = "https://api.mycompany.com/v1"\n',
     "javascript": "const API = 'https://api.mycompany.com/v1'\n",
     "nim":        'let api = "https://api.mycompany.com/v1"\n',
+    "systemverilog": 'module m; localparam string U = "https://api.mycompany.com/v1"; endmodule\n',
 }
 
 # Check 3b: localhost/example.com URLs -> allowed
@@ -127,6 +140,7 @@ URL_ALLOWED = {
     "python":     'API = "http://localhost:8080/api"\n',
     "javascript": "const API = 'http://localhost:8080/api'\n",
     "nim":        'let api = "http://localhost:8080/api"\n',
+    "systemverilog": 'module m; localparam string U = "http://localhost:8080/api"; endmodule\n',
 }
 
 # Check 4: Hardcoded IPs -> block
@@ -134,6 +148,7 @@ IP_SRC = {
     "python":     'HOST = "192.168.1.100"\n',
     "javascript": "const HOST = '192.168.1.100'\n",
     "nim":        'let host = "192.168.1.100"\n',
+    "systemverilog": 'module m; localparam string H = "192.168.1.100"; endmodule\n',
 }
 
 # Check 5: Sleep in src/ -> block
@@ -193,17 +208,21 @@ STDLIB_IMPORT = {
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv"}
 
 # Which languages need external tools to run their scanners
-NEEDS_TOOL = {"javascript": "node", "nim": "nim"}
+NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog"}
 
 
 # ---------------------------------------------------------------------------
 # 1. BASE CAPABILITY TESTS - parameterized across all languages
 # ---------------------------------------------------------------------------
 
-LANGUAGES = ["python", "javascript", "nim"]
+# All languages with contamination engines
+LANGUAGES = ["python", "javascript", "nim", "systemverilog"]
+
+# Languages with native sleep/import/env detection (not applicable to SV)
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim"]
 
 
 def _skip_if_missing(lang):
@@ -285,15 +304,16 @@ class TestContaminationStandard:
             f"{lang}: hardcoded IP not blocked: {result}"
 
     # -- Check 5: Sleep/blocking -> block in src, conditional warn in tests --
+    # (Not applicable to SystemVerilog - it has its own timing rules)
 
-    @pytest.mark.parametrize("lang", LANGUAGES)
+    @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_sleep_in_src_blocks(self, tmp_path, lang):
         _skip_if_missing(lang)
         result = _scan(tmp_path, lang, EXT[lang], SLEEP_SRC[lang])
         assert any("sleep" in b.lower() for b in result["blocks"]), \
             f"{lang}: sleep not blocked in src: {result}"
 
-    @pytest.mark.parametrize("lang", LANGUAGES)
+    @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_sleep_in_tests_small_no_warning(self, tmp_path, lang):
         _skip_if_missing(lang)
         clean_src = CLEAN[lang][0]
@@ -302,7 +322,7 @@ class TestContaminationStandard:
         assert not any("sleep" in w.lower() for w in result["warnings"]), \
             f"{lang}: small sleep should not warn: {result['warnings']}"
 
-    @pytest.mark.parametrize("lang", LANGUAGES)
+    @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_sleep_in_tests_large_warns(self, tmp_path, lang):
         _skip_if_missing(lang)
         clean_src = CLEAN[lang][0]
@@ -312,8 +332,9 @@ class TestContaminationStandard:
             f"{lang}: large sleep should warn: {result['warnings']}"
 
     # -- Check 6: Hardcoded values -> warning --
+    # (Not applicable to SystemVerilog - it has its own hardcoded constant rules)
 
-    @pytest.mark.parametrize("lang", LANGUAGES)
+    @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_hardcoded_value_warns(self, tmp_path, lang):
         _skip_if_missing(lang)
         result = _scan(tmp_path, lang, EXT[lang], HARDCODED_VALUE[lang])
@@ -321,8 +342,9 @@ class TestContaminationStandard:
             f"{lang}: hardcoded value should warn: {result['warnings']}"
 
     # -- Check 7: Env var access -> warning --
+    # (Not applicable to SystemVerilog - no env vars in HDL)
 
-    @pytest.mark.parametrize("lang", LANGUAGES)
+    @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_env_var_warns(self, tmp_path, lang):
         _skip_if_missing(lang)
         result = _scan(tmp_path, lang, EXT[lang], ENV_VAR[lang])
@@ -330,8 +352,9 @@ class TestContaminationStandard:
             f"{lang}: env var should warn: {result['warnings']}"
 
     # -- Check 8: Unlisted imports -> warning --
+    # (Not applicable to SystemVerilog - no package imports in the same sense)
 
-    @pytest.mark.parametrize("lang", LANGUAGES)
+    @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_unlisted_import_warns(self, tmp_path, lang):
         _skip_if_missing(lang)
         result = _scan(tmp_path, lang, EXT[lang], UNLISTED_IMPORT[lang])
@@ -339,7 +362,7 @@ class TestContaminationStandard:
                     for w in result["warnings"]), \
             f"{lang}: unlisted import should warn: {result['warnings']}"
 
-    @pytest.mark.parametrize("lang", LANGUAGES)
+    @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_listed_import_no_warning(self, tmp_path, lang):
         _skip_if_missing(lang)
         src, deps = LISTED_IMPORT[lang]
@@ -347,7 +370,7 @@ class TestContaminationStandard:
         assert not any("unlisted" in w.lower() for w in result["warnings"]), \
             f"{lang}: listed import should not warn: {result['warnings']}"
 
-    @pytest.mark.parametrize("lang", LANGUAGES)
+    @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_stdlib_import_no_warning(self, tmp_path, lang):
         _skip_if_missing(lang)
         result = _scan(tmp_path, lang, EXT[lang], STDLIB_IMPORT[lang])
@@ -706,6 +729,7 @@ class TestDepPinning:
         ("python", PythonEngine),
         ("javascript", JavaScriptEngine),
         ("nim", NimEngine),
+        ("systemverilog", SystemVerilogEngine),
     ])
     def test_unpinned_dep_fails(self, tmp_path, lang, engine_cls):
         if lang in NEEDS_TOOL:
@@ -720,6 +744,7 @@ class TestDepPinning:
         ("python", PythonEngine),
         ("javascript", JavaScriptEngine),
         ("nim", NimEngine),
+        ("systemverilog", SystemVerilogEngine),
     ])
     def test_pinned_dep_passes_pinning(self, tmp_path, lang, engine_cls):
         if lang in NEEDS_TOOL:
@@ -756,6 +781,14 @@ class TestOrchestrator:
                             'let api_key = "sk-abc123verylongkey"\n')
         result = scan_contamination(wdir)
         assert any("credential" in b.lower() for b in result["blocks"])
+
+    def test_sv_delegation(self, tmp_path):
+        if not shutil.which("iverilog"):
+            pytest.skip("iverilog not installed")
+        wdir = _make_widget(tmp_path, "systemverilog", "mod.sv",
+                            "module m;\n    initial begin\n    end\nendmodule\n")
+        result = scan_contamination(wdir)
+        assert any("initial" in b.lower() for b in result["blocks"])
 
     def test_missing_manifest_returns_empty(self, tmp_path):
         result = scan_contamination(str(tmp_path))
@@ -972,3 +1005,163 @@ class TestOpenSCADContamination:
     def test_credential_blocks(self, tmp_path):
         result = self._scan(tmp_path, 'module m(w=10) { cube([w,w,w]); }\napi_key = "sk-secret123abc";\n')
         assert any("credential" in b.lower() for b in result["blocks"])
+
+
+@pytest.mark.systemverilog
+class TestSystemVerilogContamination:
+    """SystemVerilog-specific contamination checks."""
+
+    @pytest.fixture(autouse=True)
+    def _require_iverilog(self):
+        if not shutil.which("iverilog"):
+            pytest.skip("iverilog not installed")
+
+    def _scan(self, tmp_path, src_content, dependencies=None):
+        wdir = tmp_path / "widget"
+        (wdir / "src").mkdir(parents=True)
+        (wdir / "tests").mkdir()
+        (wdir / "examples").mkdir()
+        (wdir / "src" / "mod.sv").write_text(src_content)
+        engine = SystemVerilogEngine()
+        return engine.scan_contamination(
+            str(wdir), {"language": "systemverilog",
+                        "dependencies": dependencies or []})
+
+    # --- clean code ---
+
+    def test_clean_module_no_findings(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m #(parameter int W = 8)(\n"
+            "    input logic clk, input logic rst_n,\n"
+            "    input logic [W-1:0] d, output logic [W-1:0] q\n"
+            ");\n    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n) q <= '0; else q <= d;\n"
+            "    end\nendmodule\n")
+        assert result["blocks"] == [], f"unexpected blocks: {result['blocks']}"
+
+    # --- vendor primitives ---
+
+    def test_vendor_primitive_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m; BUFG clk_buf (.I(clk), .O(buf_clk)); endmodule\n")
+        assert any("vendor" in b.lower() for b in result["blocks"])
+
+    def test_vendor_primitive_allowed_with_dep(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m; BUFG clk_buf (.I(clk), .O(buf_clk)); endmodule\n",
+            dependencies=["xilinx-unisim"])
+        assert not any("vendor" in b.lower() for b in result["blocks"])
+
+    def test_altera_primitive_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m; ALTPLL #(.WIDTH(8)) pll (.inclk0(clk)); endmodule\n")
+        assert any("vendor" in b.lower() for b in result["blocks"])
+
+    def test_altera_allowed_with_dep(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m; ALTPLL #(.WIDTH(8)) pll (.inclk0(clk)); endmodule\n",
+            dependencies=["altera-ip"])
+        assert not any("vendor" in b.lower() for b in result["blocks"])
+
+    # --- initial blocks ---
+
+    def test_initial_block_in_src_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m;\n    initial begin\n        d_out = '0;\n    end\nendmodule\n")
+        assert any("initial" in b.lower() for b in result["blocks"])
+
+    # --- #delay ---
+
+    def test_delay_in_src_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m;\n    always_ff @(posedge clk) begin\n"
+            "        #10 q <= d;\n    end\nendmodule\n")
+        assert any("delay" in b.lower() for b in result["blocks"])
+
+    # --- timescale ---
+
+    def test_timescale_in_src_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "`timescale 1ns/1ps\nmodule m; endmodule\n")
+        assert any("timescale" in b.lower() for b in result["blocks"])
+
+    # --- legacy always ---
+
+    def test_legacy_always_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m;\n    always @(posedge clk) begin\n"
+            "        q <= d;\n    end\nendmodule\n")
+        assert any("always @" in b or "Verilog-2001" in b for b in result["blocks"])
+
+    # --- $display family ---
+
+    def test_display_in_src_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m;\n    always_ff @(posedge clk) begin\n"
+            "        $display(\"debug\");\n        q <= d;\n"
+            "    end\nendmodule\n")
+        assert any("display" in b.lower() for b in result["blocks"])
+
+    def test_monitor_in_src_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m;\n    always_comb begin\n"
+            "        $monitor(\"watch\");\n    end\nendmodule\n")
+        assert any("monitor" in b.lower() for b in result["blocks"])
+
+    # --- $readmemh hardcoded path ---
+
+    def test_readmemh_hardcoded_path_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m;\n    logic [7:0] mem [0:255];\n"
+            "    always_comb $readmemh(\"/data/rom.hex\", mem);\n"
+            "endmodule\n")
+        assert any("readmemh" in b.lower() for b in result["blocks"])
+
+    # --- blocking/non-blocking assignment ---
+
+    def test_blocking_in_always_ff_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m(input logic clk, input logic d, output logic q);\n"
+            "    always_ff @(posedge clk) begin\n"
+            "        q = d;\n"
+            "    end\nendmodule\n")
+        assert any("blocking" in b.lower() and "always_ff" in b
+                    for b in result["blocks"])
+
+    def test_nonblocking_in_always_comb_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m(input logic a, output logic b);\n"
+            "    always_comb begin\n"
+            "        b <= a;\n"
+            "    end\nendmodule\n")
+        assert any("non-blocking" in b.lower() and "always_comb" in b
+                    for b in result["blocks"])
+
+    def test_for_loop_in_always_ff_not_false_positive(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m #(parameter int D = 4)(\n"
+            "    input logic clk, input logic rst_n,\n"
+            "    output logic [7:0] s [0:D-1]\n"
+            ");\n    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n)\n"
+            "            for (int i = 0; i < D; i++) s[i] <= '0;\n"
+            "    end\nendmodule\n")
+        assert not any("blocking" in b.lower() for b in result["blocks"])
+
+    def test_typedef_enum_not_false_positive(self, tmp_path):
+        result = self._scan(tmp_path,
+            "module m;\n"
+            "    typedef enum logic [1:0] {\n"
+            "        IDLE = 2'b00, RUN = 2'b01\n"
+            "    } state_t;\n"
+            "    state_t st;\nendmodule\n")
+        assert not any("hardcoded" in w.lower() for w in result["warnings"])
+
+    # --- comments don't false-positive ---
+
+    def test_vendor_in_comment_not_flagged(self, tmp_path):
+        result = self._scan(tmp_path,
+            "// This replaces a LUT6 with generic logic\n"
+            "/* Previously used BUFG */\n"
+            "module m; endmodule\n")
+        assert not any("vendor" in b.lower() for b in result["blocks"])

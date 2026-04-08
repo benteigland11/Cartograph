@@ -116,6 +116,7 @@ LANGUAGE_ALIASES = {
     "c++": "cpp", "cxx": "cpp",
     "c#": "csharp",
     "hipc++": "hip", "hip c++": "hip",
+    "sv": "systemverilog", "verilog": "systemverilog",
 }
 
 def normalize_language(lang):
