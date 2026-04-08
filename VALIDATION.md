@@ -42,6 +42,7 @@ These are requirements. Validation fails if any are not met.
 | JavaScript/TypeScript | Yes | 80% | @vitest/coverage-v8 |
 | Nim | No | N/A | No stdlib coverage tool exists |
 | OpenSCAD | No | N/A | Render passes = validation passes |
+| SystemVerilog | No | N/A | Testbench `$finish` exit code = pass; no per-line coverage |
 
 Nim coverage would require compiling via `--debugger:native` and running `gcov`/`lcov` on the generated C code. This produces C-level line coverage, not Nim source-level coverage. Decided it was too unreliable and confusing to impose on widget authors.
 
@@ -70,6 +71,16 @@ Nim coverage would require compiling via `--debugger:native` and running `gcov`/
 | Native Nim scanner passes | issues found | nim_scanner.nim |
 | .nimble file exists | missing | file check |
 
+### SystemVerilog
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| src/ has .sv files | missing | file check |
+| Lint passes | syntax/semantic errors | iverilog -g2012 -Wall -tnull |
+| Each tests/test_*.sv compiles and simulates | iverilog or vvp non-zero exit | iverilog + vvp subprocess |
+| examples/example_usage.sv compiles and simulates | iverilog or vvp non-zero exit | iverilog + vvp subprocess |
+| Python fallback contamination scanner passes | issues found | regex + block_walker primitives |
+
 ## Contamination Scanning
 
 Each language has a native scanner written in that language (not regex from Python).
@@ -77,35 +88,42 @@ Python uses AST parsing. JS uses a token-based parser. Nim uses line-based scann
 
 ### Fails validation if found (src/ only unless noted)
 
-| Pattern | Python | JS | Nim | OpenSCAD | Notes |
-|---------|--------|----|-----|----------|-------|
-| Debug output (print/echo/console.log) | Yes (AST, src/ only) | Yes (src/ block, tests/ warn, examples/ allow) | Yes (src/ block, tests/ warn, examples/ allow) | Yes (echo(), src/ only) | |
-| Process exit (sys.exit/process.exit/quit) | Yes (AST) | Yes | Yes | N/A | Not a concept in OpenSCAD |
-| Sleep/blocking calls | Yes (AST) | Yes | Yes | N/A | Not a concept in OpenSCAD |
-| Absolute paths in strings | Yes | Yes | Yes | Yes (in include<>/use<>) | /home/, /Users/, C:\ |
-| Hardcoded credentials | Yes | Yes | Yes | Yes | api_key, secret_key, password, etc. |
-| Hardcoded IPs | Yes | Yes | Yes | No | N.N.N.N pattern |
-| eval() | No | Yes | N/A | N/A | JS-specific |
-| C FFI pragmas ({.importc.}, {.compile.}) | N/A | N/A | Yes | N/A | Nim-specific |
-| Global mutable state ({.global.}) | N/A | N/A | Yes | N/A | Nim-specific |
-| when isMainModule | N/A | N/A | Yes | N/A | Nim-specific |
-| OS-specific when defined() | N/A | N/A | Yes | N/A | Nim-specific |
-| Risky stdlib imports | N/A | Yes (fs, child_process, etc.) | Yes (os, osproc, etc.) | N/A | Python does not block these |
-| Top-level geometry/control flow | N/A | N/A | N/A | Yes (src/ only) | Bleeds into consumer's scene |
-| include<> | N/A | N/A | N/A | Yes (src/ local only) | Executes full file on import; use use<>. External declared deps allowed. |
-| Global resolution ($fn/$fa/$fs) | N/A | N/A | N/A | Yes (src/ only) | Steals consumer's quality settings |
+| Pattern | Python | JS | Nim | OpenSCAD | SystemVerilog | Notes |
+|---------|--------|----|-----|----------|---------------|-------|
+| Debug output (print/echo/console.log) | Yes (AST, src/ only) | Yes (src/ block, tests/ warn, examples/ allow) | Yes (src/ block, tests/ warn, examples/ allow) | Yes (echo(), src/ only) | Yes ($display/$monitor/$write/$strobe in src/) | |
+| Process exit (sys.exit/process.exit/quit) | Yes (AST) | Yes | Yes | N/A | N/A | Not a concept in OpenSCAD or RTL |
+| Sleep/blocking calls | Yes (AST) | Yes | Yes | N/A | Yes (`#delay`, src/ only) | RTL: simulation timing belongs in testbench |
+| Absolute paths in strings | Yes | Yes | Yes | Yes (in include<>/use<>) | Yes (in $readmemh/$readmemb) | /home/, /Users/, C:\ |
+| Hardcoded credentials | Yes | Yes | Yes | Yes | Yes | api_key, secret_key, password, etc. |
+| Hardcoded IPs | Yes | Yes | Yes | No | No | N.N.N.N pattern |
+| eval() | No | Yes | N/A | N/A | N/A | JS-specific |
+| C FFI pragmas ({.importc.}, {.compile.}) | N/A | N/A | Yes | N/A | N/A | Nim-specific |
+| Global mutable state ({.global.}) | N/A | N/A | Yes | N/A | N/A | Nim-specific |
+| when isMainModule | N/A | N/A | Yes | N/A | N/A | Nim-specific |
+| OS-specific when defined() | N/A | N/A | Yes | N/A | N/A | Nim-specific |
+| Risky stdlib imports | N/A | Yes (fs, child_process, etc.) | Yes (os, osproc, etc.) | N/A | N/A | Python does not block these |
+| Top-level geometry/control flow | N/A | N/A | N/A | Yes (src/ only) | N/A | Bleeds into consumer's scene |
+| include<> | N/A | N/A | N/A | Yes (src/ local only) | N/A | Executes full file on import; use use<>. External declared deps allowed. |
+| Global resolution ($fn/$fa/$fs) | N/A | N/A | N/A | Yes (src/ only) | N/A | Steals consumer's quality settings |
+| `initial` blocks | N/A | N/A | N/A | N/A | Yes (src/ only) | Simulation-only, not synthesizable |
+| `` `timescale `` directive | N/A | N/A | N/A | N/A | Yes (src/ only) | Belongs in testbench |
+| Verilog-2001 `always @(...)` | N/A | N/A | N/A | N/A | Yes (src/ only) | Use always_comb / always_ff |
+| Vendor primitives (LUT6, BUFG, RAMB36, ALTPLL, sky130, ...) | N/A | N/A | N/A | N/A | Yes unless declared | Allowed if vendor lib in widget.json deps |
+| Blocking `=` in always_ff | N/A | N/A | N/A | N/A | Yes | Race condition on synthesis |
+| Non-blocking `<=` in always_comb | N/A | N/A | N/A | N/A | Yes | Wrong semantics for combinational |
+| Hardcoded file paths in $readmemh/$readmemb | N/A | N/A | N/A | N/A | Yes | Parameterize the path |
 
 ### Warnings (overridable)
 
-| Pattern | Python | JS | Nim | Notes |
-|---------|--------|----|-----|-------|
-| Hardcoded URLs | Yes | Yes | Yes | Excludes localhost, example.com, .test |
-| Hardcoded values (constants) | Yes (AST) | Yes (config-like names) | Yes | |
-| Unlisted imports | Yes (AST) | Yes | Yes | Not in stdlib or deps |
-| Environment variable access | Yes | Yes | Yes | os.getenv, process.env, getEnv |
-| Old-style stdlib imports | No | No | Yes | `import json` vs `import std/json` |
-| Top-level mutable state | No | No | Yes | `var` at module level |
-| Credentials in tests | Yes | Yes | Yes | "verify it's fake" |
+| Pattern | Python | JS | Nim | SystemVerilog | Notes |
+|---------|--------|----|-----|---------------|-------|
+| Hardcoded URLs | Yes | Yes | Yes | Yes | Excludes localhost, example.com, .test |
+| Hardcoded values (constants) | Yes (AST) | Yes (config-like names) | Yes | Yes (sized literals like 32'd115200, 8'hFF; typedef enum bodies excluded) | |
+| Unlisted imports | Yes (AST) | Yes | Yes | No | Not in stdlib or deps |
+| Environment variable access | Yes | Yes | Yes | N/A | os.getenv, process.env, getEnv |
+| Old-style stdlib imports | No | No | Yes | N/A | `import json` vs `import std/json` |
+| Top-level mutable state | No | No | Yes | N/A | `var` at module level |
+| Credentials in tests | Yes | Yes | Yes | Yes | "verify it's fake" |
 
 ### OpenSCAD
 
@@ -132,6 +150,37 @@ Python uses AST parsing. JS uses a token-based parser. Nim uses line-based scann
 | Unlisted library in use<> | Not declared in widget.json dependencies |
 | Module parameters without unit comments | Add `// mm`, `// degrees`, etc. |
 | Missing Customizer annotations in examples | Add `/* [Section] */` blocks with value ranges |
+
+### SystemVerilog
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| Lints under iverilog -g2012 | syntax/semantic errors | iverilog -Wall -tnull |
+| No `initial` blocks in src/ | present | regex (comment-stripped) |
+| No `#delay` in src/ | present | regex (comment-stripped) |
+| No `` `timescale `` directive in src/ | present | regex (comment-stripped) |
+| No Verilog-2001 `always @(...)` in src/ | present | regex |
+| No $display/$monitor/$write in src/ | present | regex |
+| No vendor primitives unless declared | undeclared use | regex with vendor-key allowlist |
+| No blocking `=` in always_ff bodies | present | block_walker extracts always_ff blocks, line scan |
+| No non-blocking `<=` in always_comb bodies | present | block_walker extracts always_comb blocks, line scan |
+| No hardcoded paths in $readmemh/$readmemb | present | regex |
+| Each tests/test_*.sv simulates to clean exit | iverilog or vvp non-zero | iverilog + vvp |
+| examples/example_usage.sv simulates to clean exit | iverilog or vvp non-zero | iverilog + vvp |
+
+**Coverage:** None enforced. Successful simulation (testbench reaches `$finish`) = validation passes.
+
+**Native scanner:** Python fallback. Icarus Verilog has no scriptable AST API and SystemVerilog parsers in Python (e.g. pyverilog) are heavy and incomplete. The scanner uses regex for token matches and dogfoods the `universal-block-walker-python` widget for depth-aware extraction (always_ff/always_comb bodies, typedef enum bodies).
+
+**Contamination scanner scope:** src/ only for structural checks. All files checked for absolute paths and credentials.
+
+### Warnings (SystemVerilog)
+
+| Pattern | Notes |
+|---------|-------|
+| Hardcoded URLs in src/ | Excludes localhost, example.com |
+| Hardcoded sized literals | e.g. 32'd115200, 8'hFF — should be parameters. typedef enum bodies excluded. |
+| Hardcoded credentials in tests | "verify it's fake" — same rule as other languages |
 
 ## Decisions and Known Limitations
 
@@ -163,3 +212,21 @@ OpenSCAD has no stdlib parser accessible from Python. A brace-depth tracker catc
 
 **Why tests run twice if users want custom test flags?**
 Custom rules can call the test runner again with their preferred flags (testament --megatest, pytest --benchmark, etc.). Tests run once our way (the quality guarantee), once their way (their preferences). This avoids the complexity of flag merging and keeps the base validation clean.
+
+**Why no coverage enforcement for SystemVerilog?**
+Coverage in RTL means functional/assertion/toggle coverage and is a property of the testbench, not the source. Icarus Verilog does not produce line coverage in any form Cartograph could enforce uniformly. The bar is the same as OpenSCAD: a successful simulation that reaches `$finish` is the validation. Testbenches are expected to use `$fatal(1, ...)` on assertion failure so non-zero exit codes propagate.
+
+**Why block `initial`, `#delay`, and `timescale` in src/ but allow them in tests/?**
+These are simulation-only constructs. `initial` blocks and `#delay` are not synthesizable — they cannot be turned into hardware. A widget's src/ must be synthesizable RTL; the testbench owns all simulation timing. `timescale` is a tool directive that belongs once per simulation, in the testbench, so a consumer's project sets the global timescale instead of inheriting one per widget.
+
+**Why block legacy `always @(...)` in src/ but use `always_ff` / `always_comb`?**
+Verilog-2001 `always @(posedge clk)` and `always @*` rely on the writer to remember whether a block is sequential or combinational. SystemVerilog's `always_ff` and `always_comb` make the intent explicit and let tools catch incorrect sensitivity lists or missing assignments. Widget code must be unambiguous about intent — if you wrote `always_ff` you mean a flip-flop, full stop.
+
+**Why check blocking vs non-blocking assignments per always block?**
+Mixing `=` (blocking) inside an `always_ff` (sequential) block introduces simulation/synthesis mismatches that are notoriously hard to debug — the simulator may show one schedule and the synthesized hardware another. Similarly, `<=` inside `always_comb` produces a latch in synthesis. The scanner uses `block_walker.extract_blocks` to find each always block's body and then checks line statements. For-loop headers are skipped because the loop variable `=` is not a signal assignment.
+
+**Why allow vendor primitives only when declared in dependencies?**
+Vendor primitives like Xilinx `LUT6` or Intel `ALTPLL` lock a widget to one FPGA family and require the vendor's simulation library to even compile. If a widget genuinely needs them, declaring `xilinx-unisim` (or similar) in `widget.json` makes the dependency explicit so consumers know what toolchain they're committing to. Generic, portable RTL is the default expectation.
+
+**Why dogfood the `universal-block-walker-python` widget instead of inlining the parser?**
+Both OpenSCAD and SystemVerilog need depth-aware text walking (matching `{`/`}`, `(`/`)`, `begin`/`end`) that respects strings and comments. Maintaining two copies of that logic would drift. The block_walker widget is the shared primitive — it gets exercised by every SV and OpenSCAD validation, which is the strongest possible regression test for it.

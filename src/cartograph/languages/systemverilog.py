@@ -109,37 +109,63 @@ def _find_always_blocks(content: str) -> list:
 
 
 def _check_assignments(content: str, blocks: list, rel: str) -> list[str]:
-    """Check for blocking assignments in always_ff and non-blocking in always_comb."""
+    """Check for blocking assignments in always_ff and non-blocking in always_comb.
+
+    Block bodies are already comment-stripped at the file level, so this scans
+    line-by-line within each block without re-stripping. Strings in HDL source
+    rarely contain `=` and the file-level strip preserves them, but the
+    comparison-operator guard below filters the common cases.
+    """
     errors = []
     for block in blocks:
         kind = block.name  # "always_ff" or "always_comb"
         for line_offset, line in enumerate(block.body.splitlines()):
             stripped = line.strip()
-            if not stripped or stripped.startswith('//'):
+            if not stripped:
                 continue
             abs_line = block.line + line_offset
             if "always_ff" in kind:
-                clean = re.sub(r'"[^"]*"', '""', stripped)
-                clean = re.sub(r'//.*$', '', clean)
                 # Skip for-loop headers — loop variable = is not a signal assignment
-                if re.match(r'\bfor\s*\(', clean):
+                if re.match(r'\bfor\s*\(', stripped):
                     continue
-                if _BLOCKING_ASSIGN_RE.search(clean) and '<=' not in clean:
-                    if '==' not in clean and '!=' not in clean and '>=' not in clean:
+                if _BLOCKING_ASSIGN_RE.search(stripped) and '<=' not in stripped:
+                    if '==' not in stripped and '!=' not in stripped and '>=' not in stripped:
                         errors.append(
                             f"Blocking assignment `=` in always_ff at {rel}:{abs_line} — "
                             f"use `<=` (non-blocking) for sequential logic"
                         )
             elif "always_comb" in kind:
-                clean = re.sub(r'"[^"]*"', '""', stripped)
-                clean = re.sub(r'//.*$', '', clean)
-                if _NONBLOCKING_ASSIGN_RE.search(clean):
-                    if ';' in clean:
+                if _NONBLOCKING_ASSIGN_RE.search(stripped):
+                    if ';' in stripped:
                         errors.append(
                             f"Non-blocking assignment `<=` in always_comb at {rel}:{abs_line} — "
                             f"use `=` (blocking) for combinational logic"
                         )
     return errors
+
+
+def _enum_body_ranges(content: str) -> list[tuple[int, int]]:
+    """Return (start, end) byte ranges of typedef enum bodies via block_walker.
+
+    Replaces the prior regex-blanking approach (`typedef enum [^{]*{[^}]*}`)
+    which broke on nested braces. block_walker handles depth correctly.
+    """
+    enums = _extract_blocks(
+        content, r'\btypedef\s+enum\b', "{", "}", syntax=_HDL_STYLE,
+    )
+    return [(e.body_start, e.body_end) for e in enums]
+
+
+def _blank_ranges(content: str, ranges: list[tuple[int, int]]) -> str:
+    """Replace byte ranges with spaces, preserving newlines so line numbers align."""
+    if not ranges:
+        return content
+    out = list(content)
+    for start, end in ranges:
+        for i in range(start, min(end, len(out))):
+            if out[i] != "\n":
+                out[i] = " "
+    return "".join(out)
 
 
 # Hardcoded numeric constants — values that should likely be parameters
@@ -527,13 +553,11 @@ class SystemVerilogEngine(LanguageEngine):
                     f"use a parameter for the file path"
                 )
 
-            # Hardcoded numeric constants — warning to nudge parameterization
-            # Strip typedef enum blocks first — state encodings aren't parameterizable
-            content_no_enums = re.sub(
-                r'typedef\s+enum\b[^{]*\{[^}]*\}',
-                lambda m: '\n' * m.group().count('\n'),  # preserve line count
-                content, flags=re.DOTALL,
-            )
+            # Hardcoded numeric constants — warning to nudge parameterization.
+            # Blank out typedef enum bodies first via block_walker (state
+            # encodings aren't parameterizable). Newlines preserved so line
+            # numbers stay accurate against the original file.
+            content_no_enums = _blank_ranges(content, _enum_body_ranges(content))
             for m in _HARDCODED_NUMERIC_RE.finditer(content_no_enums):
                 line_no = content_no_enums[: m.start()].count("\n") + 1
                 blocks_text = m.group().strip()

@@ -1157,6 +1157,23 @@ class TestSystemVerilogContamination:
             "    state_t st;\nendmodule\n")
         assert not any("hardcoded" in w.lower() for w in result["warnings"])
 
+    def test_typedef_enum_with_nested_concat_initializer(self, tmp_path):
+        # Regression: the prior regex-blanking approach used [^}]* and stopped
+        # at the first } inside the enum body, so a SV concatenation literal
+        # like {2'b01, 2'b10} broke enum exclusion and exposed later constants
+        # to the hardcoded-numeric scanner. block_walker handles nested {}
+        # correctly via depth counting.
+        result = self._scan(tmp_path,
+            "module m;\n"
+            "    typedef enum logic [3:0] {\n"
+            "        X = {2'b01, 2'b10},\n"
+            "        Y = 4'hAB\n"
+            "    } t;\n"
+            "    t st;\nendmodule\n")
+        # 4'hAB is inside the enum body and must not be flagged
+        for w in result["warnings"]:
+            assert "4'hAB" not in w
+
     # --- comments don't false-positive ---
 
     def test_vendor_in_comment_not_flagged(self, tmp_path):
