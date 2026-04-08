@@ -650,6 +650,18 @@ class TestNimSpecific:
         assert not unlisted, \
             f"local src/ module should not warn as unlisted: {result['warnings']}"
 
+    def test_brace_group_stdlib_import_not_warned(self, tmp_path):
+        """`import std/[options, terminal]` must be parsed as two stdlib
+        imports, not as the bogus modules `[options` and `terminal]`.
+        Regression for a false positive on real TUI widgets that use the
+        brace-group syntax to import multiple std modules on one line."""
+        src_code = ("import std/[options, terminal]\n"
+                    "func noop*(x: int): int = x\n")
+        result = _scan(tmp_path, "nim", "nim", src_code)
+        unlisted = [w for w in result["warnings"] if "unlisted" in w.lower()]
+        assert not unlisted, \
+            f"brace-group std imports should not warn: {result['warnings']}"
+
     def test_top_level_var_in_test_file_not_warned(self, tmp_path):
         """Test files often have top-level helper state."""
         clean_src = "proc hello*(): string =\n  \"ok\"\n"

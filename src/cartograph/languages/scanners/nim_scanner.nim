@@ -294,6 +294,21 @@ proc scanFile(filename: string): seq[Finding] =
       elif importLine.startsWith("import "):
         importLine = importLine[7 .. ^1].strip()
 
+      # Expand brace-group imports: "std/[options, terminal]" ->
+      # "std/options, std/terminal". Also handles bare "[a, b]".
+      let obPos = importLine.find('[')
+      let cbPos = importLine.rfind(']')
+      if obPos >= 0 and cbPos > obPos:
+        let prefix = importLine[0 ..< obPos]       # "std/" or ""
+        let inner = importLine[obPos + 1 ..< cbPos]
+        let tail = importLine[cbPos + 1 .. ^1]     # usually ""
+        var expanded: seq[string] = @[]
+        for m in inner.split(","):
+          let mTrim = m.strip()
+          if mTrim.len > 0:
+            expanded.add(prefix & mTrim)
+        importLine = expanded.join(", ") & tail
+
       # Handle comma-separated imports: "import a, b, c"
       let modules = importLine.split(",")
       for rawMod in modules:
