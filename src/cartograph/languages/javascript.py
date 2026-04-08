@@ -338,7 +338,16 @@ class JavaScriptEngine(LanguageEngine):
                 with open(package_json_path, "w") as f:
                     json.dump(pkg, f, indent=2)
 
-        res = self._run(["npm", "install", "--silent"], cwd=path, timeout=120)
+        # Per-validation npm cache so install never writes to ~/.npm. Required
+        # for sandboxed environments (Codex, restricted devcontainers) where
+        # $HOME is read-only. Cleaned up in cleanup().
+        npm_cache = tempfile.mkdtemp(prefix="cartograph_npm_")
+        self._npm_cache_dir = npm_cache
+        res = self._run(
+            ["npm", "install", "--silent", "--cache", npm_cache],
+            cwd=path,
+            timeout=120,
+        )
         if res.returncode != 0:
             output = (res.stderr or res.stdout or "").strip()
             raise RuntimeError(
@@ -430,6 +439,11 @@ class JavaScriptEngine(LanguageEngine):
             d = os.path.join(path, dirname)
             if os.path.exists(d):
                 shutil.rmtree(d, ignore_errors=True)
+        npm_cache = getattr(self, "_npm_cache_dir", None)
+        if npm_cache and os.path.exists(npm_cache):
+            shutil.rmtree(npm_cache, ignore_errors=True)
+            log.debug("Removed isolated npm cache: %s", npm_cache)
+        self._npm_cache_dir = None
 
 
 class TypeScriptEngine(JavaScriptEngine):

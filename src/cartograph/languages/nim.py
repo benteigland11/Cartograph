@@ -159,34 +159,45 @@ class NimEngine(LanguageEngine):
         if not src_files:
             errors.append("src/ contains no .nim files - add at least one source file")
 
-        # 2. Semantic check - nim check catches type errors, undefined symbols, bad syntax
-        errors.extend(self._nim_check(src_files, path, src_dir,
-                                      ["nim", "check", "--hints:off", "--warnings:off"],
-                                      "nim check", timeout=60))
+        # Allocate a per-validation nim cache dir so `nim check` and `nim c`
+        # never write to ~/.cache/nim. This makes Cartograph robust against
+        # sandboxed environments (Codex, restricted devcontainers) where $HOME
+        # is read-only. Scoped strictly to this method - we clean it up in
+        # the finally block below so it doesn't depend on engine.cleanup().
+        nimcache = tempfile.mkdtemp(prefix="cartograph_nimcache_")
+        self._nimcache_dir = nimcache
+        try:
+            # 2. Semantic check - nim check catches type errors, undefined symbols, bad syntax
+            errors.extend(self._nim_check(src_files, path, src_dir,
+                                          ["nim", "check", "--hints:off", "--warnings:off",
+                                           f"--nimcache:{nimcache}"],
+                                          "nim check", timeout=60))
 
-        # 3. Compile check - catches linker/codegen issues nim check misses
-        errors.extend(self._nim_check(src_files, path, src_dir,
-                                      ["nim", "c", "--compileOnly", "--hints:off", "--warnings:off",
-                                       "--nimcache:/tmp/cartograph_nimcache"],
-                                      "nim compile", timeout=120))
+            # 3. Compile check - catches linker/codegen issues nim check misses
+            errors.extend(self._nim_check(src_files, path, src_dir,
+                                          ["nim", "c", "--compileOnly", "--hints:off", "--warnings:off",
+                                           f"--nimcache:{nimcache}"],
+                                          "nim compile", timeout=120))
 
-        # 4. Native source scanner (uses base class helper)
-        scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")
-        scan_errors, _, _ = self._run_native_scanner(
-            scanner_path=scanner,
-            runner=self.scanner_runner,
-            src_files=src_files,
-            cwd=path,
-            finding_messages=self.scanner_messages,
-        )
-        errors.extend(scan_errors)
+            # 4. Native source scanner (uses base class helper)
+            scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")
+            scan_errors, _, _ = self._run_native_scanner(
+                scanner_path=scanner,
+                runner=self.scanner_runner,
+                src_files=src_files,
+                cwd=path,
+                finding_messages=self.scanner_messages,
+            )
+            errors.extend(scan_errors)
 
-        # 5. Dependencies must have a version floor
-        errors.extend(self._check_dep_pinning(dependencies))
+            # 5. Dependencies must have a version floor
+            errors.extend(self._check_dep_pinning(dependencies))
 
-        if errors:
-            return self._fail("\n".join(errors))
-        return self._ok()
+            if errors:
+                return self._fail("\n".join(errors))
+            return self._ok()
+        finally:
+            self._cleanup_nimcache_dir()
 
     def scan_contamination(self, path: str, widget: dict) -> dict:
         """Nim contamination: native scanner on src + test files."""
@@ -271,6 +282,7 @@ class NimEngine(LanguageEngine):
 
     def cleanup(self, path: str) -> None:
         self._cleanup_nimble_dir()
+        self._cleanup_nimcache_dir()
         self._cleanup_compiled_binaries(path)
 
     # -- Private helpers --
@@ -287,6 +299,13 @@ class NimEngine(LanguageEngine):
             shutil.rmtree(nimble_dir, ignore_errors=True)
             log.debug("Removed isolated Nim env: %s", nimble_dir)
         self._nimble_dir = None
+
+    def _cleanup_nimcache_dir(self) -> None:
+        nimcache_dir = getattr(self, "_nimcache_dir", None)
+        if nimcache_dir and os.path.exists(nimcache_dir):
+            shutil.rmtree(nimcache_dir, ignore_errors=True)
+            log.debug("Removed isolated nim cache: %s", nimcache_dir)
+        self._nimcache_dir = None
 
     def _cleanup_compiled_binaries(self, path: str) -> None:
         """Remove compiled test/example binaries left by nimble c -r."""

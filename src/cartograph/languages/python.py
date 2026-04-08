@@ -352,8 +352,12 @@ class PythonEngine(LanguageEngine):
                     )
                 log.debug("Heavy ML dep '%s' found in environment - skipping install.", dep_name)
                 continue
+            # --no-cache-dir keeps pip from writing to ~/.cache/pip, which
+            # may not exist or be writable in sandboxed environments (Codex,
+            # restricted devcontainers). The venv is throwaway so caching
+            # provides no benefit here.
             res = self._run(
-                [py, "-m", "pip", "install", "-q", dep_name],
+                [py, "-m", "pip", "install", "--no-cache-dir", "-q", dep_name],
                 cwd=path,
                 timeout=60,
             )
