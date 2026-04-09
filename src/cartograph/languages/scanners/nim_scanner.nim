@@ -47,7 +47,9 @@ const nimStdlib = [
   "std/lists", "std/sequtils", "std/sets", "std/sharedlist",
   "std/sharedtables", "std/tables",
   # lib/pure/concurrency/
-  "std/cpuinfo", "std/cpuload",
+  "std/cpuinfo", "std/cpuload", "std/threadpool",
+  # lib/core/ (locks, typeinfo) — importable as std/<name>
+  "std/locks", "std/rlocks", "std/typeinfo",
   # lib/std/
   "std/appdirs", "std/assertions", "std/cmdline", "std/compilesettings",
   "std/decls", "std/dirs", "std/editdistance", "std/effecttraits",
@@ -82,7 +84,7 @@ const nimStdlib = [
   "segfaults", "selectors", "sequtils", "sets", "sha1", "sharedlist",
   "sharedtables", "ssl_certs", "ssl_config", "stats", "streams",
   "streamwrapper", "strformat", "strmisc", "strscans", "strtabs",
-  "strutils", "sugar", "terminal", "times", "typetraits", "unicode",
+  "strutils", "sugar", "tables", "terminal", "times", "typetraits", "unicode",
   "unittest", "uri", "volatile", "widestrs", "wordwrap", "wrapnils",
   "xmlparser", "xmltree",
   # lib/std/ short forms
@@ -146,6 +148,136 @@ proc isInCode(line: string): bool =
   let stripped = line.strip()
   return stripped.len > 0 and not stripped.startsWith("#") and not stripped.startsWith("##")
 
+# --- Import statement parsing -----------------------------------------------
+#
+# Nim has a rich import grammar that line-level regex can't handle reliably:
+#   import foo                          # bare
+#   import std/foo                      # slashed
+#   import a, b, c                      # comma list
+#   import std/[a, b, c]                # brace group
+#   import std/[a, b], pkg/[c, d]       # multiple brace groups
+#   import foo as bar                   # rename
+#   import foo except a, b              # except clause
+#   from foo import a, b                # from-import
+#   import pkg/sub/mod                  # nested package path
+#   import                              # multi-line continuation
+#     std/hashes,
+#     std/sets
+#   import std/[                        # multi-line brace group
+#     locks,
+#     atomics
+#   ]
+#
+# parseImportStatement takes a single logical import statement (already
+# reassembled across lines) and returns the normalized module specs, each
+# with the full dotted path and the root package name (for dep checking).
+
+type ImportedModule = object
+  fullPath: string   # e.g. "std/tables" or "chronos/apps/http"
+  root: string       # first slash segment, e.g. "std" or "chronos"
+
+proc rootOf(fullPath: string): string =
+  let slash = fullPath.find('/')
+  if slash < 0: fullPath else: fullPath[0 ..< slash]
+
+proc splitTopLevelCommas(body: string): seq[string] =
+  ## Split `body` on commas that are NOT inside a `[...]` brace group.
+  result = @[]
+  var depth = 0
+  var cur = ""
+  for c in body:
+    if c == '[':
+      depth += 1
+      cur &= c
+    elif c == ']':
+      depth -= 1
+      cur &= c
+    elif c == ',' and depth == 0:
+      let t = cur.strip()
+      if t.len > 0: result.add(t)
+      cur = ""
+    else:
+      cur &= c
+  let t = cur.strip()
+  if t.len > 0: result.add(t)
+
+proc stripModifiers(spec: string): string =
+  ## Drop ` as <alias>` and ` except <list>` suffixes from a single module
+  ## spec. The alias/except symbols are NOT modules — they must not be
+  ## checked against the stdlib or dep lists.
+  var s = spec.strip()
+  let asIdx = s.find(" as ")
+  if asIdx >= 0:
+    s = s[0 ..< asIdx].strip()
+  let exIdx = s.find(" except ")
+  if exIdx >= 0:
+    s = s[0 ..< exIdx].strip()
+  return s
+
+proc parseImportStatement(stmt: string): seq[ImportedModule] =
+  ## Parse a (possibly multi-line, already reassembled) import or from-import
+  ## statement into its imported module specs.
+  result = @[]
+  var body: string
+  let s = stmt.strip()
+  if s.startsWith("from "):
+    # `from <modspec> import <symbols...>` - only the modspec is a module
+    let rest = s[5 .. ^1].strip()
+    let importKw = rest.find(" import ")
+    if importKw < 0:
+      return
+    body = rest[0 ..< importKw].strip()
+  elif s.startsWith("import "):
+    body = s[7 .. ^1].strip()
+  else:
+    return
+
+  # `except` takes a comma-separated symbol list, not more module specs.
+  # (Verified against `nim check`: `import std/os except putEnv, std/tables`
+  # fails to compile.) Truncate at the first top-level ` except ` so its
+  # symbols don't get mistaken for modules.
+  let exceptIdx = body.find(" except ")
+  if exceptIdx >= 0:
+    body = body[0 ..< exceptIdx].strip()
+
+  for rawSpec in splitTopLevelCommas(body):
+    let spec = stripModifiers(rawSpec)
+    if spec.len == 0:
+      continue
+    let obIdx = spec.find('[')
+    if obIdx >= 0:
+      let cbIdx = spec.find(']', obIdx)
+      if cbIdx > obIdx:
+        let prefix = spec[0 ..< obIdx].strip()
+        let inner = spec[obIdx + 1 ..< cbIdx]
+        for rawMember in inner.split(","):
+          let m = rawMember.strip()
+          if m.len == 0: continue
+          let full = prefix & m
+          result.add(ImportedModule(fullPath: full, root: rootOf(full)))
+        continue
+      # Unclosed brace group — malformed or truncated; skip this spec
+      continue
+    result.add(ImportedModule(fullPath: spec, root: rootOf(spec)))
+
+proc isImportComplete(stmt: string): bool =
+  ## Returns true if `stmt` is a complete import statement. An import
+  ## is incomplete if it has an unclosed `[`, or ends with a trailing
+  ## comma (meaning more modules are coming on the next line), or is
+  ## just the bare `import` keyword awaiting its first module.
+  let s = stmt.strip()
+  if s == "import" or s == "from":
+    return false
+  var depth = 0
+  for c in s:
+    if c == '[': depth += 1
+    elif c == ']': depth -= 1
+  if depth != 0:
+    return false
+  if s.endsWith(","):
+    return false
+  return true
+
 proc scanFile(filename: string): seq[Finding] =
   result = @[]
   let content = readFile(filename)
@@ -154,6 +286,14 @@ proc scanFile(filename: string): seq[Finding] =
   var inMultilineString = false
   var inRawString = false
   var topLevelSection = true
+
+  # Pending multi-line import accumulator. When we see an import statement
+  # that isn't complete (trailing comma, unclosed brace, or bare `import`),
+  # we buffer it and append subsequent indented continuation lines until it
+  # parses cleanly. The recorded line number is the line where the import
+  # started, so findings point at the right spot.
+  var pendingImport = ""
+  var pendingImportLine = 0
 
   for i, rawLine in lines:
     let lineNo = i + 1
@@ -271,60 +411,69 @@ proc scanFile(filename: string): seq[Finding] =
             severity: "error"))
           break
 
-    # Import checks: risky imports (error) + unlisted imports (warning)
-    if code.startsWith("import ") or code.startsWith("from "):
-      let lower = code.toLower()
-      const riskyModules = ["std/os", "std/osproc", "std/httpclient",
-                            "std/net", "std/nativesockets"]
-      for m in riskyModules:
-        if m in lower:
-          result.add(Finding(
-            file: filename, kind: "risky_import", line: lineNo,
-            detail: "import " & m & " - flagged for review",
-            severity: "error"))
+    # Import checks via proper tokenizer (see parseImportStatement).
+    # Multi-line imports are accumulated across iterations in pendingImport
+    # and only parsed once isImportComplete returns true. This handles bare
+    # `import`, trailing-comma continuations, and multi-line brace groups.
+    const riskyModules = ["std/os", "std/osproc", "std/httpclient",
+                          "std/net", "std/nativesockets",
+                          "os", "osproc", "httpclient", "net", "nativesockets"]
 
-      # Unlisted import check - extract module name(s)
-      var importLine = code
-      if importLine.startsWith("from "):
-        # "from module import thing" -> check "module"
-        importLine = importLine[5 .. ^1].strip()
-        let spacePos = importLine.find(" ")
-        if spacePos > 0:
-          importLine = importLine[0 ..< spacePos]
-      elif importLine.startsWith("import "):
-        importLine = importLine[7 .. ^1].strip()
-
-      # Expand brace-group imports: "std/[options, terminal]" ->
-      # "std/options, std/terminal". Also handles bare "[a, b]".
-      let obPos = importLine.find('[')
-      let cbPos = importLine.rfind(']')
-      if obPos >= 0 and cbPos > obPos:
-        let prefix = importLine[0 ..< obPos]       # "std/" or ""
-        let inner = importLine[obPos + 1 ..< cbPos]
-        let tail = importLine[cbPos + 1 .. ^1]     # usually ""
-        var expanded: seq[string] = @[]
-        for m in inner.split(","):
-          let mTrim = m.strip()
-          if mTrim.len > 0:
-            expanded.add(prefix & mTrim)
-        importLine = expanded.join(", ") & tail
-
-      # Handle comma-separated imports: "import a, b, c"
-      let modules = importLine.split(",")
-      for rawMod in modules:
-        let modName = rawMod.strip().split("/")[^1].strip()  # std/foo -> foo
-        let fullMod = rawMod.strip().toLower()
-        if rawMod.strip().len > 0 and "/" notin rawMod and modName.toLower() in nimStdlib and modName.toLower() != "system":
-          result.add(Finding(
-            file: filename, kind: "std_import_style", line: lineNo,
-            detail: "import " & modName & " - prefer std/" & modName,
-            severity: "warning"))
-        if modName.len > 0 and fullMod notin nimStdlib and modName.toLower() notin nimStdlib:
-          if modName.toLower() notin declaredDeps and modName.toLower() notin localModules:
+    template processImport(stmt: string, startLine: int) =
+      # Template (not proc) because it mutates `result` from the enclosing
+      # scanFile body and Nim's closure rules forbid capturing var locals.
+      let parsed = parseImportStatement(stmt)
+      for mods in parsed:
+        for rm in riskyModules:
+          if mods.fullPath.toLower() == rm:
             result.add(Finding(
-              file: filename, kind: "unlisted_import", line: lineNo,
-              detail: "import " & modName & " - not in widget.json dependencies",
-              severity: "warning"))
+              file: filename, kind: "risky_import", line: startLine,
+              detail: "import " & mods.fullPath & " - flagged for review",
+              severity: "error"))
+            break
+      for mods in parsed:
+        let full = mods.fullPath.toLower()
+        let root = mods.root.toLower()
+        # std_import_style: bare stdlib name without std/ prefix
+        if "/" notin full and full in nimStdlib and full != "system":
+          result.add(Finding(
+            file: filename, kind: "std_import_style", line: startLine,
+            detail: "import " & mods.fullPath & " - prefer std/" & mods.fullPath,
+            severity: "warning"))
+        # unlisted_import: check if any recognized form of the root package
+        # is in stdlib, declared deps, or local src modules.
+        let isStd = full in nimStdlib or ("std/" & full) in nimStdlib or
+                    root == "std" or full.startsWith("std/")
+        if isStd:
+          continue
+        if root in declaredDeps or full in declaredDeps:
+          continue
+        if root in localModules or full in localModules:
+          continue
+        result.add(Finding(
+          file: filename, kind: "unlisted_import", line: startLine,
+          detail: "import " & mods.fullPath & " - not in widget.json dependencies",
+          severity: "warning"))
+
+    if pendingImport.len > 0:
+      # Continue accumulating a multi-line import regardless of indentation.
+      # The loop terminates as soon as the accumulated text parses as a
+      # complete import statement.
+      pendingImport.add(" ")
+      pendingImport.add(code)
+      if isImportComplete(pendingImport):
+        processImport(pendingImport, pendingImportLine)
+        pendingImport = ""
+      continue
+
+    if code.startsWith("import ") or code.startsWith("from ") or
+       code == "import" or code == "from":
+      if isImportComplete(code):
+        processImport(code, lineNo)
+      else:
+        pendingImport = code
+        pendingImportLine = lineNo
+      continue
 
     # Sleep/blocking: sleep(), sleepAsync()
     # In src/: block. In tests/examples: warn if duration > 1000.
