@@ -153,10 +153,12 @@ class PythonEngine(LanguageEngine):
 
         src_files = glob.glob(os.path.join(path, "src", "**", "*.py"), recursive=True)
         test_files = glob.glob(os.path.join(path, "tests", "**", "*.py"), recursive=True)
+        example_files = glob.glob(os.path.join(path, "examples", "**", "*.py"), recursive=True)
 
-        for fpath in src_files + test_files:
+        for fpath in src_files + test_files + example_files:
             rel = os.path.relpath(fpath, path)
             is_src = fpath in src_files
+            is_example = fpath in example_files
             try:
                 code = open(fpath).read()
             except Exception as e:
@@ -168,29 +170,34 @@ class PythonEngine(LanguageEngine):
                 loc = f"{rel}:{line_no}"
                 stripped = line.strip()
                 is_comment = stripped.startswith("#")
+                # abs_path: block in both src and tests - test files should use
+                # tmp_path fixtures, not /home/... or C:\... paths
+                if not is_comment and self._ABS_PATH_RE.search(line):
+                    blocks.append(f"Absolute path in {loc}: {stripped}")
                 if is_src:
-                    if not is_comment and self._ABS_PATH_RE.search(line):
-                        blocks.append(f"Absolute path in {loc}: {stripped}")
                     if self._CREDENTIAL_RE.search(line):
                         blocks.append(f"Possible credential in {loc}: {stripped}")
                 else:
                     if self._CREDENTIAL_RE.search(line):
                         warnings.append(f"Possible credential in test {loc} - verify it's fake: {stripped}")
 
-            for m in self._URL_RE.finditer(code):
-                line_no = code[:m.start()].count("\n") + 1
-                warnings.append(f"Hardcoded URL in {rel}:{line_no}: {m.group()}")
+            # hardcoded_url: src only - tests legitimately use mock URLs as
+            # fixtures (matches hardcoded_value precedent)
+            if is_src:
+                for m in self._URL_RE.finditer(code):
+                    line_no = code[:m.start()].count("\n") + 1
+                    warnings.append(f"Hardcoded URL in {rel}:{line_no}: {m.group()}")
 
-            for m in self._IP_RE.finditer(code):
-                line_no = code[:m.start()].count("\n") + 1
-                # Only flag if at least one octet has 2+ digits - single-digit-only
-                # patterns like "1.2.3.4" are indistinguishable from version strings.
-                octets = m.group().strip("\"'").split(":")[0].split(".")
-                if any(len(o) >= 2 for o in octets):
-                    if is_src:
+            # hardcoded_ip: src only - tests legitimately use mock IPs as
+            # fixture data (matches hardcoded_url/hardcoded_value precedent)
+            if is_src:
+                for m in self._IP_RE.finditer(code):
+                    line_no = code[:m.start()].count("\n") + 1
+                    # Only flag if at least one octet has 2+ digits - single-digit-only
+                    # patterns like "1.2.3.4" are indistinguishable from version strings.
+                    octets = m.group().strip("\"'").split(":")[0].split(".")
+                    if any(len(o) >= 2 for o in octets):
                         blocks.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
-                    else:
-                        warnings.append(f"Hardcoded IP in test {rel}:{line_no} - verify it's not project-specific: {m.group()}")
 
             # AST-based checks
             try:
@@ -237,11 +244,11 @@ class PythonEngine(LanguageEngine):
                                 f"sleep({node.args[0].value}) in {rel}:{node.lineno} - consider reducing sleep duration"
                             )
 
-            # Remaining AST checks are src/ only
-            if not is_src:
-                continue
-
-            # Unlisted imports
+            # Unlisted imports - runs on src, tests, AND examples. Tests and
+            # examples must only import stdlib, declared deps, or local src
+            # modules. own_modules already includes every .py file in src/ so
+            # local imports from tests (e.g. `from src.mymod import ...`) and
+            # examples are allowlisted.
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
@@ -256,6 +263,10 @@ class PythonEngine(LanguageEngine):
                         warnings.append(
                             f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
                         )
+
+            # Remaining AST checks are src/ only
+            if not is_src:
+                continue
 
             # Hardcoded values
             for node in ast.iter_child_nodes(tree):

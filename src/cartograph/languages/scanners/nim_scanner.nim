@@ -539,8 +539,10 @@ proc scanFile(filename: string): seq[Finding] =
                 else: "possible credential assignment",
         severity: if inTests: "warning" else: "block"))
 
-    # Hardcoded URLs (warning, src/ only - tests use mock URLs all the time)
-    if not inTests and ("\"http://" in rawLine or "\"https://" in rawLine):
+    # Hardcoded URLs (warning, src/ only - tests and examples use mock URLs
+    # as fixtures/demo data)
+    if not inTests and not inExamples and
+       ("\"http://" in rawLine or "\"https://" in rawLine):
       if not ("localhost" in rawLine or "127.0.0.1" in rawLine or
               "example.com" in rawLine or ".test/" in rawLine or
               ".test\"" in rawLine or ".test:" in rawLine):
@@ -549,39 +551,42 @@ proc scanFile(filename: string): seq[Finding] =
           detail: "hardcoded URL in string",
           severity: "warning"))
 
-    # Hardcoded IPs (block) - string scan for "N.N.N.N" pattern
-    block ipCheck:
-      let qpos = rawLine.find('"')
-      if qpos < 0: break ipCheck
-      let after = rawLine[qpos + 1 .. ^1]
-      var dots = 0
-      var digits = 0
-      var valid = false
-      for ci in 0 ..< after.len:
-        let c = after[ci]
-        if c == '"':
-          if dots == 3 and digits > 0:
+    # Hardcoded IPs (block, src/ only) - tests and examples legitimately use
+    # mock IPs as fixture data, matching the precedent for hardcoded_url and
+    # hardcoded_value.
+    if not inTests and not inExamples:
+      block ipCheck:
+        let qpos = rawLine.find('"')
+        if qpos < 0: break ipCheck
+        let after = rawLine[qpos + 1 .. ^1]
+        var dots = 0
+        var digits = 0
+        var valid = false
+        for ci in 0 ..< after.len:
+          let c = after[ci]
+          if c == '"':
+            if dots == 3 and digits > 0:
+              valid = true
+            break
+          elif c == '.':
+            if digits == 0: break ipCheck
+            dots += 1
+            digits = 0
+            if dots > 3: break ipCheck
+          elif c.isDigit:
+            digits += 1
+            if digits > 3: break ipCheck
+          elif c == ':' and dots == 3 and digits > 0:
+            # port suffix like "10.0.0.1:8080" - keep scanning
             valid = true
-          break
-        elif c == '.':
-          if digits == 0: break ipCheck
-          dots += 1
-          digits = 0
-          if dots > 3: break ipCheck
-        elif c.isDigit:
-          digits += 1
-          if digits > 3: break ipCheck
-        elif c == ':' and dots == 3 and digits > 0:
-          # port suffix like "10.0.0.1:8080" - keep scanning
-          valid = true
-          break
-        else:
-          break ipCheck
-      if valid or (dots == 3 and digits > 0):
-        result.add(Finding(
-          file: filename, kind: "hardcoded_ip", line: lineNo,
-          detail: "hardcoded IP address in string",
-          severity: if inTests: "warning" else: "block"))
+            break
+          else:
+            break ipCheck
+        if valid or (dots == 3 and digits > 0):
+          result.add(Finding(
+            file: filename, kind: "hardcoded_ip", line: lineNo,
+            detail: "hardcoded IP address in string",
+            severity: "block"))
 
     # Environment variable access
     if "getenv(" in code.toLower() or "getEnv(" in code or "envPairs" in code:
@@ -591,9 +596,10 @@ proc scanFile(filename: string): seq[Finding] =
         severity: "warning"))
 
     # Hardcoded values: let/const with numeric literals (src/ only)
-    # Tests legitimately have expected values, fixtures, and constants -
-    # nudging consumers to parameterize them is noise.
-    if not inTests and (code.startsWith("let ") or code.startsWith("const ")):
+    # Tests legitimately have expected values, fixtures, and constants;
+    # examples legitimately have demo constants (physics values, mock config).
+    if not inTests and not inExamples and
+       (code.startsWith("let ") or code.startsWith("const ")):
       let eqPos = code.find(" = ")
       if eqPos >= 0:
         let afterKeyword = code.split(" ", 1)[1].strip()
@@ -624,8 +630,10 @@ proc scanFile(filename: string): seq[Finding] =
                 detail: varName & " = \"" & strVal[0 ..< min(strVal.len, 60)] & "\" - consider making this a parameter",
                 severity: "warning"))
 
-    # Top-level var (src/ only) - tests can have helper state at module scope
-    if not inTests and topLevelSection and code.startsWith("var ") and "{.global.}" notin code:
+    # Top-level var (src/ only) - tests can have helper state at module scope;
+    # examples are script-like and naturally declare top-level state.
+    if not inTests and not inExamples and topLevelSection and
+       code.startsWith("var ") and "{.global.}" notin code:
       let afterKeyword = code[4 .. ^1].strip()
       let splitters = [' ', ':', '=', '*']
       var endPos = afterKeyword.len

@@ -41,7 +41,7 @@ def _write(path, content):
 
 
 def _make_widget(tmp_path, language, src_filename, src_code,
-                 test_code="", dependencies=None):
+                 test_code="", dependencies=None, example_code=""):
     """Create a minimal widget dir with the given source and return its path."""
     wdir = str(tmp_path)
     manifest = {
@@ -60,6 +60,9 @@ def _make_widget(tmp_path, language, src_filename, src_code,
     if test_code:
         test_name = "test_" + src_filename
         _write(os.path.join(wdir, "tests", test_name), test_code)
+    if example_code:
+        ext = os.path.splitext(src_filename)[1]
+        _write(os.path.join(wdir, "examples", f"example_usage{ext}"), example_code)
     return wdir
 
 
@@ -67,7 +70,8 @@ def _make_widget(tmp_path, language, src_filename, src_code,
 # Per-language scan helpers
 # ---------------------------------------------------------------------------
 
-def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None):
+def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
+          example_code=""):
     """Run scan_contamination for a given language engine."""
     engines = {
         "python": PythonEngine,
@@ -76,7 +80,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None):
         "systemverilog": SystemVerilogEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
-                        test_code, dependencies)
+                        test_code, dependencies, example_code=example_code)
     engine = engines[language]()
     tech_stack = {"language": language, "dependencies": dependencies or []}
     return engine.scan_contamination(wdir, tech_stack)
@@ -462,6 +466,76 @@ class TestPythonSpecific:
                         'password = "supersecretpassword"\n')
         assert any("credential" in b.lower() for b in result["blocks"])
 
+    def test_hardcoded_url_in_test_file_not_warned(self, tmp_path):
+        """Test files legitimately use mock URLs. URL warnings should be
+        src/ only - matches hardcoded_value precedent."""
+        result = _scan(tmp_path, "python", "py",
+                       "def f(): pass\n",
+                       test_code='URL = "https://api.realsite.com/v1"\n')
+        assert not any("URL" in w for w in result["warnings"]), \
+            f"hardcoded URLs in test files should not warn: {result['warnings']}"
+
+    def test_hardcoded_ip_in_test_file_not_warned(self, tmp_path):
+        """Test files legitimately use mock IPs as fixture data. IP warnings
+        should be src/ only - matches hardcoded_url/hardcoded_value precedent
+        and Nim/JS scanner behavior."""
+        result = _scan(tmp_path, "python", "py",
+                       "def f(): pass\n",
+                       test_code='HOST = "10.0.0.1:8080"\n'
+                                 'ADDR = "192.168.1.100"\n')
+        ip_findings = [w for w in result["warnings"] + result["blocks"]
+                       if "IP" in w]
+        assert not ip_findings, \
+            f"hardcoded IPs in test files should not warn: {result}"
+
+    def test_abs_path_in_test_file_blocks(self, tmp_path):
+        """Tests should use tmp_path fixtures, not real absolute home paths.
+        abs_path must block in tests too, matching the Nim and JS scanners."""
+        result = _scan(tmp_path, "python", "py",
+                       "def f(): pass\n",
+                       test_code='LOG = "/home/user/logs/app.log"\n')
+        assert any("path" in b.lower() for b in result["blocks"]), \
+            f"abs_path in test files must block: {result}"
+
+    def test_unlisted_import_in_test_warns(self, tmp_path):
+        """Tests must also only use stdlib, declared deps, or local src
+        modules. A third-party import in a test that isn't declared in
+        widget.json should warn."""
+        result = _scan(tmp_path, "python", "py",
+                       "def f(): return 1\n",
+                       test_code="import flask\ndef test_f(): assert True\n")
+        assert any("flask" in w for w in result["warnings"]), \
+            f"unlisted import in test must warn: {result['warnings']}"
+
+    def test_unlisted_import_in_example_warns(self, tmp_path):
+        """Examples must also only use stdlib, declared deps, or local src
+        modules. A third-party import in an example without declaration
+        should warn."""
+        result = _scan(tmp_path, "python", "py",
+                       "def f(): return 1\n",
+                       example_code="import requests\nprint(requests.__name__)\n")
+        assert any("requests" in w for w in result["warnings"]), \
+            f"unlisted import in example must warn: {result['warnings']}"
+
+    def test_local_src_import_in_test_not_warned(self, tmp_path):
+        """Test importing a local src/ module must not warn as unlisted."""
+        result = _scan(tmp_path, "python", "py",
+                       "def greet(): return 'hi'\n",
+                       test_code="from src.module import greet\ndef test_f(): assert greet()\n")
+        unlisted = [w for w in result["warnings"]
+                    if "Unlisted" in w and "module" in w]
+        assert not unlisted, \
+            f"local src import in test must not warn: {result['warnings']}"
+
+    def test_hardcoded_value_in_example_not_warned(self, tmp_path):
+        """Examples legitimately use hardcoded values as demo data - these
+        must NOT be flagged (parity with tests)."""
+        result = _scan(tmp_path, "python", "py",
+                       "def f(): return 1\n",
+                       example_code="G = 6.674e-11\nprint(G)\n")
+        assert not any("Hardcoded" in w for w in result["warnings"]), \
+            f"hardcoded values in examples must not warn: {result['warnings']}"
+
 
 @pytest.mark.javascript
 class TestJSSpecific:
@@ -534,6 +608,35 @@ class TestJSSpecific:
             "setTimeout(\n  () => {},\n  1000\n)\n"
         )
         assert any("sleep" in b.lower() for b in result["blocks"])
+
+    def test_hardcoded_url_in_test_file_not_warned(self, tmp_path):
+        """Test files legitimately use mock URLs. URL warnings should be
+        src/ only - matches hardcoded_value precedent."""
+        result = _scan(tmp_path, "javascript", "js",
+                       "function f() { return 1 }\n",
+                       test_code="const url = 'https://api.realsite.com/v1'\n")
+        assert not any("url" in w.lower() for w in result["warnings"]), \
+            f"hardcoded URLs in test files should not warn: {result['warnings']}"
+
+    def test_unlisted_import_in_example_warns(self, tmp_path):
+        """Examples must only use stdlib, declared deps, or local src
+        modules. A third-party import in an example without declaration
+        should warn."""
+        result = _scan(tmp_path, "javascript", "js",
+                       "export function f() { return 1 }\n",
+                       example_code="const axios = require('axios')\nconsole.log(axios)\n")
+        assert any("axios" in w.lower() and "unlisted" in w.lower()
+                   for w in result["warnings"]), \
+            f"unlisted import in example must warn: {result['warnings']}"
+
+    def test_hardcoded_value_in_example_not_warned(self, tmp_path):
+        """Examples use demo config values as fixtures."""
+        result = _scan(tmp_path, "javascript", "js",
+                       "export function f() { return 1 }\n",
+                       example_code="const API_URL = 'https://api.demo.com'\nconst TIMEOUT = 5000\n")
+        hv = [w for w in result["warnings"] if "consider making this a parameter" in w]
+        assert not hv, \
+            f"hardcoded values in examples must not warn: {hv}"
 
 
 @pytest.mark.nim
@@ -630,6 +733,67 @@ class TestNimSpecific:
         assert not any("hardcoded url" in w.lower() for w in result["warnings"]), \
             f"hardcoded URLs in test files should not warn: {result['warnings']}"
 
+    def test_hardcoded_ip_in_test_file_not_warned(self, tmp_path):
+        """Test files legitimately use mock IPs as fixture data - IP warnings
+        should be src/ only. Regression for infra-websocket-server-nim which
+        was flagged for IPs hardcoded in its test fixtures."""
+        clean_src = "proc hello*(): string =\n  \"ok\"\n"
+        test_code = ('import std/unittest\n'
+                     'let host = "10.0.0.1"\n'
+                     'let addr = "192.168.1.100:8080"\n'
+                     'suite "x":\n  test "y":\n    check 1 == 1\n')
+        result = _scan(tmp_path, "nim", "nim", clean_src, test_code=test_code)
+        ip_findings = [w for w in result["warnings"] + result["blocks"]
+                       if "hardcoded ip" in w.lower()]
+        assert not ip_findings, \
+            f"hardcoded IPs in test files should not warn: {result}"
+
+    def test_unlisted_import_in_example_warns(self, tmp_path):
+        """Examples must only use stdlib, declared deps, or local src
+        modules. A third-party import in an example without declaration
+        should warn."""
+        result = _scan(tmp_path, "nim", "nim",
+                       "func hello*(): string = \"ok\"\n",
+                       example_code="import chronos\nproc main() = discard\nmain()\n")
+        assert any("chronos" in w and "unlisted" in w.lower()
+                   for w in result["warnings"]), \
+            f"unlisted import in example must warn: {result['warnings']}"
+
+    def test_hardcoded_value_in_example_not_warned(self, tmp_path):
+        """Examples legitimately use hardcoded values as demo/physical
+        constants. Regression for physics-two-body-barycenter-nim which
+        has gravitational constants in its example."""
+        result = _scan(tmp_path, "nim", "nim",
+                       "func hello*(): string = \"ok\"\n",
+                       example_code="let mEarth = 5.972e24\n"
+                                    "let mMoon = 7.342e22\n"
+                                    "echo mEarth + mMoon\n")
+        hv = [w for w in result["warnings"] if "parameter" in w.lower()]
+        assert not hv, \
+            f"hardcoded values in examples must not warn: {hv}"
+
+    def test_top_level_var_in_example_not_warned(self, tmp_path):
+        """Examples are scripts - top-level var is natural and expected."""
+        result = _scan(tmp_path, "nim", "nim",
+                       "func hello*(): string = \"ok\"\n",
+                       example_code="var counter = 0\ncounter.inc\necho counter\n")
+        tlv = [w for w in result["warnings"] if "top-level" in w.lower()]
+        assert not tlv, \
+            f"top-level vars in examples must not warn: {tlv}"
+
+    def test_local_src_import_in_example_not_warned(self, tmp_path):
+        """Examples importing a local widget src/ module must not warn as
+        unlisted - the scanner allowlists filenames found in src/."""
+        src_code = "func double*(x: int): int = x * 2\n"
+        wdir = _make_widget(tmp_path, "nim", "double_lib.nim", src_code,
+                            example_code="import double_lib\necho double(21)\n")
+        engine = NimEngine()
+        result = engine.scan_contamination(wdir, {"language": "nim", "dependencies": []})
+        unlisted = [w for w in result["warnings"]
+                    if "double_lib" in w and "unlisted" in w.lower()]
+        assert not unlisted, \
+            f"local src import in example must not warn: {result['warnings']}"
+
     def test_local_src_module_import_from_tests_not_warned(self, tmp_path):
         """A test file importing a local widget src/ module is not an unlisted
         external dep — the scanner must allowlist filenames found in src/.
@@ -702,32 +866,143 @@ class TestNimSpecific:
                 if fname.endswith(".nim"):
                     actual_modules.add(fname[:-4])
 
-        # Extract the scanner's hardcoded list
+        # Extract the scanner's hardcoded list - track bare and slashed forms
+        # SEPARATELY so we catch omissions in either form. Nim allows both
+        # `import tables` and `import std/tables`; the scanner must know both.
         scanner_path = os.path.join(
             os.path.dirname(__file__), "..", "src", "cartograph",
             "languages", "scanners", "nim_scanner.nim",
         )
         scanner_src = open(scanner_path).read()
-        # Pull all quoted strings from the nimStdlib block
         start = scanner_src.index("const nimStdlib = [")
         end = scanner_src.index("].toHashSet()", start)
         block = scanner_src[start:end]
-        scanner_modules = set()
+        scanner_bare = set()
+        scanner_slashed = set()
         for m in _re.findall(r'"([^"]+)"', block):
-            # Strip std/ prefix to get the bare module name
-            bare = m.split("/")[-1]
-            scanner_modules.add(bare)
+            if "/" in m:
+                scanner_slashed.add(m.split("/", 1)[1])  # strip "std/"
+            else:
+                scanner_bare.add(m)
 
         # Internal/private modules that aren't meant for user import
         internal = {"hashcommon", "tableimpl", "setimpl", "rtarrays"}
         actual_public = actual_modules - internal
 
-        missing = actual_public - scanner_modules
-        assert not missing, (
-            f"Nim stdlib modules missing from nim_scanner.nim nimStdlib list: "
-            f"{sorted(missing)}\n"
-            f"Update the hardcoded list in scanners/nim_scanner.nim"
+        # Modules that legitimately exist in only one form:
+        # - `system` is implicit, never imported with std/ prefix
+        # - legacy aliases (readline, smtp, sockets, winlean) are bare-only
+        bare_only = {"system", "readline", "smtp", "sockets", "winlean"}
+        # Currently none — every real stdlib module should have both forms
+        slashed_only: set[str] = set()
+
+        # Every actual public module must appear in BOTH forms (with
+        # allowlisted exceptions). This catches the bug where `std/tables`
+        # masked the absence of bare `tables`.
+        missing_bare = (actual_public - scanner_bare) - slashed_only
+        missing_slashed = (actual_public - scanner_slashed) - bare_only
+        errors = []
+        if missing_bare:
+            errors.append(f"missing BARE form: {sorted(missing_bare)}")
+        if missing_slashed:
+            errors.append(f"missing std/ form: {sorted(missing_slashed)}")
+        assert not errors, (
+            "Nim stdlib modules missing from nim_scanner.nim nimStdlib list:\n"
+            + "\n".join(errors)
+            + "\nUpdate the hardcoded list in scanners/nim_scanner.nim"
         )
+
+    # -- parametric import grammar coverage --
+    # Locks down all 17 legal Nim import forms the scanner must handle.
+    # Each case specifies substrings that MUST and MUST NOT appear in warnings.
+    # These cases exist because six real bugs were found by exploration;
+    # the parametric form makes regressions impossible to reintroduce.
+    @pytest.mark.parametrize("label,src,deps,must_have,must_not", [
+        # 1. bare stdlib → warn old-style, no unlisted
+        ("bare_stdlib",
+         "import tables\n", [],
+         ["std/"], ["unlisted"]),
+        # 2. slashed stdlib → clean
+        ("slashed_stdlib",
+         "import std/tables\n", [],
+         [], ["unlisted", "std/"]),
+        # 3. brace group stdlib → clean (regression: was parsed as [options)
+        ("brace_group_stdlib",
+         "import std/[options, terminal]\n", [],
+         [], ["unlisted"]),
+        # 4. except clause with comma symbol list → risky only (not unlisted)
+        ("except_clause",
+         "import std/os except putEnv, getEnv\n", [],
+         ["flagged for review"], ["unlisted"]),
+        # 5. comma list stdlib → clean
+        ("comma_list_stdlib",
+         "import std/strutils, std/sequtils\n", [],
+         [], ["unlisted"]),
+        # 6. multi-line import (dangerous — was silent false negative)
+        ("multiline_import",
+         "import\n  std/options,\n  std/strutils\n", [],
+         [], ["unlisted"]),
+        # 7. multi-line brace group
+        ("multiline_brace",
+         "import std/[\n  options,\n  terminal\n]\n", [],
+         [], ["unlisted"]),
+        # 8. nested pkg path — root is unlisted
+        ("nested_pkg_unlisted",
+         "import chronos/apps/http\n", [],
+         ["unlisted", "chronos"], []),
+        # 9. nested pkg path — root is declared
+        ("nested_pkg_declared",
+         "import chronos/apps/http\n", ["chronos>=4.0.0"],
+         [], ["unlisted"]),
+        # 10. rename with `as`
+        ("rename_as",
+         "import std/os as osys\n", [],
+         ["flagged for review"], ["unlisted"]),
+        # 11. from form slashed stdlib
+        ("from_slashed",
+         "from std/strutils import split\n", [],
+         [], ["unlisted", "std/"]),
+        # 12. from form bare stdlib
+        ("from_bare",
+         "from strutils import split\n", [],
+         ["std/"], ["unlisted"]),
+        # 13. truly unlisted third-party
+        ("unlisted_pkg",
+         "import totallymadeuplib\n", [],
+         ["unlisted", "totallymadeuplib"], []),
+        # 14. risky stdlib slashed
+        ("risky_slashed",
+         "import std/httpclient\n", [],
+         ["flagged for review"], ["unlisted"]),
+        # 15. risky stdlib bare → risky + style warning
+        ("risky_bare",
+         "import httpclient\n", [],
+         ["flagged for review", "prefer std/"], ["unlisted"]),
+        # 16. legacy core lib as std/
+        ("core_locks",
+         "import std/locks\n", [],
+         [], ["unlisted"]),
+        # 17. bare comma list (two style warnings)
+        ("bare_comma_list",
+         "import tables, sets\n", [],
+         ["std/"], ["unlisted"]),
+    ])
+    def test_nim_import_forms(self, tmp_path, label, src, deps,
+                              must_have, must_not):
+        body = src + "proc noop*(): int = 0\n"
+        result = _scan(tmp_path, "nim", "nim", body, dependencies=deps)
+        # Combine warnings and blocks for substring matching
+        all_msgs = " ".join(result["warnings"] + result["blocks"]).lower()
+        for needle in must_have:
+            assert needle.lower() in all_msgs, (
+                f"[{label}] expected '{needle}' in findings, got: "
+                f"warnings={result['warnings']} blocks={result['blocks']}"
+            )
+        for needle in must_not:
+            assert needle.lower() not in all_msgs, (
+                f"[{label}] unexpected '{needle}' in findings: "
+                f"warnings={result['warnings']} blocks={result['blocks']}"
+            )
 
 
 # ---------------------------------------------------------------------------

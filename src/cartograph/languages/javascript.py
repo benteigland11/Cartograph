@@ -260,18 +260,19 @@ class JavaScriptEngine(LanguageEngine):
             return self._fail("\n".join(errors))
         return self._ok()
 
-    def _collect_source_files(self, path: str) -> tuple[list[str], list[str]]:
+    def _collect_source_files(self, path: str) -> tuple[list[str], list[str], list[str]]:
         """JS/TS uses multiple extensions."""
-        src_files, test_files = [], []
+        src_files, test_files, example_files = [], [], []
         for ext in ("*.js", "*.jsx", "*.ts", "*.tsx"):
             src_files.extend(_glob.glob(os.path.join(path, "src", "**", ext), recursive=True))
             test_files.extend(_glob.glob(os.path.join(path, "tests", "**", ext), recursive=True))
-        return src_files, test_files
+            example_files.extend(_glob.glob(os.path.join(path, "examples", "**", ext), recursive=True))
+        return src_files, test_files, example_files
 
     def scan_contamination(self, path: str, widget: dict) -> dict:
-        """JS contamination: native scanner on src + test files."""
-        src_files, test_files = self._collect_source_files(path)
-        all_files = src_files + test_files
+        """JS contamination: native scanner on src + test + example files."""
+        src_files, test_files, example_files = self._collect_source_files(path)
+        all_files = src_files + test_files + example_files
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "js_scanner.js")
         scan_errors, scan_warnings, scan_blocks = self._run_native_scanner(
             scanner_path=scanner,

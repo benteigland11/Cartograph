@@ -370,7 +370,10 @@ function detectSleepCalls(tokens, filename, findings, inTests, inExamples) {
   }
 }
 
-function detectAssignments(tokens, filename, findings) {
+function detectAssignments(tokens, filename, findings, inTests, inExamples) {
+  // hardcoded_value: src only - tests and examples legitimately use fixtures,
+  // expected values, and demo constants (matches Python/Nim behavior).
+  if (inTests || inExamples) return
   for (let i = 0; i < tokens.length - 3; i++) {
     const start = tokens[i]
     if (start.type !== 'ident' || !['const', 'let'].includes(start.value)) continue
@@ -395,7 +398,8 @@ function detectAssignments(tokens, filename, findings) {
   }
 }
 
-function detectStringContamination(tokens, filename, findings, inTests) {
+function detectStringContamination(tokens, filename, findings, inTests, inExamples) {
+  const isFixtureContext = inTests || inExamples
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i]
     if (tok.type === 'newline') continue
@@ -404,14 +408,18 @@ function detectStringContamination(tokens, filename, findings, inTests) {
       if (ABS_PATH_RE.test(value)) {
         addFinding(findings, filename, 'abs_path', tok.line, `absolute path "${value.substring(0, 60)}" - widgets must be portable`, 'block')
       }
-      if (URL_RE.test(value)) {
+      // hardcoded_url: src only - tests and examples legitimately use mock
+      // URLs as fixtures (matches hardcoded_value precedent)
+      if (!isFixtureContext && URL_RE.test(value)) {
         addFinding(findings, filename, 'hardcoded_url', tok.line, `hardcoded URL "${value.substring(0, 60)}"`, 'warning')
       }
-      if (IP_RE.test(value)) {
+      // hardcoded_ip: src only - tests and examples legitimately use mock IPs
+      // as fixture data (matches hardcoded_url/hardcoded_value precedent).
+      if (!isFixtureContext && IP_RE.test(value)) {
         // Skip single-digit-only patterns like "1.2.3.4" which are indistinguishable from version strings
         const octets = value.split(':')[0].split('.')
         if (octets.some(o => o.length >= 2)) {
-          addFinding(findings, filename, 'hardcoded_ip', tok.line, `hardcoded IP "${value}"`, inTests ? 'warning' : 'block')
+          addFinding(findings, filename, 'hardcoded_ip', tok.line, `hardcoded IP "${value}"`, 'block')
         }
       }
 
@@ -494,8 +502,8 @@ function scanFile(filename) {
 
   detectImports(tokens, filename, findings)
   detectSleepCalls(tokens, filename, findings, inTests, inExamples)
-  detectAssignments(tokens, filename, findings)
-  detectStringContamination(tokens, filename, findings, inTests)
+  detectAssignments(tokens, filename, findings, inTests, inExamples)
+  detectStringContamination(tokens, filename, findings, inTests, inExamples)
 
   return findings
 }

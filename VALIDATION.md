@@ -86,6 +86,19 @@ Nim coverage would require compiling via `--debugger:native` and running `gcov`/
 Each language has a native scanner written in that language (not regex from Python).
 Python uses AST parsing. JS uses a token-based parser. Nim uses line-based scanning with string/comment awareness.
 
+### Scoping rule
+
+The scanners use three file-location scopes: `src/`, `tests/`, `examples/`.
+The unifying rule for contamination checks:
+
+- **Tests skip fixture-style warnings** (hardcoded values, URLs, IPs).
+  Tests legitimately use mock data, expected values, and fake endpoints.
+- **Tests keep real safety nets** (absolute home paths, credentials,
+  unlisted imports). A real secret or real user path in a test is still
+  wrong.
+- **Examples are not scanned** — they are validated by being executed
+  (Python/JS/Nim) or rendered (OpenSCAD/SV), not by static scanning.
+
 ### Fails validation if found (src/ only unless noted)
 
 | Pattern | Python | JS | Nim | OpenSCAD | SystemVerilog | Notes |
@@ -93,9 +106,9 @@ Python uses AST parsing. JS uses a token-based parser. Nim uses line-based scann
 | Debug output (print/echo/console.log) | Yes (AST, src/ only) | Yes (src/ block, tests/ warn, examples/ allow) | Yes (src/ block, tests/ warn, examples/ allow) | Yes (echo(), src/ only) | Yes ($display/$monitor/$write/$strobe in src/) | |
 | Process exit (sys.exit/process.exit/quit) | Yes (AST) | Yes | Yes | N/A | N/A | Not a concept in OpenSCAD or RTL |
 | Sleep/blocking calls | Yes (AST) | Yes | Yes | N/A | Yes (`#delay`, src/ only) | RTL: simulation timing belongs in testbench |
-| Absolute paths in strings | Yes | Yes | Yes | Yes (in include<>/use<>) | Yes (in $readmemh/$readmemb) | /home/, /Users/, C:\ |
-| Hardcoded credentials | Yes | Yes | Yes | Yes | Yes | api_key, secret_key, password, etc. |
-| Hardcoded IPs | Yes | Yes | Yes | No | No | N.N.N.N pattern |
+| Absolute paths in strings | Yes (src+tests block) | Yes (src+tests block) | Yes (src+tests block) | Yes (in include<>/use<>) | Yes (in $readmemh/$readmemb) | /home/, /Users/, C:\ — blocked in tests too (use tmp_path fixtures) |
+| Hardcoded credentials | Yes (src block, tests warn) | Yes (src block, tests warn) | Yes (src block, tests warn) | Yes | Yes | api_key, secret_key, password, etc. |
+| Hardcoded IPs | Yes (src/ only) | Yes (src/ only) | Yes (src/ only) | No | No | N.N.N.N pattern — skipped in tests (mock fixtures) |
 | eval() | No | Yes | N/A | N/A | N/A | JS-specific |
 | C FFI pragmas ({.importc.}, {.compile.}) | N/A | N/A | Yes | N/A | N/A | Nim-specific |
 | Global mutable state ({.global.}) | N/A | N/A | Yes | N/A | N/A | Nim-specific |
@@ -115,15 +128,18 @@ Python uses AST parsing. JS uses a token-based parser. Nim uses line-based scann
 
 ### Warnings (overridable)
 
-| Pattern | Python | JS | Nim | SystemVerilog | Notes |
-|---------|--------|----|-----|---------------|-------|
-| Hardcoded URLs | Yes | Yes | Yes | Yes | Excludes localhost, example.com, .test |
-| Hardcoded values (constants) | Yes (AST) | Yes (config-like names) | Yes | Yes (sized literals like 32'd115200, 8'hFF; typedef enum bodies excluded) | |
-| Unlisted imports | Yes (AST) | Yes | Yes | No | Not in stdlib or deps |
-| Environment variable access | Yes | Yes | Yes | N/A | os.getenv, process.env, getEnv |
-| Old-style stdlib imports | No | No | Yes | N/A | `import json` vs `import std/json` |
-| Top-level mutable state | No | No | Yes | N/A | `var` at module level |
-| Credentials in tests | Yes | Yes | Yes | Yes | "verify it's fake" |
+Unless otherwise noted, warnings are **src/ only** — the scoping rule
+above applies.
+
+| Pattern | Python | JS | Nim | SystemVerilog | Scope | Notes |
+|---------|--------|----|-----|---------------|-------|-------|
+| Hardcoded URLs | Yes | Yes | Yes | Yes | src/ only | Excludes localhost, example.com, .test |
+| Hardcoded values (constants) | Yes (AST) | Yes (config-like names) | Yes | Yes (sized literals like 32'd115200, 8'hFF; typedef enum bodies excluded) | src/ only | Fixture values in tests are expected |
+| Unlisted imports | Yes (AST) | Yes | Yes | No | src + tests | Local src/ modules allowlisted in tests |
+| Environment variable access | Yes | Yes | Yes | N/A | src + tests | os.getenv, process.env, getEnv |
+| Old-style stdlib imports | No | No | Yes | N/A | src + tests | `import json` vs `import std/json` |
+| Top-level mutable state | No | No | Yes | N/A | src/ only | `var` at module level |
+| Credentials in tests | Yes | Yes | Yes | Yes | tests/ | Lowered from block → warn in tests |
 
 ### OpenSCAD
 

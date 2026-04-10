@@ -200,10 +200,11 @@ class NimEngine(LanguageEngine):
             self._cleanup_nimcache_dir()
 
     def scan_contamination(self, path: str, widget: dict) -> dict:
-        """Nim contamination: native scanner on src + test files."""
+        """Nim contamination: native scanner on src + test + example files."""
         src_files = _glob.glob(os.path.join(path, "src", "**", "*.nim"), recursive=True)
         test_files = _glob.glob(os.path.join(path, "tests", "**", "*.nim"), recursive=True)
-        all_files = src_files + test_files
+        example_files = _glob.glob(os.path.join(path, "examples", "**", "*.nim"), recursive=True)
+        all_files = src_files + test_files + example_files
         scanner = os.path.join(os.path.dirname(__file__), "scanners", "nim_scanner.nim")
         scan_errors, scan_warnings, scan_blocks = self._run_native_scanner(
             scanner_path=scanner,
