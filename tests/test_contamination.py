@@ -527,6 +527,15 @@ class TestPythonSpecific:
         assert not unlisted, \
             f"local src import in test must not warn: {result['warnings']}"
 
+    def test_pytest_import_in_test_not_warned(self, tmp_path):
+        """Test frameworks like pytest must not trigger unlisted import warnings."""
+        result = _scan(tmp_path, "python", "py",
+                       "def f(): return 1\n",
+                       test_code="import pytest\ndef test_f(): assert True\n")
+        unlisted = [w for w in result["warnings"] if "Unlisted" in w and "pytest" in w]
+        assert not unlisted, \
+            f"pytest import in test must not warn: {result['warnings']}"
+
     def test_hardcoded_value_in_example_not_warned(self, tmp_path):
         """Examples legitimately use hardcoded values as demo data - these
         must NOT be flagged (parity with tests)."""

@@ -102,10 +102,20 @@ def test_checkin_writes_changelog(carto_tmp, modified_widget):
 
 
 def test_checkin_blocks_identical_content(carto_tmp, installed_widget):
-    """Checking in with no changes must fail — prevents silent version inflation."""
+    """Checking in with no changes must fail - prevents silent version inflation."""
     result = carto_tmp.checkin(installed_widget, reason="no changes")
     assert result["status"] == "error"
     assert "identical content" in result["message"]
+
+
+def test_checkin_allows_example_only_change(carto_tmp, installed_widget):
+    """Updating only examples/ is a legitimate checkin - not a no-op."""
+    example_dir = os.path.join(installed_widget, "examples")
+    os.makedirs(example_dir, exist_ok=True)
+    with open(os.path.join(example_dir, "example_usage.py"), "a") as f:
+        f.write("\n# improved example\nprint('better demo')\n")
+    result = carto_tmp.checkin(installed_widget, reason="Improved example")
+    assert result["status"] == "success"
 
 
 def test_checkin_missing_path_errors(carto_tmp):

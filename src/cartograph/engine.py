@@ -208,23 +208,24 @@ class Cartograph:
 
 
     def _calculate_implementation_hash(self, path):
-        """Calculate a stable hash of the entire src/ folder."""
-        src_path = os.path.join(path, "src")
-        if not os.path.exists(src_path):
-            return None
-        
+        """Calculate a stable hash of src/, tests/, and examples/."""
         hasher = hashlib.md5()
-        # Sort files to ensure stable hash
-        for root, dirs, files in os.walk(src_path):
-            dirs[:] = [d for d in dirs if d != '__pycache__']
-            for names in sorted(files):
-                if names.endswith('.pyc'):
-                    continue
-                filepath = os.path.join(root, names)
-                with open(filepath, 'rb') as f:
-                    # Hash normalized content to be whitespace-insensitive if possible, 
-                    # but for hard-block we'll do raw content to be safe.
-                    hasher.update(f.read())
+        found_any = False
+        for subdir in ("src", "tests", "examples"):
+            sub_path = os.path.join(path, subdir)
+            if not os.path.exists(sub_path):
+                continue
+            found_any = True
+            for root, dirs, files in os.walk(sub_path):
+                dirs[:] = [d for d in dirs if d != '__pycache__']
+                for name in sorted(files):
+                    if name.endswith('.pyc'):
+                        continue
+                    filepath = os.path.join(root, name)
+                    with open(filepath, 'rb') as f:
+                        hasher.update(f.read())
+        if not found_any:
+            return None
         return hasher.hexdigest()
 
     def _diff_against_library(self, path, item_id):

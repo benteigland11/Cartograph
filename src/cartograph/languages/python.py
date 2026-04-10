@@ -124,6 +124,7 @@ class PythonEngine(LanguageEngine):
         return lines
 
     _STDLIB = sys.stdlib_module_names
+    _TEST_FRAMEWORKS = {"pytest", "hypothesis", "faker", "mock", "unittest"}
     _ENVVAR_RE = re.compile(r'os\.getenv\(|os\.environ')
     _SLEEP_MODULES = {"time", "asyncio"}
     _ABS_PATH_RE = re.compile(
@@ -253,13 +254,13 @@ class PythonEngine(LanguageEngine):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         top = alias.name.split(".")[0].lower()
-                        if top and top not in self._STDLIB and top not in dep_names and top not in own_modules:
+                        if top and top not in self._STDLIB and top not in dep_names and top not in own_modules and top not in self._TEST_FRAMEWORKS:
                             warnings.append(
                                 f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
                             )
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     top = node.module.split(".")[0].lower()
-                    if top and top not in self._STDLIB and top not in dep_names and top not in own_modules:
+                    if top and top not in self._STDLIB and top not in dep_names and top not in own_modules and top not in self._TEST_FRAMEWORKS:
                         warnings.append(
                             f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
                         )
