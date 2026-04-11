@@ -5,6 +5,7 @@ import glob
 import os
 import re
 import sys
+import time
 
 from .base import LanguageEngine, _dep_bare_name, log
 
@@ -329,10 +330,34 @@ class PythonEngine(LanguageEngine):
         return getattr(self, "_venv_py", sys.executable)
 
     def install_deps(self, path: str, dependencies: list) -> None:
+        import shutil
         import venv
         venv_dir = os.path.join(path, ".venv")
         log.debug("Creating isolated venv at %s", venv_dir)
-        venv.create(venv_dir, with_pip=True, system_site_packages=True)
+
+        # Retry venv creation to handle stale venvs whose python binary is still
+        # held open by a lingering subprocess from a previous validation run.
+        # Linux raises ETXTBSY (errno 26), Windows raises PermissionError (WinError 32).
+        _MAX_RETRIES = 3
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                venv.create(venv_dir, with_pip=True, system_site_packages=True)
+                break
+            except (OSError, PermissionError) as exc:
+                _errno = getattr(exc, "errno", None)
+                _winerr = getattr(exc, "winerror", None)
+                is_busy = _errno == 26 or _winerr == 32
+                if is_busy and attempt < _MAX_RETRIES:
+                    log.warning(
+                        "Venv python binary is still held open by a previous process "
+                        "(attempt %d/%d) - waiting 2s before retry...",
+                        attempt, _MAX_RETRIES,
+                    )
+                    if os.path.isdir(venv_dir):
+                        shutil.rmtree(venv_dir, ignore_errors=True)
+                    time.sleep(2)
+                else:
+                    raise
 
         # Locate the venv python
         if os.name == "nt":
