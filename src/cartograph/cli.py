@@ -605,6 +605,18 @@ def cmd_cloud_publish(args):
     else:
         path = _resolve_widget(args.path)
         widget_id = args.widget_id
+        # If widget_id was given but path is default ".", the user likely
+        # ran `cartograph cloud publish <widget_id>` from outside the widget
+        # dir. Try resolving the widget_id as a path or library lookup.
+        if widget_id and args.path == "." and not os.path.isfile(os.path.join(path, "widget.json")):
+            candidate = _resolve_widget(widget_id)
+            if os.path.isfile(os.path.join(candidate, "widget.json")):
+                path = candidate
+            else:
+                carto = _carto()
+                lib_widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
+                if lib_widget:
+                    path = lib_widget["path"]
         if not widget_id:
             try:
                 with open(os.path.join(path, "widget.json")) as f:
@@ -1473,7 +1485,13 @@ def cmd_sync(args):
     handle = profile.get("owner", "")
 
     cloud_widgets_list = cloud.list_my_widgets()
-    cloud_by_id = {w["id"]: w for w in cloud_widgets_list}
+    if not cloud_widgets_list:
+        print("\n  No widgets published to cloud. Use 'cartograph cloud publish' first.\n")
+        return
+    # Cloud IDs are @owner/widget-id; normalize to bare widget-id for matching
+    def _bare(wid):
+        return wid.split("/", 1)[1] if "/" in wid else wid
+    cloud_by_id = {_bare(w["id"]): w for w in cloud_widgets_list}
 
     all_ids = sorted(set(local_widgets) | set(cloud_by_id))
     if not all_ids:
