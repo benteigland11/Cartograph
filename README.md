@@ -139,6 +139,7 @@ cartograph whoami
 - **Nim**: nimble, std/unittest, native Nim scanner, stdlib-aware import checking
 - **OpenSCAD**: renders to STL, non-empty mesh check, Python contamination scanner (OpenSCAD has no file I/O). Requires 2021.01+ for `assert()` support. BOSL2 optional.
 - **SystemVerilog**: Icarus Verilog (iverilog + vvp), `-g2012` mode. Enforces `always_comb`/`always_ff` (legacy `always @(...)` blocked). Contamination scanner checks vendor primitives, simulation-only constructs (`initial`, `#delay`, `$display`), blocking/non-blocking assignment misuse, and hardcoded constants. Vendor primitives allowed when the vendor library is declared as a dependency.
+- **Angular** *(WIP)*: Angular CLI (`ng test` + `ng build`), Karma + Jasmine with ChromeHeadless, 80% coverage via `karma.conf.js` thresholds. Standalone components (Angular 14+). Reuses JS contamination scanner. Example validation: `ng build` (build artifact, not script execution). Requires `@angular/cli` globally and Chrome/Chromium installed.
 
 Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD and SystemVerilog use Python-based scanners since neither language has general-purpose file I/O suitable for static analysis tooling.
 

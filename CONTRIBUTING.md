@@ -68,6 +68,8 @@ cg/<widget_id>/
 
 If a language requires additional files at the widget root (like `.nimble` for Nim or `package.json` for JS), the engine's `scaffold()` method must create them and `_copy_widget` in `src/cartograph/installer.py` must copy them on install.
 
+**Angular-specific notes:** Angular widgets are library projects (not app projects). The scaffold creates `angular.json`, `karma.conf.js`, `tsconfig.lib.json`, `tsconfig.spec.json`, and `ng-package.json` in addition to the standard files. Test files are named `test_<module>.component.ts` (Jasmine specs). Example validation runs `ng build` (build artifact, not script execution) - document this deviation explicitly. Coverage enforcement is via `karma.conf.js` `check.global` thresholds at 80%, not CLI flags. Chrome or Chromium must be installed for `ng test` to run in CI.
+
 A language engine must:
 - Run tests and report pass/fail
 - Measure code coverage (if possible to measure, it should be measured and sit at 80%)
