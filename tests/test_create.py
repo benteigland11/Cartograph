@@ -60,6 +60,33 @@ def test_create_widget_manifest_valid(carto, tmp_path):
     assert "tags" in meta
 
 
+def test_create_angular_widget(carto, tmp_path):
+    result = carto.create(
+        "my-ng-widget",
+        language="angular",
+        name="My Angular Widget",
+        domain="frontend",
+        tags=["ui"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    # scaffolding/__init__.py converts hyphens to underscores in module_name
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "angular.json",
+        "package.json",
+        "karma.conf.js",
+        "ng-package.json",
+        "tsconfig.json",
+        "tsconfig.lib.json",
+        "tsconfig.spec.json",
+        "src/public-api.ts",
+        "src/my_ng_widget.component.ts",
+        "tests/test_my_ng_widget.component.ts",
+        "examples/example_usage.ts",
+    ])
+
+
 def test_create_duplicate_widget_errors(carto, tmp_path):
     carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=str(tmp_path))
     result = carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=str(tmp_path))

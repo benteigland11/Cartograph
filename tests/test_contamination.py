@@ -26,6 +26,7 @@ from cartograph.languages.python import PythonEngine
 from cartograph.languages.javascript import JavaScriptEngine
 from cartograph.languages.nim import NimEngine
 from cartograph.languages.systemverilog import SystemVerilogEngine
+from cartograph.languages.angular import AngularEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
 
@@ -78,6 +79,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "javascript": JavaScriptEngine,
         "nim": NimEngine,
         "systemverilog": SystemVerilogEngine,
+        "angular": AngularEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -105,6 +107,7 @@ CLEAN = {
                       "        if (!rst_n) d_out <= '0;\n"
                       "        else d_out <= d_in;\n"
                       "    end\nendmodule\n", "", None),
+    "angular":    ("export class ItemComponent { getValue() { return 'world'; } }\n", "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -113,6 +116,7 @@ ABS_PATH_SRC = {
     "javascript": "const LOG = '/home/user/logs/app.log'\n",
     "nim":        'let logDir = "/home/user/logs/app"\n',
     "systemverilog": 'module m; localparam string P = "/home/user/data"; endmodule\n',
+    "angular":    "const LOG = '/home/user/logs/app.log'\n",
 }
 
 # Check 2: Credentials in src/ -> block
@@ -121,6 +125,7 @@ CREDENTIAL_SRC = {
     "javascript": "const api_key = 'sk-abc123verylongkey'\n",
     "nim":        'let api_key = "sk-abc123verylongkey"\n',
     "systemverilog": 'module m;\nlocalparam string api_key = "sk-abc123verylongkey";\nendmodule\n',
+    "angular":    "const api_key = 'sk-abc123verylongkey'\n",
 }
 
 # Check 2b: Credentials in tests/ -> warning (not block)
@@ -129,6 +134,7 @@ CREDENTIAL_TEST = {
     "javascript": "const password = 'fake_test_password_123'\n",
     "nim":        'let password = "fake_test_password_123"\n',
     "systemverilog": 'module m;\npassword = "fake_test_password_123";\nendmodule\n',
+    "angular":    "const password = 'fake_test_password_123'\n",
 }
 
 # Check 3: Hardcoded URLs -> block
@@ -137,6 +143,7 @@ URL_SRC = {
     "javascript": "const API = 'https://api.mycompany.com/v1'\n",
     "nim":        'let api = "https://api.mycompany.com/v1"\n',
     "systemverilog": 'module m; localparam string U = "https://api.mycompany.com/v1"; endmodule\n',
+    "angular":    "const API = 'https://api.mycompany.com/v1'\n",
 }
 
 # Check 3b: localhost/example.com URLs -> allowed
@@ -145,6 +152,7 @@ URL_ALLOWED = {
     "javascript": "const API = 'http://localhost:8080/api'\n",
     "nim":        'let api = "http://localhost:8080/api"\n',
     "systemverilog": 'module m; localparam string U = "http://localhost:8080/api"; endmodule\n',
+    "angular":    "const API = 'http://localhost:8080/api'\n",
 }
 
 # Check 4: Hardcoded IPs -> block
@@ -153,6 +161,7 @@ IP_SRC = {
     "javascript": "const HOST = '192.168.1.100'\n",
     "nim":        'let host = "192.168.1.100"\n',
     "systemverilog": 'module m; localparam string H = "192.168.1.100"; endmodule\n',
+    "angular":    "const HOST = '192.168.1.100'\n",
 }
 
 # Check 5: Sleep in src/ -> block
@@ -160,6 +169,7 @@ SLEEP_SRC = {
     "python":     "import time\ntime.sleep(1)\n",
     "javascript": "setTimeout(() => {}, 1000)\n",
     "nim":        "sleep(1000)\n",
+    "angular":    "setTimeout(() => {}, 1000)\n",
 }
 
 # Check 5b: Sleep in tests/ with small duration -> no warning
@@ -167,6 +177,7 @@ SLEEP_TEST_SMALL = {
     "python":     "import time\ntime.sleep(0.5)\n",
     "javascript": "setTimeout(() => {}, 500)\n",
     "nim":        "sleep(500)\n",
+    "angular":    "setTimeout(() => {}, 500)\n",
 }
 
 # Check 5c: Sleep in tests/ with large duration -> warning
@@ -174,6 +185,7 @@ SLEEP_TEST_LARGE = {
     "python":     "import time\ntime.sleep(5)\n",
     "javascript": "setTimeout(() => {}, 5000)\n",
     "nim":        "sleep(5000)\n",
+    "angular":    "setTimeout(() => {}, 5000)\n",
 }
 
 # Check 6: Hardcoded values -> warning
@@ -181,6 +193,7 @@ HARDCODED_VALUE = {
     "python":     "TIMEOUT = 30\n",
     "javascript": "const TIMEOUT = 30\n",
     "nim":        "let timeout = 30\n",
+    "angular":    "const TIMEOUT = 30\n",
 }
 
 # Check 7: Env var access -> warning
@@ -188,6 +201,7 @@ ENV_VAR = {
     "python":     "import os\nv = os.getenv('KEY')\n",
     "javascript": "const v = process.env.KEY\n",
     "nim":        'let v = getEnv("KEY")\n',
+    "angular":    "const v = process.env['KEY']\n",
 }
 
 # Check 8: Unlisted imports -> warning
@@ -195,6 +209,7 @@ UNLISTED_IMPORT = {
     "python":     "import requests\n",
     "javascript": "const axios = require('axios')\n",
     "nim":        "import somepkg\n",
+    "angular":    "import { something } from 'some-unregistered-pkg'\n",
 }
 
 # Check 8b: Listed imports -> no warning
@@ -202,6 +217,7 @@ LISTED_IMPORT = {
     "python":     ("import requests\n", ["requests>=2.0.0"]),
     "javascript": ("const axios = require('axios')\n", ["axios>=1.0.0"]),
     "nim":        ("import somepkg\n", ["somepkg>=1.0.0"]),
+    "angular":    ("import { something } from 'some-registered-pkg'\n", ["some-registered-pkg>=1.0.0"]),
 }
 
 # Check 8c: Stdlib imports -> no warning
@@ -209,13 +225,14 @@ STDLIB_IMPORT = {
     "python":     "import json\n",
     "javascript": "const path = require('path')\n",
     "nim":        "import std/json\n",
+    "angular":    "import * as path from 'path'\n",
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts"}
 
 # Which languages need external tools to run their scanners
-NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog"}
+NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node"}
 
 
 # ---------------------------------------------------------------------------
@@ -223,10 +240,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog"}
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular"]
 
 
 def _skip_if_missing(lang):

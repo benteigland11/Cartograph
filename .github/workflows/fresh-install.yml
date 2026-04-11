@@ -58,5 +58,22 @@ jobs:
           test -d "$WIDGET_DIR/src"
           test -d "$WIDGET_DIR/tests"
 
+      - name: Install Angular CLI
+        run: npm install -g @angular/cli
+
+      - name: cartograph create (angular)
+        run: cartograph create frontend-ci-test-angular --language angular --domain frontend --name "CI Angular Test"
+
+      - name: Verify angular widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "angular.json" -printf "%h" -quit)
+          echo "Angular widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/angular.json"
+          test -f "$WIDGET_DIR/package.json"
+          test -f "$WIDGET_DIR/karma.conf.js"
+          test -f "$WIDGET_DIR/ng-package.json"
+          test -d "$WIDGET_DIR/src"
+          test -d "$WIDGET_DIR/tests"
+
       - name: cartograph stats
         run: cartograph stats

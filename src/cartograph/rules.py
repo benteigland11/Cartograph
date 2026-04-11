@@ -34,6 +34,7 @@ _LANGUAGE_RULES = {
     "javascript": ("rules.js",  ["node"]),
     "typescript": ("rules.js",  ["node"]),
     "nim":        ("rules.nim", ["nim", "r", "--hints:off"]),
+    "angular":    ("rules.js",  ["node"]),
 }
 
 
@@ -505,6 +506,7 @@ _TEMPLATES = {
     "python": _TEMPLATE_PYTHON,
     "javascript": _TEMPLATE_JAVASCRIPT,
     "typescript": _TEMPLATE_JAVASCRIPT,
+    "angular": _TEMPLATE_JAVASCRIPT,
     "nim": _TEMPLATE_NIM,
 }
 

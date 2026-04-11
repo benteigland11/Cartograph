@@ -71,6 +71,30 @@ Nim coverage would require compiling via `--debugger:native` and running `gcov`/
 | Native Nim scanner passes | issues found | nim_scanner.nim |
 | .nimble file exists | missing | file check |
 
+### Angular
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| angular.json exists | missing | file check |
+| package.json exists | missing | file check |
+| karma.conf.js exists | missing | file check |
+| ng-package.json exists | missing | file check |
+| Native JS scanner passes on src/ | issues found | js_scanner.js (reused for TypeScript) |
+| All declared dependencies are version-pinned | unpinned dep found | dep pinning check |
+
+**Coverage:** 80% enforced via `karma.conf.js` `check.global` thresholds (statements, branches, functions, lines). Karma exits non-zero when thresholds are not met; the validator detects the "does not meet global threshold" string in output and surfaces a coverage-specific error message.
+
+**Test runner:** `ng test --watch=false --no-progress` — Karma + Jasmine in ChromeHeadlessNoSandbox. Chrome or Chromium must be installed on the system. The karma.conf.js in the scaffold configures `--no-sandbox --disable-gpu` for CI compatibility.
+
+**Example validation:** Angular components cannot be executed as scripts. `run_example` calls `ng build <project>` (build artifact pattern, same as OpenSCAD's render check). `examples/example_usage.ts` is included in `tsconfig.lib.json` so TypeScript type errors in the example will also fail the build.
+
+**Scanner:** Reuses `js_scanner.js` since Angular uses TypeScript syntax. All standard JS contamination checks apply: console.log, eval, absolute paths, credentials, hardcoded URLs/IPs, env var access, unlisted imports, sleep/blocking.
+
+**Angular-specific contamination rules (language_notes, not scanner):**
+- Component selectors must be generic: `lib-item`, `lib-counter` - not `lib-mycompany-header`
+- No project-specific class names in decorators: `@Component`, `@Injectable`, `@NgModule`
+- URL parameters belong in examples/ as demonstration data, not hardcoded in component logic
+
 ### SystemVerilog
 
 | Check | Fails if | Method |
