@@ -244,7 +244,13 @@ def validate_item(carto, path):
         test_error = result.get("error", "")
         if not check("All tests pass", result["passed"], test_error):
             _print_checklist(checklist, errors, failed=True, test_output=test_error)
-            return {"status": "error", "message": "Tests failed. Fix before checkin.",
+            if ("does not meet global threshold" in test_error
+                    or "Required test coverage of" in test_error
+                    or ("coverage" in test_error.lower() and "threshold" in test_error.lower())):
+                fail_msg = "Coverage below threshold - add tests to reach 80%."
+            else:
+                fail_msg = "Tests failed. Fix before checkin."
+            return {"status": "error", "message": fail_msg,
                     "test_output": test_error[:3000]}
 
         # 10. Custom validation rules

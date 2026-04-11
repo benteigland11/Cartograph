@@ -266,7 +266,8 @@ function bareImportName(specifier) {
 function addImportFinding(findings, filename, moduleName, line) {
   const bare = bareImportName(moduleName)
   if (!bare) return
-  const lower = bare.toLowerCase()
+  // 'node:crypto' is the explicit built-in prefix syntax - strip it before lookup
+  const lower = bare.replace(/^node:/, '').toLowerCase()
   if (RISKY_IMPORTS.has(lower)) {
     addFinding(findings, filename, 'risky_import', line, `import '${bare}' - flagged for review`)
   }
