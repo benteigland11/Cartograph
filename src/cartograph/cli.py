@@ -1173,7 +1173,30 @@ def cmd_doctor(args):
         sys.exit(1)
 
 
-_SETUP_INSTRUCTIONS = """\
+def _build_setup_instructions() -> str:
+    import json as _json
+    _cfg_path = os.path.join(os.path.dirname(__file__), "library_config.json")
+    try:
+        with open(_cfg_path) as _f:
+            cfg = _json.load(_f)
+    except Exception:
+        cfg = {}
+    domains = cfg.get("domains", {})
+    domain_lines = "\n".join(
+        f"    {name:<10} {desc.split('.')[0].strip()}"
+        for name, desc in domains.items()
+    )
+
+    from .config import _SCHEMA, _DEFAULTS
+    _flat_defaults = {k: v for section in _DEFAULTS.values() for k, v in section.items()}
+    # Map toml_key back to CLI key for defaults lookup
+    _toml_to_cli = {meta[1]: key for key, meta in _SCHEMA.items()}
+    config_lines = "\n".join(
+        f"    {key:<18} {meta[4]}  (default: {_flat_defaults.get(meta[1], '—')})"
+        for key, meta in _SCHEMA.items()
+    )
+
+    return f"""\
 ## Cartograph
 
 Widget library manager. Widgets are reusable code modules with tests,
@@ -1188,13 +1211,14 @@ creates `backend-retry-backoff-python`.
 
 ### Domains
 
-    backend    server-side logic, APIs, networking
-    frontend   UI components, browser utilities
-    data       parsing, transformation, pipelines
-    ml         machine learning utilities (must be framework-free)
-    security   auth, encryption, scanning
-    infra      CLI tools, file ops, system utilities
-    universal  language-agnostic, cross-domain
+{domain_lines}
+
+### Config keys  (set with: cartograph config <key> <value>)
+
+{config_lines}"""
+
+
+_SETUP_INSTRUCTIONS_TAIL = """\
 
 ### Commands
 
@@ -1651,7 +1675,7 @@ def cmd_setup(args):
             return
 
     # --- Build content ---
-    content = _SETUP_INSTRUCTIONS
+    content = _build_setup_instructions() + "\n" + _SETUP_INSTRUCTIONS_TAIL
     content += _resolve_workflow(getattr(args, "workflow", None))
 
     # --- Resolve target file ---
