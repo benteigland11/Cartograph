@@ -1007,18 +1007,26 @@ def cmd_rules(args):
     from .rules import find_rules
 
     rules = find_rules()
+    print()
+    print("  Rules run automatically during `cartograph validate` and `cartograph checkin`.")
+    print("  Open any file below in your editor to add custom checks.")
+    print()
     if rules:
-        print()
         for r in rules:
             print(f"  {r['language']:<14} {r['scope']:<10} {r['path']}")
         print()
+        print("  Add project-level rules (checked in with your project):")
+        print("    cartograph rules init --language <lang>")
+        print()
+        print("  Add global rules (apply to all projects on this machine):")
+        print("    cartograph rules init --language <lang> --global")
     else:
-        print("\n  No custom rules found.")
+        print("  No custom rules found.")
         print()
         print("  Initialize one with:")
         print("    cartograph rules init --language python")
         print("    cartograph rules init --language python --global")
-        print()
+    print()
 
 
 def cmd_workflow(args):
