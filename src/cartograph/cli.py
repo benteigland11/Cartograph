@@ -958,6 +958,13 @@ def cmd_rules(args):
             print(f"\n  No rules file at {filepath}. Use `cartograph rules init` to create one.\n")
             return
 
+        confirm = getattr(args, "confirm", False)
+        if not confirm:
+            print(f"\n  This will overwrite your custom rules at:")
+            print(f"    {filepath}")
+            print(f"\n  Re-run with --confirm to proceed.\n")
+            return
+
         template = get_template(language)
         with open(filepath, "w") as f:
             f.write(template)
@@ -2037,7 +2044,7 @@ def _build_cli() -> AgentCLI:
                 "Actions:\n"
                 "  (none)   List all active rules files with their paths\n"
                 "  init     Create a project-level rules file from a template\n"
-                "  reset    Restore a rules file to its default template (clears edits)"
+                "  reset    Restore a rules file to its default template (clears edits, requires --confirm)"
             ),
             "handler": cmd_rules,
             "args": [
@@ -2048,6 +2055,8 @@ def _build_cli() -> AgentCLI:
                 {"name": "--global", "action": "store_const", "const": "global",
                  "default": "project", "dest": "scope",
                  "help": "Target the global rules file instead of the project one"},
+                {"name": "--confirm", "action": "store_true", "default": False,
+                 "help": "Confirm reset (required - reset overwrites your edits)"},
             ],
         },
         {
