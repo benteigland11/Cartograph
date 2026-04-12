@@ -74,7 +74,12 @@ check "widget library exists" test -d "$DATA_DIR/Widget_Library"
 check "global rules dir exists" test -d "$DATA_DIR/rules"
 check "global rules.py exists" test -f "$DATA_DIR/rules/rules.py"
 check "global rules.js exists" test -f "$DATA_DIR/rules/rules.js"
+check "global rules.typescript.js exists" test -f "$DATA_DIR/rules/rules.typescript.js"
 check "global rules.nim exists" test -f "$DATA_DIR/rules/rules.nim"
+check "global rules.angular.js exists" test -f "$DATA_DIR/rules/rules.angular.js"
+check "global rules.php exists" test -f "$DATA_DIR/rules/rules.php"
+check "global rules.openscad.py exists" test -f "$DATA_DIR/rules/rules.openscad.py"
+check "global rules.sv.py exists" test -f "$DATA_DIR/rules/rules.sv.py"
 check "rules.py runs clean" python "$DATA_DIR/rules/rules.py" /tmp
 
 # 9. Stats

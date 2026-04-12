@@ -14,10 +14,15 @@ File locations (both run if both exist, project first):
     <data_dir>/rules/rules.py        global rules
 
 Fixed filenames per language:
-    python      rules.py
-    javascript  rules.js
-    typescript  rules.js
-    nim         rules.nim
+    python        rules.py
+    javascript    rules.js
+    typescript    rules.typescript.js
+    nim           rules.nim
+    angular       rules.angular.js
+    php           rules.php
+    openscad      rules.openscad.py
+    systemverilog rules.sv.py
+    css           rules.css.js
 """
 
 import json
@@ -29,13 +34,17 @@ import sys
 log = logging.getLogger("cartograph")
 
 # Maps widget language -> (filename, runner command)
+# Each language gets its own rules file so team conventions stay isolated.
 _LANGUAGE_RULES = {
-    "python":     ("rules.py",  [sys.executable]),
-    "javascript": ("rules.js",  ["node"]),
-    "typescript": ("rules.js",  ["node"]),
-    "nim":        ("rules.nim", ["nim", "r", "--hints:off"]),
-    "angular":    ("rules.js",  ["node"]),
-    "php":        ("rules.php", ["php"]),
+    "python":        ("rules.py",            [sys.executable]),
+    "javascript":    ("rules.js",            ["node"]),
+    "typescript":    ("rules.typescript.js", ["node"]),
+    "nim":           ("rules.nim",           ["nim", "r", "--hints:off"]),
+    "angular":       ("rules.angular.js",    ["node"]),
+    "php":           ("rules.php",           ["php"]),
+    "openscad":      ("rules.openscad.py",   [sys.executable]),
+    "systemverilog": ("rules.sv.py",         [sys.executable]),
+    "css":           ("rules.css.js",        ["node"]),
 }
 
 
@@ -72,11 +81,7 @@ def find_rules() -> list[dict]:
     Returns list of {"language": str, "path": str, "scope": str}.
     """
     results = []
-    seen_languages = set()
     for lang, (filename, _) in _LANGUAGE_RULES.items():
-        if lang in seen_languages:
-            continue
-        seen_languages.add(lang)
         for entry in _rules_file_paths(lang):
             results.append({"language": lang, "filename": filename, **entry})
     return results
@@ -602,13 +607,453 @@ $examplesDir = $widgetPath . '/examples';
 echo json_encode(['blocks' => $blocks, 'warnings' => $warnings]);
 """
 
+_TEMPLATE_TYPESCRIPT = """\
+/**
+ * Custom validation rules for TypeScript widgets.
+ *
+ * HOW THIS WORKS
+ * --------------
+ * This file runs automatically during `cartograph validate` (and therefore
+ * `cartograph checkin`). Cartograph calls it with the widget directory as
+ * a command-line argument. Your job is to inspect the widget and report problems.
+ *
+ * Print a JSON object to stdout with two keys:
+ *
+ *     {"blocks": [...], "warnings": [...]}
+ *
+ *   blocks    - hard failures. Checkin is rejected, no override possible.
+ *   warnings  - soft issues. User can override with --override-warnings.
+ *
+ * Empty arrays (or no output at all) means all checks passed.
+ *
+ * TYPESCRIPT-SPECIFIC CHECKS TO CONSIDER
+ * ---------------------------------------
+ * TypeScript has its own quality concerns beyond JavaScript:
+ *
+ *   - `any` type usage: weakens type safety, consider banning or warning
+ *   - Missing return types on exported functions: harder to use as a library
+ *   - `@ts-ignore` / `@ts-expect-error`: may hide real type errors
+ *   - `as <Type>` casts: can silently break if types change
+ *
+ * WHAT YOU HAVE ACCESS TO
+ * -----------------------
+ * The widgetPath argument points to a standard widget directory:
+ *
+ *     widgetPath/
+ *       widget.json       metadata (id, name, domain, version, dependencies)
+ *       src/              source code
+ *       tests/            test files
+ *       examples/         example usage files
+ *
+ * Use normal fs operations to read any of these. No special APIs needed.
+ */
+const fs = require("fs");
+const path = require("path");
+
+function validate(widgetPath) {
+    const blocks = [];
+    const warnings = [];
+
+    const srcDir = path.join(widgetPath, "src");
+
+    // --- Your checks go here ---
+    //
+    // Examples (uncomment to use):
+
+    // Warning: `any` type usage in source files
+    // if (fs.existsSync(srcDir)) {
+    //     for (const fname of fs.readdirSync(srcDir)) {
+    //         if (!fname.endsWith(".ts")) continue;
+    //         const content = fs.readFileSync(path.join(srcDir, fname), "utf8");
+    //         const matches = (content.match(/: any\\b/g) || []).length;
+    //         if (matches > 0) {
+    //             warnings.push(fname + " uses `any` type " + matches + " time(s) - prefer explicit types");
+    //         }
+    //     }
+    // }
+
+    // Warning: `@ts-ignore` suppression
+    // if (fs.existsSync(srcDir)) {
+    //     for (const fname of fs.readdirSync(srcDir)) {
+    //         if (!fname.endsWith(".ts")) continue;
+    //         const content = fs.readFileSync(path.join(srcDir, fname), "utf8");
+    //         if (content.includes("@ts-ignore") || content.includes("@ts-expect-error")) {
+    //             warnings.push(`${fname} suppresses TypeScript errors - review before shipping`);
+    //         }
+    //     }
+    // }
+
+    return { blocks, warnings };
+}
+
+console.log(JSON.stringify(validate(process.argv[2])));
+"""
+
+_TEMPLATE_ANGULAR = """\
+/**
+ * Custom validation rules for Angular widgets.
+ *
+ * HOW THIS WORKS
+ * --------------
+ * This file runs automatically during `cartograph validate` (and therefore
+ * `cartograph checkin`). Cartograph calls it with the widget directory as
+ * a command-line argument. Your job is to inspect the widget and report problems.
+ *
+ * Print a JSON object to stdout with two keys:
+ *
+ *     {"blocks": [...], "warnings": [...]}
+ *
+ *   blocks    - hard failures. Checkin is rejected, no override possible.
+ *   warnings  - soft issues. User can override with --override-warnings.
+ *
+ * Empty arrays (or no output at all) means all checks passed.
+ *
+ * ANGULAR-SPECIFIC CHECKS TO CONSIDER
+ * ------------------------------------
+ * Angular has naming and structural conventions worth enforcing:
+ *
+ *   - Component class names should end with `Component`
+ *   - Service class names should end with `Service`
+ *   - `console.log` left in production components
+ *   - Direct DOM manipulation (document.querySelector) bypasses Angular's
+ *     change detection - prefer ElementRef or Renderer2
+ *
+ * WHAT YOU HAVE ACCESS TO
+ * -----------------------
+ * The widgetPath argument points to a standard widget directory:
+ *
+ *     widgetPath/
+ *       widget.json       metadata (id, name, domain, version, dependencies)
+ *       src/              source code (Angular component files)
+ *       tests/            test files
+ *       examples/         example usage files
+ *
+ * Use normal fs operations to read any of these. No special APIs needed.
+ */
+const fs = require("fs");
+const path = require("path");
+
+function validate(widgetPath) {
+    const blocks = [];
+    const warnings = [];
+
+    const srcDir = path.join(widgetPath, "src");
+
+    // --- Your checks go here ---
+    //
+    // Examples (uncomment to use):
+
+    // Warning: direct DOM manipulation (bypasses Angular change detection)
+    // if (fs.existsSync(srcDir)) {
+    //     for (const fname of fs.readdirSync(srcDir)) {
+    //         if (!fname.endsWith(".ts")) continue;
+    //         const content = fs.readFileSync(path.join(srcDir, fname), "utf8");
+    //         if (content.includes("document.querySelector") || content.includes("document.getElementById")) {
+    //             warnings.push(`${fname} uses direct DOM manipulation - prefer ElementRef/Renderer2`);
+    //         }
+    //     }
+    // }
+
+    // Warning: console.log in component source
+    // if (fs.existsSync(srcDir)) {
+    //     for (const fname of fs.readdirSync(srcDir)) {
+    //         if (!fname.endsWith(".ts")) continue;
+    //         const content = fs.readFileSync(path.join(srcDir, fname), "utf8");
+    //         if (content.includes("console.log(")) {
+    //             warnings.push(`${fname} contains console.log - remove before shipping`);
+    //         }
+    //     }
+    // }
+
+    return { blocks, warnings };
+}
+
+console.log(JSON.stringify(validate(process.argv[2])));
+"""
+
+_TEMPLATE_OPENSCAD = """\
+\"\"\"
+Custom validation rules for OpenSCAD widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+              Use for things that must never ship (banned patterns, etc).
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+              Use for things that are usually wrong but sometimes intentional.
+
+Empty arrays (or no output at all) means all checks passed.
+
+OPENSCAD-SPECIFIC CHECKS TO CONSIDER
+--------------------------------------
+OpenSCAD parametric models have their own quality concerns:
+
+  - Magic numbers: hardcoded dimensions like `cube([25.4, 12.7, 6.35])` with
+    no named variable make models hard to customize. Prefer `cube([width, height, depth])`.
+  - Missing parameter validation: `assert(width > 0, "width must be positive")` prevents
+    confusing geometry errors downstream.
+  - echo() left in production: useful for debug, noisy in production widgets.
+  - Very large $fn values: `$fn=360` makes renders unbearably slow; `$fn=100` is usually fine.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      widget.json       metadata (id, name, domain, version, dependencies)
+      src/              .scad source files
+      tests/            test files
+      examples/         example_usage.scad
+
+You can read any of these with normal file operations.
+This is a Python script - use any stdlib module you want.
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def validate(widget_path):
+    blocks = []
+    warnings = []
+
+    src_dir = os.path.join(widget_path, "src")
+
+    # --- Your checks go here ---
+    #
+    # Examples (uncomment to use):
+
+    # Warning: echo() calls in source (debug output)
+    # if os.path.isdir(src_dir):
+    #     for fname in os.listdir(src_dir):
+    #         if not fname.endswith(".scad"): continue
+    #         content = open(os.path.join(src_dir, fname)).read()
+    #         if re.search(r'\\becho\\s*\\(', content):
+    #             warnings.append(f"{fname} contains echo() calls - remove before shipping")
+
+    # Warning: very high $fn value (slow renders)
+    # if os.path.isdir(src_dir):
+    #     for fname in os.listdir(src_dir):
+    #         if not fname.endswith(".scad"): continue
+    #         content = open(os.path.join(src_dir, fname)).read()
+    #         for m in re.finditer(r'\\$fn\\s*=\\s*(\\d+)', content):
+    #             if int(m.group(1)) > 200:
+    #                 warnings.append(f"{fname} sets $fn={m.group(1)} - values above 200 make renders very slow")
+
+    return {"blocks": blocks, "warnings": warnings}
+
+
+if __name__ == "__main__":
+    print(json.dumps(validate(sys.argv[1])))
+"""
+
+_TEMPLATE_SYSTEMVERILOG = """\
+\"\"\"
+Custom validation rules for SystemVerilog widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+              Use for things that must never ship (banned patterns, etc).
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+              Use for things that are usually wrong but sometimes intentional.
+
+Empty arrays (or no output at all) means all checks passed.
+
+SYSTEMVERILOG-SPECIFIC CHECKS TO CONSIDER
+------------------------------------------
+RTL design has its own quality concerns:
+
+  - Undriven outputs: a module output with no assignment silently drives X.
+  - Blocking assignments (=) in always_ff blocks: should use non-blocking (<=).
+  - Magic numbers in port widths: `input [7:0]` everywhere without a parameter
+    makes designs hard to generalize.
+  - `initial` blocks in synthesizable code: fine for simulation, may not synthesize.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      widget.json       metadata (id, name, domain, version, dependencies)
+      src/              .sv source files
+      tests/            testbench files
+      examples/         example usage files
+
+You can read any of these with normal file operations.
+This is a Python script - use any stdlib module you want.
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def validate(widget_path):
+    blocks = []
+    warnings = []
+
+    src_dir = os.path.join(widget_path, "src")
+
+    # --- Your checks go here ---
+    #
+    # Examples (uncomment to use):
+
+    # Warning: blocking assignments in always_ff (should be non-blocking)
+    # if os.path.isdir(src_dir):
+    #     for fname in os.listdir(src_dir):
+    #         if not fname.endswith(".sv"): continue
+    #         content = open(os.path.join(src_dir, fname)).read()
+    #         in_always_ff = False
+    #         for line in content.splitlines():
+    #             if "always_ff" in line:
+    #                 in_always_ff = True
+    #             if in_always_ff and re.search(r'\\w+\\s*=[^=<>!]', line):
+    #                 warnings.append(f"{fname} may use blocking assignment in always_ff - use <= instead")
+    #                 break
+
+    # Warning: `initial` block in src/ (usually simulation-only)
+    # if os.path.isdir(src_dir):
+    #     for fname in os.listdir(src_dir):
+    #         if not fname.endswith(".sv"): continue
+    #         content = open(os.path.join(src_dir, fname)).read()
+    #         if re.search(r'\\binitial\\b', content):
+    #             warnings.append(f"{fname} contains `initial` block - verify it's synthesizable")
+
+    return {"blocks": blocks, "warnings": warnings}
+
+
+if __name__ == "__main__":
+    print(json.dumps(validate(sys.argv[1])))
+"""
+
+_TEMPLATE_CSS = """\
+/**
+ * Custom validation rules for CSS widgets.
+ *
+ * HOW THIS WORKS
+ * --------------
+ * This file runs automatically during `cartograph validate` (and therefore
+ * `cartograph checkin`). Cartograph calls it with the widget directory as
+ * a command-line argument. Your job is to inspect the widget and report problems.
+ *
+ * Print a JSON object to stdout with two keys:
+ *
+ *     {"blocks": [...], "warnings": [...]}
+ *
+ *   blocks    - hard failures. Checkin is rejected, no override possible.
+ *   warnings  - soft issues. User can override with --override-warnings.
+ *
+ * Empty arrays (or no output at all) means all checks passed.
+ *
+ * CSS-SPECIFIC CHECKS TO CONSIDER
+ * --------------------------------
+ * CSS widgets are often shared design system components. Common team conventions:
+ *
+ *   - Hardcoded colors (#fff, rgb(255,255,255)) instead of CSS variables (--color-white)
+ *   - Hardcoded px font sizes instead of rem (breaks user font scaling)
+ *   - `!important` usage (overrides cascade, makes theming harder)
+ *   - Magic z-index values (100, 9999) instead of a defined z-index scale
+ *   - Hardcoded breakpoint px values instead of a shared breakpoint variable
+ *
+ * These are warnings by default - upgrade to blocks if your team wants to enforce them.
+ *
+ * WHAT YOU HAVE ACCESS TO
+ * -----------------------
+ * The widgetPath argument points to a standard widget directory:
+ *
+ *     widgetPath/
+ *       widget.json       metadata (id, name, domain, version, dependencies)
+ *       src/              .css source files
+ *       tests/            test files
+ *       examples/         example usage files
+ *
+ * Use normal fs operations to read any of these. No special APIs needed.
+ */
+const fs = require("fs");
+const path = require("path");
+
+function validate(widgetPath) {
+    const blocks = [];
+    const warnings = [];
+
+    const srcDir = path.join(widgetPath, "src");
+
+    // --- Your checks go here ---
+    //
+    // Examples (uncomment to use):
+
+    // Warning: hardcoded colors instead of CSS variables
+    // const HEX_COLOR = /#[0-9a-fA-F]{3,8}\\b/g;
+    // if (fs.existsSync(srcDir)) {
+    //     for (const fname of fs.readdirSync(srcDir)) {
+    //         if (!fname.endsWith(".css")) continue;
+    //         const content = fs.readFileSync(path.join(srcDir, fname), "utf8");
+    //         const matches = (content.match(HEX_COLOR) || []).length;
+    //         if (matches > 0) {
+    //             warnings.push(`${fname} has ${matches} hardcoded color(s) - prefer CSS custom properties (--color-name)`);
+    //         }
+    //     }
+    // }
+
+    // Warning: !important usage
+    // if (fs.existsSync(srcDir)) {
+    //     for (const fname of fs.readdirSync(srcDir)) {
+    //         if (!fname.endsWith(".css")) continue;
+    //         const content = fs.readFileSync(path.join(srcDir, fname), "utf8");
+    //         const count = (content.match(/!important/g) || []).length;
+    //         if (count > 0) {
+    //             warnings.push(`${fname} uses !important ${count} time(s) - may cause cascade conflicts`);
+    //         }
+    //     }
+    // }
+
+    // Warning: px font sizes (prefer rem for user font scaling)
+    // if (fs.existsSync(srcDir)) {
+    //     for (const fname of fs.readdirSync(srcDir)) {
+    //         if (!fname.endsWith(".css")) continue;
+    //         const content = fs.readFileSync(path.join(srcDir, fname), "utf8");
+    //         if (/font-size:\\s*\\d+px/.test(content)) {
+    //             warnings.push(`${fname} uses px font-size - consider rem for better accessibility`);
+    //         }
+    //     }
+    // }
+
+    return { blocks, warnings };
+}
+
+console.log(JSON.stringify(validate(process.argv[2])));
+"""
+
 _TEMPLATES = {
-    "python": _TEMPLATE_PYTHON,
-    "javascript": _TEMPLATE_JAVASCRIPT,
-    "typescript": _TEMPLATE_JAVASCRIPT,
-    "angular": _TEMPLATE_JAVASCRIPT,
-    "nim": _TEMPLATE_NIM,
-    "php": _TEMPLATE_PHP,
+    "python":        _TEMPLATE_PYTHON,
+    "javascript":    _TEMPLATE_JAVASCRIPT,
+    "typescript":    _TEMPLATE_TYPESCRIPT,
+    "angular":       _TEMPLATE_ANGULAR,
+    "nim":           _TEMPLATE_NIM,
+    "php":           _TEMPLATE_PHP,
+    "openscad":      _TEMPLATE_OPENSCAD,
+    "systemverilog": _TEMPLATE_SYSTEMVERILOG,
+    "css":           _TEMPLATE_CSS,
 }
 
 

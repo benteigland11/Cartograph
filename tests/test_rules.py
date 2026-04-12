@@ -249,8 +249,13 @@ def test_rules_filename():
     from cartograph.rules import get_rules_filename
     assert get_rules_filename("python") == "rules.py"
     assert get_rules_filename("javascript") == "rules.js"
-    assert get_rules_filename("typescript") == "rules.js"
+    assert get_rules_filename("typescript") == "rules.typescript.js"
     assert get_rules_filename("nim") == "rules.nim"
+    assert get_rules_filename("angular") == "rules.angular.js"
+    assert get_rules_filename("php") == "rules.php"
+    assert get_rules_filename("openscad") == "rules.openscad.py"
+    assert get_rules_filename("systemverilog") == "rules.sv.py"
+    assert get_rules_filename("css") == "rules.css.js"
     assert get_rules_filename("cobol") is None
 
 
