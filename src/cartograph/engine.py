@@ -86,14 +86,16 @@ def _ensure_global_rules() -> None:
 def _resolve_library_path() -> str:
     """Resolve widget library path: env var > user data dir > dev repo sibling."""
     if "WIDGET_LIBRARY_PATH" in os.environ:
+        _ensure_global_rules()
         return os.environ["WIDGET_LIBRARY_PATH"]
     # Dev: repo sibling takes priority over user data dir so local edits work
     _repo_lib = os.path.join(REPO_DIR, "Widget_Library")
     if os.path.exists(_repo_lib):
+        _ensure_global_rules()
         return _repo_lib
     # Normal install: use platform user data dir, seeding if needed
     user_lib = os.path.join(_user_data_dir(), "Widget_Library")
-    _ensure_library(user_lib)
+    _ensure_library(user_lib)  # _ensure_library calls _ensure_global_rules internally
     return user_lib
 
 
