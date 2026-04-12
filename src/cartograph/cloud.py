@@ -282,9 +282,15 @@ def whoami() -> dict:
     return _get("/v1/auth/me")
 
 
-def inspect(owner_handle: str, widget_id: str) -> dict:
-    """Inspect a cloud widget. Public widgets don't require auth."""
-    return _get(f"/v1/widgets/{urllib.parse.quote(owner_handle)}/{urllib.parse.quote(widget_id)}")
+def inspect(owner_handle: str, widget_id: str, source: bool = False) -> dict:
+    """Inspect a cloud widget. Public widgets don't require auth.
+
+    Pass source=True to include extracted src/ file contents in the result.
+    """
+    path = f"/v1/widgets/{urllib.parse.quote(owner_handle)}/{urllib.parse.quote(widget_id)}"
+    if source:
+        path += "?include_source=true"
+    return _get(path)
 
 
 def download_widget(owner_handle: str, widget_id: str) -> dict:
