@@ -179,32 +179,28 @@ class PhpEngine(LanguageEngine):
         m = re.match(r"PHP\s+(\S+)", first_line)
         return f"php {m.group(1)}" if m else first_line.strip()
 
-    def check_optional(self) -> list[dict]:
+    def check_optional(self) -> list[tuple[str, bool, str]]:
         """Surface Xdebug / PCOV coverage driver status in doctor."""
-        results = []
         res = self._run(
-            ["php", "-r", "echo extension_loaded(\"xdebug\") ? \"yes\" : \"no\";"],
+            ["php", "-r", "echo extension_loaded('xdebug') ? 'yes' : 'no';"],
             cwd=os.getcwd(), timeout=10,
         )
         xdebug_ok = res.returncode == 0 and "yes" in (res.stdout or "")
 
         res2 = self._run(
-            ["php", "-r", "echo extension_loaded(\"pcov\") ? \"yes\" : \"no\";"],
+            ["php", "-r", "echo extension_loaded('pcov') ? 'yes' : 'no';"],
             cwd=os.getcwd(), timeout=10,
         )
         pcov_ok = res2.returncode == 0 and "yes" in (res2.stdout or "")
 
         if xdebug_ok:
-            results.append({"name": "xdebug", "status": "ok", "detail": "coverage driver available"})
-        elif pcov_ok:
-            results.append({"name": "pcov", "status": "ok", "detail": "coverage driver available"})
-        else:
-            results.append({
-                "name": "xdebug/pcov",
-                "status": "missing",
-                "detail": "no coverage driver found - install Xdebug or PCOV for coverage enforcement",
-            })
-        return results
+            return [("xdebug", True, "coverage driver available")]
+        if pcov_ok:
+            return [("pcov", True, "coverage driver available")]
+        return [(
+            "xdebug/pcov", False,
+            "no coverage driver - install Xdebug or PCOV: sudo dnf install php-pecl-xdebug3",
+        )]
 
     # ── Scaffold ──────────────────────────────────────────────────────────────
 
