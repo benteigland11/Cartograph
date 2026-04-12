@@ -80,6 +80,7 @@ def test_create_angular_widget(carto, tmp_path):
         "tsconfig.json",
         "tsconfig.lib.json",
         "tsconfig.spec.json",
+        "src/test.ts",
         "src/public-api.ts",
         "src/my_ng_widget.component.ts",
         "tests/test_my_ng_widget.component.ts",

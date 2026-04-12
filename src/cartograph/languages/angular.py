@@ -74,6 +74,23 @@ module.exports = function (config) {
 };
 """
 
+_TEST_BOOTSTRAP_TS = """\
+// This file bootstraps the Angular testing environment for Karma.
+// Required for TestBed.configureTestingModule() to work in tests.
+import 'zone.js';
+import 'zone.js/testing';
+import { getTestBed } from '@angular/core/testing';
+import {
+  BrowserDynamicTestingModule,
+  platformBrowserDynamicTesting,
+} from '@angular/platform-browser-dynamic/testing';
+
+getTestBed().initTestEnvironment(
+  BrowserDynamicTestingModule,
+  platformBrowserDynamicTesting(),
+);
+"""
+
 _PUBLIC_API_TS = """\
 export * from './__MODULE__.component';
 """
@@ -266,6 +283,7 @@ class AngularEngine(LanguageEngine):
                 "@angular/compiler": "^17.0.0",
                 "@angular/compiler-cli": "^17.0.0",
                 "@angular/platform-browser": "^17.0.0",
+                "@angular/platform-browser-dynamic": "^17.0.0",
                 "@types/jasmine": "~5.1.0",
                 "jasmine-core": "~5.1.0",
                 "karma": "~6.4.0",
@@ -302,6 +320,7 @@ class AngularEngine(LanguageEngine):
                         "test": {
                             "builder": "@angular-devkit/build-angular:karma",
                             "options": {
+                                "main": "src/test.ts",
                                 "tsConfig": "tsconfig.spec.json",
                                 "karmaConfig": "karma.conf.js",
                                 "include": ["tests/**/*.ts"],
@@ -358,7 +377,7 @@ class AngularEngine(LanguageEngine):
                 "outDir": "../../out-tsc/spec",
                 "types": ["jasmine"],
             },
-            "include": ["tests/**/*.ts"],
+            "include": ["src/test.ts", "tests/**/*.ts"],
         }
 
         ng_package_json = {
@@ -386,6 +405,10 @@ class AngularEngine(LanguageEngine):
         )
 
         # Write TypeScript source files
+        _write(
+            os.path.join(target_dir, "src", "test.ts"),
+            _TEST_BOOTSTRAP_TS,
+        )
         _write(
             os.path.join(target_dir, "src", "public-api.ts"),
             _sub(_PUBLIC_API_TS, module=module_name),
@@ -536,6 +559,11 @@ class AngularEngine(LanguageEngine):
             (
                 "ng-package.json",
                 "ng-package.json is missing - required for ng build. "
+                "Recreate with: cartograph create",
+            ),
+            (
+                "src/test.ts",
+                "src/test.ts is missing - required to bootstrap TestBed for Karma. "
                 "Recreate with: cartograph create",
             ),
         ]
