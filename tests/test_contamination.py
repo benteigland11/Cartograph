@@ -27,6 +27,7 @@ from cartograph.languages.javascript import JavaScriptEngine
 from cartograph.languages.nim import NimEngine
 from cartograph.languages.systemverilog import SystemVerilogEngine
 from cartograph.languages.angular import AngularEngine
+from cartograph.languages.php import PhpEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
 
@@ -80,6 +81,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "nim": NimEngine,
         "systemverilog": SystemVerilogEngine,
         "angular": AngularEngine,
+        "php": PhpEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -108,6 +110,7 @@ CLEAN = {
                       "        else d_out <= d_in;\n"
                       "    end\nendmodule\n", "", None),
     "angular":    ("export class ItemComponent { getValue() { return 'world'; } }\n", "", None),
+    "php":        ("<?php\nclass Item { public function getValue(): mixed { return 'world'; } }\n", "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -117,6 +120,7 @@ ABS_PATH_SRC = {
     "nim":        'let logDir = "/home/user/logs/app"\n',
     "systemverilog": 'module m; localparam string P = "/home/user/data"; endmodule\n',
     "angular":    "const LOG = '/home/user/logs/app.log'\n",
+    "php":        "<?php\n$log = '/home/user/logs/app.log';\n",
 }
 
 # Check 2: Credentials in src/ -> block
@@ -126,6 +130,7 @@ CREDENTIAL_SRC = {
     "nim":        'let api_key = "sk-abc123verylongkey"\n',
     "systemverilog": 'module m;\nlocalparam string api_key = "sk-abc123verylongkey";\nendmodule\n',
     "angular":    "const api_key = 'sk-abc123verylongkey'\n",
+    "php":        "<?php\n$api_key = 'sk-abc123verylongkey';\n",
 }
 
 # Check 2b: Credentials in tests/ -> warning (not block)
@@ -135,6 +140,7 @@ CREDENTIAL_TEST = {
     "nim":        'let password = "fake_test_password_123"\n',
     "systemverilog": 'module m;\npassword = "fake_test_password_123";\nendmodule\n',
     "angular":    "const password = 'fake_test_password_123'\n",
+    "php":        "<?php\n$password = 'fake_test_password_123';\n",
 }
 
 # Check 3: Hardcoded URLs -> block
@@ -144,6 +150,7 @@ URL_SRC = {
     "nim":        'let api = "https://api.mycompany.com/v1"\n',
     "systemverilog": 'module m; localparam string U = "https://api.mycompany.com/v1"; endmodule\n',
     "angular":    "const API = 'https://api.mycompany.com/v1'\n",
+    "php":        "<?php\n$api = 'https://api.mycompany.com/v1';\n",
 }
 
 # Check 3b: localhost/example.com URLs -> allowed
@@ -153,6 +160,7 @@ URL_ALLOWED = {
     "nim":        'let api = "http://localhost:8080/api"\n',
     "systemverilog": 'module m; localparam string U = "http://localhost:8080/api"; endmodule\n',
     "angular":    "const API = 'http://localhost:8080/api'\n",
+    "php":        "<?php\n$api = 'http://localhost:8080/api';\n",
 }
 
 # Check 4: Hardcoded IPs -> block
@@ -162,6 +170,7 @@ IP_SRC = {
     "nim":        'let host = "192.168.1.100"\n',
     "systemverilog": 'module m; localparam string H = "192.168.1.100"; endmodule\n',
     "angular":    "const HOST = '192.168.1.100'\n",
+    "php":        "<?php\n$host = '192.168.1.100';\n",
 }
 
 # Check 5: Sleep in src/ -> block
@@ -170,6 +179,7 @@ SLEEP_SRC = {
     "javascript": "setTimeout(() => {}, 1000)\n",
     "nim":        "sleep(1000)\n",
     "angular":    "setTimeout(() => {}, 1000)\n",
+    "php":        "<?php\nsleep(1);\n",
 }
 
 # Check 5b: Sleep in tests/ with small duration -> no warning
@@ -178,6 +188,7 @@ SLEEP_TEST_SMALL = {
     "javascript": "setTimeout(() => {}, 500)\n",
     "nim":        "sleep(500)\n",
     "angular":    "setTimeout(() => {}, 500)\n",
+    "php":        "<?php\nsleep(1);\n",  # 1 second - not > 1, no warning
 }
 
 # Check 5c: Sleep in tests/ with large duration -> warning
@@ -186,6 +197,7 @@ SLEEP_TEST_LARGE = {
     "javascript": "setTimeout(() => {}, 5000)\n",
     "nim":        "sleep(5000)\n",
     "angular":    "setTimeout(() => {}, 5000)\n",
+    "php":        "<?php\nsleep(5);\n",
 }
 
 # Check 6: Hardcoded values -> warning
@@ -194,6 +206,7 @@ HARDCODED_VALUE = {
     "javascript": "const TIMEOUT = 30\n",
     "nim":        "let timeout = 30\n",
     "angular":    "const TIMEOUT = 30\n",
+    "php":        "<?php\nclass Item { private $TIMEOUT = 30; }\n",
 }
 
 # Check 7: Env var access -> warning
@@ -202,6 +215,7 @@ ENV_VAR = {
     "javascript": "const v = process.env.KEY\n",
     "nim":        'let v = getEnv("KEY")\n',
     "angular":    "const v = process.env['KEY']\n",
+    "php":        "<?php\n$v = getenv('KEY');\n",
 }
 
 # Check 8: Unlisted imports -> warning
@@ -210,6 +224,7 @@ UNLISTED_IMPORT = {
     "javascript": "const axios = require('axios')\n",
     "nim":        "import somepkg\n",
     "angular":    "import { something } from 'some-unregistered-pkg'\n",
+    "php":        "<?php\nuse GuzzleHttp\\Client;\n",
 }
 
 # Check 8b: Listed imports -> no warning
@@ -218,6 +233,7 @@ LISTED_IMPORT = {
     "javascript": ("const axios = require('axios')\n", ["axios>=1.0.0"]),
     "nim":        ("import somepkg\n", ["somepkg>=1.0.0"]),
     "angular":    ("import { something } from 'some-registered-pkg'\n", ["some-registered-pkg>=1.0.0"]),
+    "php":        ("<?php\nuse GuzzleHttp\\Client;\n", ["guzzlehttp/guzzle>=7.0.0"]),
 }
 
 # Check 8c: Stdlib imports -> no warning
@@ -226,10 +242,12 @@ STDLIB_IMPORT = {
     "javascript": "const path = require('path')\n",
     "nim":        "import std/json\n",
     "angular":    "import * as path from 'path'\n",
+    # PHP builtins don't need use statements - calling strlen() has no import to flag
+    "php":        "<?php\nclass Item { public function run(): void { strlen('test'); } }\n",
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php"}
 
 # Which languages need external tools to run their scanners
 NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node"}
@@ -240,10 +258,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php"]
 
 
 def _skip_if_missing(lang):
@@ -1495,3 +1513,117 @@ class TestSystemVerilogContamination:
             "/* Previously used BUFG */\n"
             "module m; endmodule\n")
         assert not any("vendor" in b.lower() for b in result["blocks"])
+
+
+@pytest.mark.php
+class TestPhpSpecific:
+    """PHP-only validation and contamination checks."""
+
+    @pytest.fixture(autouse=True)
+    def _require_php(self):
+        if not shutil.which("php"):
+            pytest.skip("PHP not installed")
+
+    def _scan(self, tmp_path, src_content, test_content="", deps=None):
+        wdir = tmp_path / "widget"
+        (wdir / "src").mkdir(parents=True)
+        (wdir / "tests").mkdir()
+        (wdir / "examples").mkdir()
+        (wdir / "src" / "mod.php").write_text(src_content)
+        if test_content:
+            (wdir / "tests" / "test_mod.php").write_text(test_content)
+        engine = PhpEngine()
+        return engine.scan_contamination(
+            str(wdir), {"language": "php", "dependencies": deps or []}
+        )
+
+    # -- validate_widget --
+
+    def test_echo_in_src_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "php", "mod.php",
+                            "<?php\necho 'debug';\n")
+        result = PhpEngine().validate_widget(wdir, [])
+        assert result["passed"] is True  # validate_widget does syntax+pinning only
+
+    def test_echo_in_src_blocked_by_scanner(self, tmp_path):
+        result = self._scan(tmp_path, "<?php\necho 'debug';\n")
+        assert any("echo" in b.lower() for b in result["blocks"])
+
+    def test_clean_passes(self, tmp_path):
+        wdir = _make_widget(tmp_path, "php", "mod.php",
+                            "<?php\nclass Item { public function get(): mixed { return 1; } }\n")
+        result = PhpEngine().validate_widget(wdir, [])
+        assert result["passed"] is True
+
+    def test_syntax_error_fails(self, tmp_path):
+        wdir = _make_widget(tmp_path, "php", "mod.php",
+                            "<?php\nclass Item { public function get() { return }\n")
+        result = PhpEngine().validate_widget(wdir, [])
+        assert result["passed"] is False
+        assert "syntax" in result["error"].lower()
+
+    # -- WordPress globals --
+
+    def test_wp_function_in_src_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "<?php\nfunction my_func() { wp_enqueue_script('my-js'); }\n")
+        assert any("wordpress" in b.lower() for b in result["blocks"])
+
+    def test_add_action_in_src_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "<?php\nadd_action('init', 'my_init');\n")
+        assert any("wordpress" in b.lower() for b in result["blocks"])
+
+    def test_wpdb_in_src_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "<?php\nglobal $wpdb;\n$wpdb->query('SELECT 1');\n")
+        assert any("wordpress" in b.lower() for b in result["blocks"])
+
+    def test_get_option_in_src_blocks(self, tmp_path):
+        result = self._scan(tmp_path,
+            "<?php\n$val = get_option('my_setting');\n")
+        assert any("wordpress" in b.lower() for b in result["blocks"])
+
+    def test_wp_in_comment_not_blocked(self, tmp_path):
+        result = self._scan(tmp_path,
+            "<?php\n// This widget has no wp_enqueue_script dependency\n"
+            "class Item { public function get(): mixed { return 1; } }\n")
+        assert not any("wordpress" in b.lower() for b in result["blocks"])
+
+    # -- echo isolation --
+
+    def test_echo_in_example_not_blocked(self, tmp_path):
+        """Examples are allowed to use echo - it's the PHP print equivalent."""
+        wdir = tmp_path / "widget2"
+        (wdir / "src").mkdir(parents=True)
+        (wdir / "tests").mkdir()
+        (wdir / "examples").mkdir()
+        (wdir / "src" / "mod.php").write_text(
+            "<?php\nclass Item { public function get(): mixed { return 1; } }\n")
+        (wdir / "examples" / "example_usage.php").write_text(
+            "<?php\n$x = 1;\necho $x . PHP_EOL;\n")
+        engine = PhpEngine()
+        result = engine.scan_contamination(
+            str(wdir), {"language": "php", "dependencies": []})
+        assert not any("echo" in b.lower() for b in result["blocks"])
+
+    # -- unlisted use statement --
+
+    def test_psr_namespace_not_warned(self, tmp_path):
+        """PSR is a standards body, not a real package - should be excluded."""
+        result = self._scan(tmp_path,
+            "<?php\nuse Psr\\Log\\LoggerInterface;\n"
+            "class Item { public function get(): mixed { return 1; } }\n")
+        assert not any("unlisted" in w.lower() for w in result["warnings"])
+
+    def test_cartograph_namespace_not_warned(self, tmp_path):
+        """Internal Cartograph namespace imports must not warn."""
+        result = self._scan(tmp_path,
+            "<?php\nuse Cartograph\\MyModule\\MyClass;\n"
+            "class Item { public function get(): mixed { return 1; } }\n")
+        assert not any("unlisted" in w.lower() for w in result["warnings"])
+
+    def test_hardcoded_constant_warns(self, tmp_path):
+        result = self._scan(tmp_path,
+            "<?php\nclass Item { private $TIMEOUT = 30; }\n")
+        assert any("hardcoded" in w.lower() for w in result["warnings"])

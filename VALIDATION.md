@@ -71,6 +71,40 @@ Nim coverage would require compiling via `--debugger:native` and running `gcov`/
 | Native Nim scanner passes | issues found | nim_scanner.nim |
 | .nimble file exists | missing | file check |
 
+### PHP
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| composer.json exists | missing | file check |
+| phpunit.xml exists | missing | file check |
+| PHP syntax valid | parse error in any src/ file | `php -l` per file |
+| All declared dependencies are version-pinned | unpinned dep found | dep pinning check |
+| Contamination scan passes on src/ | issues found | Python-based scanner |
+| PHPUnit tests pass | any test fails | `vendor/bin/phpunit` |
+| Coverage meets threshold | below 80% | `--min-coverage=80` flag |
+| Example runs and exits cleanly | non-zero exit | `php examples/example_usage.php` |
+
+**Coverage:** 80% enforced via `--min-coverage=80` PHPUnit flag. Requires Xdebug or PCOV installed as a PHP extension. The validator checks for both extensions before running tests and returns a clear error if neither is found. `check_optional()` surfaces coverage driver status in `cartograph doctor`.
+
+**Test runner:** `php vendor/bin/phpunit --coverage-text --coverage-filter=src --min-coverage=80`. PHPUnit is installed as a dev dependency via Composer.
+
+**Example validation:** `php examples/example_usage.php` - runs and exits cleanly (same as Python). No build step.
+
+**Scanner:** Python-based line scanner (PHP has no file I/O limitation, but the Python scanner covers all required checks accurately for PHP's syntax). Key checks:
+
+- `echo` in src/ files blocked (same rule as Python `print()`)
+- WordPress globals blocked everywhere: `wp_*`, `add_action`, `add_filter`, `do_action`, `apply_filters`, `register_post_type`, `register_taxonomy`, `get_option`, `update_option`, `$wpdb`, `$wp_query`, `$post`, `$current_user` - these make PHP untestable outside WordPress
+- Hardcoded credentials blocked in src/, warned in tests
+- Absolute paths blocked everywhere
+- Hardcoded IPs blocked in src/
+- Hardcoded URLs warned in src/
+- `sleep()`/`usleep()` blocked in src/, large values warned in tests
+- `getenv()`/`$_ENV`/`$_SERVER` access warned in src/
+- Hardcoded constant assignments warned in src/
+- Unlisted namespace imports warned in src/
+
+**No native scanner:** The Python scanner handles PHP contamination accurately. PHP's string and comment syntax is simple enough for line-based checks, and WordPress globals are identifiable by name without AST parsing.
+
 ### Angular
 
 | Check | Fails if | Method |

@@ -88,6 +88,26 @@ def test_create_angular_widget(carto, tmp_path):
     ])
 
 
+def test_create_php_widget(carto, tmp_path):
+    result = carto.create(
+        "my-php-widget",
+        language="php",
+        name="My PHP Widget",
+        domain="backend",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "composer.json",
+        "phpunit.xml",
+        "src/MyPhpWidget.php",
+        "tests/MyPhpWidgetTest.php",
+        "examples/example_usage.php",
+    ])
+
+
 def test_create_duplicate_widget_errors(carto, tmp_path):
     carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=str(tmp_path))
     result = carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=str(tmp_path))

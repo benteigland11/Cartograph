@@ -267,7 +267,16 @@ class PhpEngine(LanguageEngine):
         blocks, warnings = [], []
 
         deps = widget.get("dependencies", [])
-        dep_names = {_dep_bare_name(d).lower() for d in deps if isinstance(d, str)}
+        dep_names = set()
+        for d in deps:
+            if not isinstance(d, str):
+                continue
+            bare = _dep_bare_name(d).lower()
+            dep_names.add(bare)
+            # Composer packages use vendor/package format; the PHP namespace root
+            # matches the vendor prefix (e.g. "guzzlehttp/guzzle" -> "guzzlehttp").
+            if "/" in bare:
+                dep_names.add(bare.split("/")[0])
 
         src_files = glob.glob(os.path.join(path, "src", "**", "*.php"), recursive=True)
         test_files = glob.glob(os.path.join(path, "tests", "**", "*.php"), recursive=True)
