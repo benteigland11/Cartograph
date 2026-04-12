@@ -470,6 +470,12 @@ class PhpEngine(LanguageEngine):
                 )
         return self._ok()
 
+    # ── Test discovery ────────────────────────────────────────────────────────
+
+    def find_test_files(self, path: str) -> list[str]:
+        """PHPUnit convention is *Test.php, not test_*.php."""
+        return glob.glob(os.path.join(path, "tests", "**", "*Test.php"), recursive=True)
+
     # ── Example ───────────────────────────────────────────────────────────────
 
     def run_example(self, path: str) -> dict:
