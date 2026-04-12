@@ -216,7 +216,7 @@ def _write(path: str, content: str) -> None:
 class AngularEngine(LanguageEngine):
     name = "angular"
     aliases = ["ang", "ng"]
-    validation_version = 1
+    validation_version = 2
     file_ext = "ts"
     supported = False
     toolchain = {
@@ -271,11 +271,12 @@ class AngularEngine(LanguageEngine):
             "version": "1.0.0",
             "scripts": {"test": "ng test --watch=false"},
             "dependencies": {
+                "tslib": "^2.3.0",
+            },
+            "peerDependencies": {
                 "@angular/common": "^17.0.0",
                 "@angular/core": "^17.0.0",
                 "rxjs": "~7.8.0",
-                "tslib": "^2.3.0",
-                "zone.js": "~0.14.0",
             },
             "devDependencies": {
                 "@angular-devkit/build-angular": "^17.0.0",
@@ -293,6 +294,7 @@ class AngularEngine(LanguageEngine):
                 "karma-jasmine-html-reporter": "~2.1.0",
                 "ng-packagr": "^17.0.0",
                 "typescript": "~5.2.0",
+                "zone.js": "~0.14.0",
             },
         }
 
@@ -323,7 +325,8 @@ class AngularEngine(LanguageEngine):
                                 "main": "src/test.ts",
                                 "tsConfig": "tsconfig.spec.json",
                                 "karmaConfig": "karma.conf.js",
-                                "include": ["tests/**/*.ts"],
+                                "include": ["../tests/**/*.ts"],
+                                "codeCoverage": True,
                             },
                         },
                     },
@@ -478,7 +481,12 @@ class AngularEngine(LanguageEngine):
             for dep in dependencies:
                 bare = _dep_bare_name(dep)
                 ver_part = dep[len(bare):].strip() or "*"
-                if bare and bare not in pkg.get("dependencies", {}):
+                already_present = (
+                    bare in pkg.get("dependencies", {})
+                    or bare in pkg.get("peerDependencies", {})
+                    or bare in pkg.get("devDependencies", {})
+                )
+                if bare and not already_present:
                     pkg.setdefault("dependencies", {})[bare] = ver_part
                     changed = True
             if changed:
