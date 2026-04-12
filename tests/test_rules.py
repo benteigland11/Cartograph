@@ -304,9 +304,17 @@ def test_cli_rules_reset(tmp_path):
     rules_file = tmp_path / ".cartograph" / "rules" / "rules.py"
     rules_file.write_text("BROKEN SYNTAX {{{{")
 
-    # Reset
+    # Reset without --confirm should block
     result = subprocess.run(
         ["python", "-m", "cartograph", "rules", "reset", "--language", "python"],
+        capture_output=True, text=True, cwd=str(tmp_path),
+    )
+    assert result.returncode == 0
+    assert "Re-run with --confirm" in result.stdout
+
+    # Reset with --confirm should succeed
+    result = subprocess.run(
+        ["python", "-m", "cartograph", "rules", "reset", "--language", "python", "--confirm"],
         capture_output=True, text=True, cwd=str(tmp_path),
     )
     assert result.returncode == 0
