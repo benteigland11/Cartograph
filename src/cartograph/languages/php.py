@@ -160,7 +160,7 @@ class PhpEngine(LanguageEngine):
     aliases = []
     validation_version = 1
     file_ext = "php"
-    supported = False
+    supported = True
 
     toolchain = {
         "php": "Install PHP 8.1+ - php.net/downloads",
@@ -439,22 +439,35 @@ class PhpEngine(LanguageEngine):
             return self._fail(
                 "No PHP coverage driver found. Install Xdebug or PCOV to enable "
                 "coverage enforcement.\n"
-                "  Xdebug: pecl install xdebug  (or via your distro's package manager)\n"
+                "  Xdebug: sudo dnf install php-pecl-xdebug3\n"
                 "  PCOV:   pecl install pcov"
             )
 
-        cmd = [
-            "php",
-            f"--define=pcov.enabled={'1' if has_pcov else '0'}",
-            "vendor/bin/phpunit",
-            "--coverage-text",
-            f"--coverage-filter=src",
-            f"--min-coverage={_COVERAGE_THRESHOLD}",
-        ]
+        # PHPUnit 11 dropped --min-coverage; set XDEBUG_MODE=coverage and
+        # parse the text report ourselves to enforce the threshold.
+        env = os.environ.copy()
+        php_extra = []
+        if has_xdebug:
+            env["XDEBUG_MODE"] = "coverage"
+        else:
+            php_extra = ["-d", "pcov.enabled=1"]
 
-        res = self._run(cmd, cwd=path, timeout=120)
+        cmd = ["php"] + php_extra + ["vendor/bin/phpunit", "--coverage-text"]
+        res = self._run(cmd, cwd=path, timeout=120, env=env)
+
+        output = (res.stdout or "") + (res.stderr or "")
         if res.returncode != 0:
-            return self._fail(res.stdout + res.stderr)
+            return self._fail(output)
+
+        # Parse "Lines:  XX.XX% (N/M)" from the summary block
+        m = re.search(r"Lines:\s+([\d.]+)%", output)
+        if m:
+            coverage = float(m.group(1))
+            if coverage < _COVERAGE_THRESHOLD:
+                return self._fail(
+                    f"Coverage {coverage:.1f}% is below the required "
+                    f"{_COVERAGE_THRESHOLD}%.\n\n{output[-2000:]}"
+                )
         return self._ok()
 
     # ── Example ───────────────────────────────────────────────────────────────
