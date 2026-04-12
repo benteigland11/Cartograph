@@ -35,6 +35,7 @@ _LANGUAGE_RULES = {
     "typescript": ("rules.js",  ["node"]),
     "nim":        ("rules.nim", ["nim", "r", "--hints:off"]),
     "angular":    ("rules.js",  ["node"]),
+    "php":        ("rules.php", ["php"]),
 }
 
 
@@ -502,12 +503,112 @@ proc validate(widgetPath: string): JsonNode =
 echo $validate(paramStr(1))
 """
 
+_TEMPLATE_PHP = """\
+<?php
+/**
+ * Custom validation rules for PHP widgets.
+ *
+ * HOW THIS WORKS
+ * --------------
+ * This file runs automatically during `cartograph validate` (and therefore
+ * `cartograph checkin`). Cartograph calls it with the widget directory as
+ * the first argument. Your job is to inspect the widget and report problems.
+ *
+ * Print a JSON object to stdout with two keys:
+ *
+ *     {"blocks": [...], "warnings": [...]}
+ *
+ *   blocks    - hard failures. Checkin is rejected, no override possible.
+ *               Use for things that must never ship (banned patterns, etc).
+ *   warnings  - soft issues. Checkin pauses, but the user can override with
+ *               --override-warnings --override-reason "why it's ok".
+ *               Use for things that are usually wrong but sometimes intentional.
+ *
+ * Empty arrays (or no output at all) means all checks passed.
+ *
+ * WHAT YOU HAVE ACCESS TO
+ * -----------------------
+ * The $widgetPath argument points to a standard widget directory:
+ *
+ *     widgetPath/
+ *       widget.json       metadata (id, name, domain, version, dependencies)
+ *       src/              source code
+ *       tests/            test files
+ *       examples/         example usage files
+ *
+ * Use standard PHP functions (file_get_contents, glob, json_decode) to
+ * inspect files. This is just a PHP script - no special APIs needed.
+ *
+ * RUNNING EXTRA TESTS
+ * -------------------
+ * Cartograph runs your widget's tests via vendor/bin/phpunit. If you want
+ * to run additional PHPUnit suites or enforce custom test patterns, call
+ * phpunit from here:
+ *
+ *   $res = shell_exec("php vendor/bin/phpunit --testsuite custom 2>&1");
+ *   if ($res === null || str_contains($res, 'FAILURES')) {
+ *       $blocks[] = "Custom test suite failed";
+ *   }
+ */
+
+$widgetPath = $argv[1] ?? '.';
+$blocks = [];
+$warnings = [];
+
+$srcDir      = $widgetPath . '/src';
+$testDir     = $widgetPath . '/tests';
+$examplesDir = $widgetPath . '/examples';
+
+// --- Your checks go here ---
+//
+// The pattern is simple: check a condition, add a message.
+//
+//   if (somethingIsWrong) {
+//       $blocks[] = "what's wrong and where";     // hard fail
+//   }
+//
+//   if (somethingIsSuspicious) {
+//       $warnings[] = "what looks off";           // soft, overridable
+//   }
+//
+// Examples (uncomment to use):
+
+// Block: ban specific function calls in source code
+// $phpFiles = glob($srcDir . '/*.php') ?: [];
+// foreach ($phpFiles as $file) {
+//     $content = file_get_contents($file);
+//     foreach (['exec(', 'shell_exec(', 'system('] as $banned) {
+//         if (str_contains($content, $banned)) {
+//             $blocks[] = basename($file) . " uses banned function: $banned";
+//         }
+//     }
+// }
+
+// Warning: source files over 200 lines
+// $phpFiles = glob($srcDir . '/*.php') ?: [];
+// foreach ($phpFiles as $file) {
+//     $count = count(file($file));
+//     if ($count > 200) {
+//         $warnings[] = basename($file) . " is $count lines (max 200)";
+//     }
+// }
+
+// Warning: fewer than 2 test files
+// $testFiles = glob($testDir . '/*Test.php') ?: [];
+// if (count($testFiles) < 2) {
+//     $warnings[] = "Only " . count($testFiles) . " test file(s) - consider more coverage";
+// }
+
+echo json_encode(['blocks' => $blocks, 'warnings' => $warnings]);
+"""
+
 _TEMPLATES = {
     "python": _TEMPLATE_PYTHON,
     "javascript": _TEMPLATE_JAVASCRIPT,
     "typescript": _TEMPLATE_JAVASCRIPT,
     "angular": _TEMPLATE_JAVASCRIPT,
     "nim": _TEMPLATE_NIM,
+    "php": _TEMPLATE_PHP,
 }
 
 

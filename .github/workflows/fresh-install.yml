@@ -75,5 +75,24 @@ jobs:
           test -d "$WIDGET_DIR/src"
           test -d "$WIDGET_DIR/tests"
 
+      - name: Install PHP and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pcov
+          tools: composer
+
+      - name: cartograph create (php)
+        run: cartograph create backend-ci-test-php --language php --domain backend --name "CI PHP Test"
+
+      - name: Verify php widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "composer.json" -printf "%h" -quit)
+          echo "PHP widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/composer.json"
+          test -f "$WIDGET_DIR/phpunit.xml"
+          test -d "$WIDGET_DIR/src"
+          test -d "$WIDGET_DIR/tests"
+
       - name: cartograph stats
         run: cartograph stats

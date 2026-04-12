@@ -194,7 +194,7 @@ def cmd_inspect(args):
             err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
         owner, wid = parts
         from .cloud import inspect as cloud_inspect
-        result = cloud_inspect(owner, wid)
+        result = cloud_inspect(owner, wid, source=args.source)
         if "error" in result:
             err(result)
         out(result)
@@ -1114,7 +1114,7 @@ def cmd_doctor(args):
 
     # --- Language engines (auto-discovered) ---
     from .languages.registry import _ENGINES
-    _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3, "openscad": 4, "angular": 5}
+    _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3, "openscad": 4, "angular": 5, "php": 6}
     lang_checks = []
     for lang_name, engine in sorted(_ENGINES.items(), key=lambda x: _lang_order.get(x[0], 99)):
         available, message = engine.check_available()
