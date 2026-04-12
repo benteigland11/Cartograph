@@ -218,7 +218,7 @@ class AngularEngine(LanguageEngine):
     aliases = ["ang", "ng"]
     validation_version = 2
     file_ext = "ts"
-    supported = False
+    supported = True
     toolchain = {
         "ng": "Install Angular CLI globally - npm install -g @angular/cli",
         "node": "Install Node.js 18+ - nodejs.org",
