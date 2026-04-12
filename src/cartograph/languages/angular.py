@@ -216,7 +216,7 @@ def _write(path: str, content: str) -> None:
 class AngularEngine(LanguageEngine):
     name = "angular"
     aliases = ["ang", "ng"]
-    validation_version = 2
+    validation_version = 1
     file_ext = "ts"
     supported = True
     toolchain = {
