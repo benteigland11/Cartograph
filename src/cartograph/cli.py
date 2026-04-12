@@ -1009,17 +1009,15 @@ def cmd_rules(args):
     rules = find_rules()
     print()
     print("  Rules run automatically during `cartograph validate` and `cartograph checkin`.")
-    print("  Open any file below in your editor to add custom checks.")
     print()
     if rules:
         for r in rules:
             print(f"  {r['language']:<14} {r['scope']:<10} {r['path']}")
         print()
-        print("  Add project-level rules (checked in with your project):")
-        print("    cartograph rules init --language <lang>")
+        print("  Global rules: open any path above in your editor to add or modify checks.")
         print()
-        print("  Add global rules (apply to all projects on this machine):")
-        print("    cartograph rules init --language <lang> --global")
+        print("  Project rules (per-repo, checked in with your project):")
+        print("    cartograph rules init --language <lang>")
     else:
         print("  No custom rules found.")
         print()
@@ -2026,16 +2024,30 @@ def _build_cli() -> AgentCLI:
         },
         {
             "name": "rules",
-            "help": "List or initialize custom validation rules",
+            "help": "List and manage custom validation rules",
+            "description": (
+                "Custom rules are scripts that run automatically during `cartograph validate`\n"
+                "and `cartograph checkin`. They let you enforce team conventions on top of\n"
+                "Cartograph's built-in quality bar (coverage, contamination, etc).\n\n"
+                "Global rules apply to all projects on this machine and are created\n"
+                "automatically at first run - just open the file and add checks.\n\n"
+                "Project rules live in .cartograph/rules/ and are checked into your repo,\n"
+                "so they apply to everyone who uses the project. Create them with:\n"
+                "  cartograph rules init --language python\n\n"
+                "Actions:\n"
+                "  (none)   List all active rules files with their paths\n"
+                "  init     Create a project-level rules file from a template\n"
+                "  reset    Restore a rules file to its default template (clears edits)"
+            ),
             "handler": cmd_rules,
             "args": [
                 {"name": "action", "nargs": "?", "default": None,
-                 "help": "'init' to create, 'reset' to restore default template, omit to list"},
+                 "help": "init | reset (omit to list)"},
                 {"name": "--language", "default": None,
-                 "help": "Language for the rules file"},
+                 "help": "Language for the rules file (e.g. python, javascript, css)"},
                 {"name": "--global", "action": "store_const", "const": "global",
                  "default": "project", "dest": "scope",
-                 "help": "Create as a global rules file"},
+                 "help": "Target the global rules file instead of the project one"},
             ],
         },
         {

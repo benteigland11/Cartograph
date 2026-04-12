@@ -112,7 +112,12 @@ class AgentCLI:
                 handler = cmd.get("handler")
 
                 if len(parts) == 1:
-                    p = sub.add_parser(name, help=cmd.get("help", ""))
+                    p = sub.add_parser(
+                        name,
+                        help=cmd.get("help", ""),
+                        description=cmd.get("description") or cmd.get("help", ""),
+                        formatter_class=argparse.RawDescriptionHelpFormatter,
+                    )
                 else:
                     # Walk the parent chain, creating subparsers at each level
                     current_sub = sub
@@ -127,7 +132,12 @@ class AgentCLI:
                             parent_sub = parent_parser.add_subparsers(dest=dest)
                             self._nested_parsers[key] = (parent_parser, parent_sub)
                         _, current_sub = self._nested_parsers[key]
-                    p = current_sub.add_parser(parts[-1], help=cmd.get("help", ""))
+                    p = current_sub.add_parser(
+                        parts[-1],
+                        help=cmd.get("help", ""),
+                        description=cmd.get("description") or cmd.get("help", ""),
+                        formatter_class=argparse.RawDescriptionHelpFormatter,
+                    )
 
                 for arg_spec in cmd.get("args", []):
                     self._add_arg(p, arg_spec)
