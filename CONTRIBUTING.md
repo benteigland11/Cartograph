@@ -70,6 +70,8 @@ If a language requires additional files at the widget root (like `.nimble` for N
 
 **Angular-specific notes:** Angular widgets are library projects (not app projects). The scaffold creates `angular.json`, `karma.conf.js`, `tsconfig.lib.json`, `tsconfig.spec.json`, and `ng-package.json` in addition to the standard files. Test files are named `test_<module>.component.ts` (Jasmine specs). Example validation runs `ng build` (build artifact, not script execution) - document this deviation explicitly. Coverage enforcement is via `karma.conf.js` `check.global` thresholds at 80%, not CLI flags. Chrome or Chromium must be installed for `ng test` to run in CI.
 
+**PHP-specific notes:** PHP widgets use Composer (PSR-4 autoloading, `Cartograph\<ModuleName>` namespace) and PHPUnit 11. Coverage requires Xdebug or PCOV to be installed as a PHP extension - the engine surfaces this in `cartograph doctor` as an optional check. The contamination scanner blocks WordPress globals (`wp_*`, `add_action`, `add_filter`, `$wpdb`, `$wp_query`, etc.) everywhere in src/ to enforce pure PHP utility widgets with no framework coupling. `echo` in src/ is blocked the same way Python's `print()` is. Example files may use `echo` freely. Dependency format in widget.json follows Composer's `vendor/package>=semver` convention; the vendor prefix (e.g. `guzzlehttp`) is used to match against `use` statements' namespace roots.
+
 A language engine must:
 - Run tests and report pass/fail
 - Measure code coverage (if possible to measure, it should be measured and sit at 80%)

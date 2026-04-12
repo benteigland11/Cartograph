@@ -238,11 +238,13 @@ class PhpEngine(LanguageEngine):
     # ── Contamination ─────────────────────────────────────────────────────────
 
     # WordPress globals that make code untestable outside WP environment.
+    # Two parts: word-char function names need \b; $-prefixed variables don't
+    # ($ is not a word char so \b before $ never fires)
     _WP_GLOBALS_RE = re.compile(
-        r'\b(wp_[a-zA-Z_]+|add_action|add_filter|do_action|apply_filters'
+        r'(?:\b(?:wp_[a-zA-Z_]+|add_action|add_filter|do_action|apply_filters'
         r'|register_post_type|register_taxonomy|get_option|update_option'
-        r'|delete_option|get_post|get_posts|get_the_ID|the_content'
-        r'|\$wpdb|\$wp_query|\$post\b|\$current_user)\b'
+        r'|delete_option|get_post|get_posts|get_the_ID|the_content)\b'
+        r'|(?:\$wpdb|\$wp_query|\$post|\$current_user)\b)'
     )
     _ABS_PATH_RE = re.compile(
         r'["\'](?:/home/|/Users/|/root/|[A-Za-z]:[/\\\\])[^"\']{3,}["\']'

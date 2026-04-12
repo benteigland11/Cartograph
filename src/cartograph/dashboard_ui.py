@@ -225,6 +225,7 @@ _HTML = r"""<!DOCTYPE html>
   .lang-text-typescript { color: #2b7489; }
   .lang-text-nim        { color: #e85d00; }
   .lang-text-angular    { color: #dd0031; }
+  .lang-text-php        { color: #8892bf; }
   .widget-owner { font-size: 13px; color: var(--muted); }
   .widget-version { font-size: 12px; color: var(--muted); background: var(--surface2); padding: 1px 6px; border-radius: 4px; }
   .widget-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; max-width: 700px; }
@@ -236,6 +237,7 @@ _HTML = r"""<!DOCTYPE html>
   .lang-typescript { background: #2b7489; }
   .lang-nim        { background: #e85d00; }
   .lang-angular    { background: #dd0031; }
+  .lang-php        { background: #8892bf; }
   .lang-unknown    { background: var(--muted); }
 
   .domain-tag {
@@ -562,6 +564,7 @@ function langClass(lang) {
   if (l === 'typescript' || l === 'ts') return 'lang-typescript';
   if (l === 'nim') return 'lang-nim';
   if (l === 'angular' || l === 'ang' || l === 'ng') return 'lang-angular';
+  if (l === 'php') return 'lang-php';
   return 'lang-unknown';
 }
 
