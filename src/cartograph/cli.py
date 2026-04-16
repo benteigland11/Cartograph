@@ -101,6 +101,39 @@ def _preflight_from_path(path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Registry widget ID parsing
+# ---------------------------------------------------------------------------
+
+def _parse_registry_id(widget_id):
+    """Parse @owner/prefix-widget-name into (owner, registry_url, bare_id).
+
+    Returns (owner, registry_url, bare_id) on success, or raises SystemExit
+    with an error if the format is invalid. registry_url is None for the
+    public registry (callers pass None to cloud functions to use the default).
+    """
+    from .config import get_registries, _PUBLIC_REGISTRY_PREFIX, _PUBLIC_REGISTRY_URL
+
+    if not widget_id.startswith("@"):
+        return None
+
+    parts = widget_id[1:].split("/", 1)
+    if len(parts) != 2:
+        err({"error": f"Invalid format: '{widget_id}'. Use @owner/prefix-widget-name."})
+
+    owner, prefixed_id = parts
+    all_prefixes = [(_PUBLIC_REGISTRY_PREFIX, None)] + \
+                   [(r["prefix"], r["url"]) for r in get_registries()]
+
+    for prefix, url in all_prefixes:
+        if prefixed_id.startswith(prefix + "-"):
+            bare_id = prefixed_id[len(prefix) + 1:]
+            return owner, url, bare_id
+
+    # Unknown prefix - pass through as-is to public registry
+    return owner, None, prefixed_id
+
+
+# ---------------------------------------------------------------------------
 # Command handlers
 # ---------------------------------------------------------------------------
 
@@ -247,14 +280,12 @@ def cmd_search(args):
 def cmd_inspect(args):
     widget_id = args.widget_id
 
-    # Cloud widget: @handle/widget_id
+    # Cloud widget: @owner/prefix-widget-name
     if widget_id.startswith("@"):
-        parts = widget_id[1:].split("/", 1)
-        if len(parts) != 2:
-            err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
-        owner, wid = parts
+        parsed = _parse_registry_id(widget_id)
+        owner, registry_url, bare_id = parsed
         from .cloud import inspect as cloud_inspect
-        result = cloud_inspect(owner, wid, source=args.source)
+        result = cloud_inspect(owner, bare_id, source=args.source, registry_url=registry_url)
         if "error" in result:
             err(result)
         out(result)
