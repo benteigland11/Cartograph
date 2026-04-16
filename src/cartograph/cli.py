@@ -183,8 +183,23 @@ def cmd_search(args):
         if existing is None or w.get("relevance_score", 0) > existing.get("relevance_score", 0):
             seen_registry[key] = w
 
-    # All registry base_ids (any prefix) suppress the same local widget
-    registry_base_ids = {_base_id(w) for w in seen_registry.values()}
+    # Only suppress a local widget if the cloud version belongs to the current user.
+    # Someone else's same-named widget in a registry should not hide your local copy.
+    try:
+        from .cloud import whoami as _whoami
+        _profile = _whoami()
+        _me = _profile.get("owner", "") or _profile.get("username", "")
+    except Exception:
+        _me = ""
+
+    registry_base_ids = set()
+    for w in seen_registry.values():
+        wid = w.get("id", "")
+        if "/" in wid:
+            owner = wid.split("/", 1)[0].lstrip("@")
+            if _me and owner == _me:
+                registry_base_ids.add(_base_id(w))
+        # no owner info or not your widget → don't suppress local
 
     # Local: keep only widgets not present in any registry
     seen_local = {}
