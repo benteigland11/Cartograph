@@ -908,6 +908,101 @@ def cmd_rate(args):
     out(result)
 
 
+def cmd_cloud_adopt(args):
+    """Link a local widget to its cloud counterpart by verifying src identity."""
+    from . import cloud, auth
+    if not auth.is_authenticated():
+        err({"error": "Not authenticated. Run: cartograph login"})
+
+    local_id = args.local_id
+    cloud_ref = args.cloud_id  # @owner/prefix-widget-name
+
+    # Resolve local widget in library
+    carto = _carto()
+    widget = next((w for w in carto.widgets if w["id"] == local_id), None)
+    if not widget:
+        err({"error": f"Local widget '{local_id}' not found in library."})
+
+    # Parse cloud reference
+    parsed = _parse_registry_id(cloud_ref)
+    if parsed is None:
+        err({"error": f"Invalid cloud id '{cloud_ref}'. Use @owner/prefix-widget-name."})
+    owner, registry_url, bare_id = parsed
+
+    # Fetch cloud widget with source
+    print(f"  Fetching cloud widget {cloud_ref}...")
+    cloud_widget = cloud.inspect(owner, bare_id, source=True, registry_url=registry_url)
+    if "error" in cloud_widget:
+        err(cloud_widget)
+
+    # Write cloud source to temp dir and hash it the same way as local
+    import hashlib
+    import tempfile
+
+    cloud_files = cloud_widget.get("source_files", {})
+    if not cloud_files:
+        err({"error": "Cloud widget returned no source files. Cannot verify identity."})
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for rel_path, content in cloud_files.items():
+            dest = os.path.join(tmp, rel_path)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            mode = "wb" if isinstance(content, bytes) else "w"
+            with open(dest, mode) as f:
+                f.write(content)
+
+        cloud_hash = carto._calculate_implementation_hash(tmp)
+
+    local_hash = carto._calculate_implementation_hash(widget["path"])
+
+    if cloud_hash != local_hash:
+        # Report which files differ
+        local_src = set()
+        for subdir in ("src", "tests", "examples"):
+            p = os.path.join(widget["path"], subdir)
+            if os.path.exists(p):
+                for root, _, files in os.walk(p):
+                    for f in files:
+                        rel = os.path.relpath(os.path.join(root, f), widget["path"])
+                        local_src.add(rel)
+        cloud_src = set(cloud_files.keys())
+        only_local = local_src - cloud_src
+        only_cloud = cloud_src - local_src
+
+        msg = ["Source files do not match - cannot adopt."]
+        if only_local:
+            msg.append(f"  Only local: {sorted(only_local)}")
+        if only_cloud:
+            msg.append(f"  Only cloud: {sorted(only_cloud)}")
+        if not only_local and not only_cloud:
+            msg.append("  Files are the same but content differs.")
+
+        local_ver = widget.get("version", "?")
+        cloud_ver = cloud_widget.get("version", "?")
+        if local_ver != cloud_ver:
+            msg.append(f"  Local v{local_ver} vs cloud v{cloud_ver}.")
+            if local_ver > cloud_ver:
+                msg.append("  Local is ahead - run: cartograph checkin --publish")
+            else:
+                msg.append("  Cloud is ahead - install the cloud version to get the latest.")
+
+        err({"error": "\n".join(msg)})
+
+    # Hashes match - write sidecar
+    from .config import _PUBLIC_REGISTRY_URL
+    sidecar = {
+        "owner": owner,
+        "registry_url": registry_url or _PUBLIC_REGISTRY_URL,
+    }
+    sidecar_path = os.path.join(widget["path"], ".cartograph_source")
+    with open(sidecar_path, "w") as f:
+        json.dump(sidecar, f)
+
+    cloud_ver = cloud_widget.get("version", "?")
+    print(f"\n  Adopted: {local_id} linked to {cloud_ref} v{cloud_ver}")
+    print(f"  Future checkin --publish will route to {sidecar['registry_url']}\n")
+
+
 def cmd_cloud_unpublish(args):
     """Remove a widget from the cloud registry (keeps local copy)."""
     from . import cloud, auth
@@ -2214,6 +2309,23 @@ def _build_cli() -> AgentCLI:
                  "help": "Override default governance model"},
                 {"name": "--override-warnings", "action": "store_true", "default": False, "dest": "override_warnings"},
                 {"name": "--override-reason", "default": None, "dest": "override_reason"},
+            ],
+        },
+        {
+            "name": "cloud adopt",
+            "help": "Link a local widget to its cloud counterpart",
+            "description": (
+                "Verifies that a local library widget and a cloud widget have identical\n"
+                "source files, then writes a .cartograph_source sidecar so future\n"
+                "checkin --publish routes to the correct registry and owner.\n\n"
+                "Useful when migrating an existing project to multi-registry, or when\n"
+                "a widget was created locally and published separately.\n\n"
+                "Example: cartograph cloud adopt backend-retry-python @benteigland11/cg-backend-retry-python"
+            ),
+            "handler": cmd_cloud_adopt,
+            "args": [
+                {"name": "local_id", "help": "Local library widget id (e.g. backend-retry-python)"},
+                {"name": "cloud_id", "help": "Cloud widget reference (e.g. @owner/cg-widget-name)"},
             ],
         },
         {
