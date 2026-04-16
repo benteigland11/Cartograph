@@ -191,8 +191,12 @@ def install(carto, widget_id, target_dir, version=None,
             except Exception:
                 pass  # no sidecar or mismatch - fall through to cloud
 
-        return _install_from_cloud(bare_id, dest_path, registry_url=registry_url,
-                                   owner_hint=owner_hint)
+        result = _install_from_cloud(bare_id, dest_path, registry_url=registry_url,
+                                    owner_hint=owner_hint)
+        # Report back the prefixed widget_id (cg-widget-name), not the bare id
+        if result.get("status") == "success":
+            result["widget_id"] = widget_id
+        return result
 
     # No prefix: try local library first
     widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
