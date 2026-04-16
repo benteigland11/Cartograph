@@ -852,16 +852,14 @@ def cmd_cloud_publish(args):
 def cmd_rate(args):
     widget_id = args.widget_id
 
-    # Cloud widget (@handle/widget_id)
+    # Cloud widget (@owner/prefix-widget-name)
     if widget_id.startswith("@"):
         from . import cloud, auth
         if not auth.is_authenticated():
             err({"error": "Not authenticated. Run: cartograph login"})
-        parts = widget_id[1:].split("/", 1)
-        if len(parts) != 2:
-            err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
-        owner, wid = parts
-        result = cloud.rate_widget(owner, wid, args.score, args.comment)
+        owner, registry_url, bare_id = _parse_registry_id(widget_id)
+        result = cloud.rate_widget(owner, bare_id, args.score, args.comment,
+                                   registry_url=registry_url)
         if "error" in result:
             err(result)
         print(f"\n  Rated {widget_id}: {args.score}/5\n")

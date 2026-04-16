@@ -65,10 +65,11 @@ def _get(path: str, registry_url: str | None = None) -> dict:
         return {"error": str(e)}
 
 
-def _post(path: str, data: dict) -> dict:
-    url = _registry_url() + path
+def _post(path: str, data: dict, registry_url: str | None = None) -> dict:
+    base = registry_url.rstrip("/") if registry_url else _registry_url()
+    url = base + path
     payload = json.dumps(data).encode()
-    req = urllib.request.Request(url, data=payload, headers=_headers(), method="POST")
+    req = urllib.request.Request(url, data=payload, headers=_headers(registry_url), method="POST")
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             return json.loads(resp.read())
@@ -83,10 +84,11 @@ def _post(path: str, data: dict) -> dict:
         return {"error": str(e)}
 
 
-def _patch(path: str, data: dict) -> dict:
-    url = _registry_url() + path
+def _patch(path: str, data: dict, registry_url: str | None = None) -> dict:
+    base = registry_url.rstrip("/") if registry_url else _registry_url()
+    url = base + path
     payload = json.dumps(data).encode()
-    req = urllib.request.Request(url, data=payload, headers=_headers(), method="PATCH")
+    req = urllib.request.Request(url, data=payload, headers=_headers(registry_url), method="PATCH")
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             return json.loads(resp.read())
@@ -393,12 +395,14 @@ def get_reviews(owner_handle: str, widget_id: str) -> dict:
     return result
 
 
-def rate_widget(owner_handle: str, widget_id: str, score: int, comment: str = "") -> dict:
+def rate_widget(owner_handle: str, widget_id: str, score: int, comment: str = "",
+                registry_url: str | None = None) -> dict:
     """Rate a cloud widget."""
     params = f"?score={score}"
     if comment:
         params += f"&comment={urllib.parse.quote(comment)}"
-    return _post(f"/v1/widgets/{urllib.parse.quote(owner_handle)}/{urllib.parse.quote(widget_id)}/rate{params}", {})
+    return _post(f"/v1/widgets/{urllib.parse.quote(owner_handle)}/{urllib.parse.quote(widget_id)}/rate{params}",
+                 {}, registry_url=registry_url)
 
 
 def get_versions(owner_handle: str, widget_id: str) -> dict:
