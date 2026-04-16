@@ -934,43 +934,53 @@ def cmd_cloud_adopt(args):
         err({"error": f"Invalid cloud id '{cloud_ref}'. Use @owner/prefix-widget-name."})
     owner, registry_url, bare_id = parsed
 
-    # Fetch cloud widget with source
+    # Fetch cloud widget with source files for identity verification
+    import tempfile
+
     print(f"  Fetching cloud widget {cloud_ref}...")
     cloud_widget = cloud.inspect(owner, bare_id, source=True, registry_url=registry_url)
     if "error" in cloud_widget:
         err(cloud_widget)
 
-    # Write cloud source to temp dir and hash it the same way as local
-    import hashlib
-    import tempfile
-
-    cloud_files = cloud_widget.get("source_files", {})
+    # Server returns source files under "source" key (dict of rel_path -> content)
+    cloud_files = cloud_widget.get("source") or cloud_widget.get("source_files", {})
     if not cloud_files:
         err({"error": "Cloud widget returned no source files. Cannot verify identity."})
 
-    with tempfile.TemporaryDirectory() as tmp:
-        for rel_path, content in cloud_files.items():
-            dest = os.path.join(tmp, rel_path)
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            mode = "wb" if isinstance(content, bytes) else "w"
-            with open(dest, mode) as f:
-                f.write(content)
+    def _src_hash(base_path, files_dict=None):
+        """Hash only src/ files. files_dict = {rel_path: content} for cloud, None for local."""
+        import hashlib
+        hasher = hashlib.md5()
+        if files_dict is not None:
+            for rel_path in sorted(files_dict.keys()):
+                if rel_path.startswith("src/") or rel_path.startswith("src" + os.sep):
+                    content = files_dict[rel_path]
+                    data = content.encode() if isinstance(content, str) else content
+                    hasher.update(data)
+        else:
+            src_path = os.path.join(base_path, "src")
+            if os.path.exists(src_path):
+                for root, dirs, files in os.walk(src_path):
+                    dirs[:] = [d for d in dirs if d != "__pycache__"]
+                    for name in sorted(files):
+                        if name.endswith(".pyc"):
+                            continue
+                        with open(os.path.join(root, name), "rb") as f:
+                            hasher.update(f.read())
+        return hasher.hexdigest()
 
-        cloud_hash = carto._calculate_implementation_hash(tmp)
-
-    local_hash = carto._calculate_implementation_hash(widget["path"])
+    cloud_hash = _src_hash(None, cloud_files)
+    local_hash = _src_hash(widget["path"])
 
     if cloud_hash != local_hash:
-        # Report which files differ
+        # Report which src/ files differ
         local_src = set()
-        for subdir in ("src", "tests", "examples"):
-            p = os.path.join(widget["path"], subdir)
-            if os.path.exists(p):
-                for root, _, files in os.walk(p):
-                    for f in files:
-                        rel = os.path.relpath(os.path.join(root, f), widget["path"])
-                        local_src.add(rel)
-        cloud_src = set(cloud_files.keys())
+        p = os.path.join(widget["path"], "src")
+        if os.path.exists(p):
+            for root, _, files in os.walk(p):
+                for f in files:
+                    local_src.add(os.path.relpath(os.path.join(root, f), widget["path"]))
+        cloud_src = {k for k in cloud_files.keys() if k.startswith("src/")}
         only_local = local_src - cloud_src
         only_cloud = cloud_src - local_src
 
