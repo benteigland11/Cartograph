@@ -488,6 +488,19 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
         print(f"  → Push failed: {push_result['error']}")
     else:
         print(f"  → Pushed: {push_result.get('namespaced_id', widget_id)} v{push_result.get('version', '?')}")
+        # Write sidecar so future checkin --publish routes to this registry
+        # without having to re-infer from config.
+        try:
+            from .config import _PUBLIC_REGISTRY_URL
+            current_user = cloud.whoami().get("owner", "")
+            sidecar = {
+                "owner": current_user,
+                "registry_url": registry_url or _PUBLIC_REGISTRY_URL,
+            }
+            with open(os.path.join(widget_path, ".cartograph_source"), "w") as _f:
+                json.dump(sidecar, _f)
+        except Exception:
+            pass  # sidecar is best-effort; push already succeeded
 
 
 def _auto_push_if_published(checkin_result: dict, install_path: str | None = None) -> None:
