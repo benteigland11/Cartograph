@@ -995,6 +995,19 @@ def cmd_cloud_adopt(args):
         "registry_url": registry_url or _PUBLIC_REGISTRY_URL,
     }
     sidecar_path = os.path.join(widget["path"], ".cartograph_source")
+    if os.path.exists(sidecar_path) and not args.force:
+        try:
+            with open(sidecar_path) as f:
+                existing = json.load(f)
+            err({
+                "error": (
+                    f"'{local_id}' already has a sidecar pointing to "
+                    f"@{existing.get('owner', '?')} at {existing.get('registry_url', '?')}. "
+                    f"Pass --force to overwrite."
+                )
+            })
+        except Exception:
+            pass  # unreadable sidecar - overwrite it
     with open(sidecar_path, "w") as f:
         json.dump(sidecar, f)
 
@@ -2329,6 +2342,8 @@ def _build_cli() -> AgentCLI:
             "args": [
                 {"name": "local_id", "help": "Local library widget id (e.g. backend-retry-python)"},
                 {"name": "cloud_id", "help": "Cloud widget reference (e.g. @owner/cg-widget-name)"},
+                {"name": "--force", "action": "store_true", "default": False,
+                 "help": "Overwrite existing sidecar if present"},
             ],
         },
         {
