@@ -320,7 +320,8 @@ def download_widget(owner_handle: str, widget_id: str,
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             version = resp.headers.get("X-Widget-Version", "0.0.0")
-            return {"zip_bytes": resp.read(), "version": version}
+            governance = resp.headers.get("X-Widget-Governance")
+            return {"zip_bytes": resp.read(), "version": version, "governance": governance}
     except urllib.error.HTTPError as e:
         body = {}
         try:

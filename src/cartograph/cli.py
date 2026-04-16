@@ -421,34 +421,25 @@ def _read_source_meta(install_path: str) -> dict | None:
         return None
 
 
-def _resolve_publish_registry(install_path: str) -> str | None:
-    """Return the registry URL to publish to, given the widget's install path.
-
-    Derives registry from the install dir's prefix (e.g. cg/myorg-widget/ → myorg
-    registry URL). Falls back to the 'publish-registry' config key, then public.
-    Returns None to indicate public registry (default).
-    """
-    from .config import get_registries, get_registry_url_for_prefix, get_value, _PUBLIC_REGISTRY_PREFIX
-
-    dir_name = os.path.basename(install_path.rstrip(os.sep)).replace("_", "-")
-    for reg in get_registries():
-        prefix = reg["prefix"]
-        if dir_name.startswith(prefix + "-"):
-            return reg["url"]
-    if dir_name.startswith(_PUBLIC_REGISTRY_PREFIX + "-"):
-        return None  # public registry, no override needed
-
-    # No prefix in dir name - check publish-registry config
+def _config_publish_registry_url() -> str | None:
+    """Return the registry URL from the publish-registry config key, or None for public default."""
+    from .config import get_value, get_registry_url_for_prefix
     configured_prefix, _ = get_value("publish-registry")
     if configured_prefix:
         return get_registry_url_for_prefix(configured_prefix)
-
-    return None  # default: public registry
+    return None
 
 
 def _force_push(checkin_result: dict, install_path: str | None = None,
                 reason: str = "") -> None:
-    """Push to cloud, or propose to origin owner if widget was installed from someone else."""
+    """Push to cloud, or propose to origin owner if widget was installed from someone else.
+
+    Registry resolution order:
+      1. Sidecar at install_path (previously established home for own widgets,
+         or origin registry for proposal routing)
+      2. publish-registry config key
+      3. Public registry (default)
+    """
     from . import cloud, auth
     from .config import load_config
     if not auth.is_authenticated():
@@ -476,8 +467,11 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
                 status = propose_result.get("status", "proposed")
                 print(f"  → Proposal {status}: {propose_result.get('proposal_id', '')}")
             return
-
-    registry_url = _resolve_publish_registry(install_path) if install_path else None
+        # Own widget - sidecar has previously established home registry
+        registry_url = source.get("registry_url")
+    else:
+        # No sidecar - fall back to publish-registry config
+        registry_url = _config_publish_registry_url()
     cfg = load_config()
     visibility = cfg["publish"]["visibility"]
     governance = cfg["publish"].get("governance")
@@ -502,8 +496,7 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
         else:
             install_id = namespaced
         print(f"  → Published v{version}  |  install: cartograph install {install_id}")
-        # Write sidecar so future checkin --publish routes to this registry
-        # without having to re-infer from config.
+        # Write sidecar: records home registry, owner, and governance as declared at publish time
         try:
             from .config import _PUBLIC_REGISTRY_URL
             current_user = cloud.whoami().get("owner", "")
@@ -511,6 +504,9 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
                 "owner": current_user,
                 "registry_url": registry_url or _PUBLIC_REGISTRY_URL,
             }
+            published_governance = push_result.get("governance")
+            if published_governance:
+                sidecar["governance"] = published_governance
             with open(os.path.join(widget_path, ".cartograph_source"), "w") as _f:
                 json.dump(sidecar, _f)
         except Exception:
@@ -526,7 +522,9 @@ def _auto_push_if_published(checkin_result: dict, install_path: str | None = Non
     widget_path = checkin_result.get("path", "")
     if not widget_id or not widget_path:
         return
-    registry_url = _resolve_publish_registry(install_path) if install_path else None
+    # Sidecar first, config fallback
+    source = _read_source_meta(install_path) if install_path else None
+    registry_url = source.get("registry_url") if source else _config_publish_registry_url()
     profile = cloud.whoami()
     handle = profile.get("owner", "")
     if not handle:
@@ -869,7 +867,14 @@ def cmd_cloud_publish(args):
     cfg = load_config()
     visibility = args.visibility or cfg["publish"]["visibility"]
     governance = getattr(args, "governance", None) or cfg["publish"]["governance"]
-    result = push(path, widget_id, visibility=visibility, governance=governance)
+
+    # Sidecar first (own widget with established home), then publish-registry config fallback.
+    # To change a widget's home registry: set publish-registry config, then cloud publish once.
+    source = _read_source_meta(path)
+    registry_url = source.get("registry_url") if source else _config_publish_registry_url()
+
+    result = push(path, widget_id, visibility=visibility, governance=governance,
+                  registry_url=registry_url)
     if "error" in result:
         err(result)
 
@@ -1028,7 +1033,12 @@ def cmd_cloud_unpublish(args):
         owner, registry_url, bare_id = parsed
         result = cloud.delete_widget(bare_id, registry_url=registry_url)
     else:
-        result = cloud.delete_widget(args.widget_id)
+        # Bare widget_id - look up sidecar from library, fall back to publish-registry config
+        carto = _carto()
+        widget = next((w for w in carto.widgets if w["id"] == args.widget_id), None)
+        source = _read_source_meta(widget["path"]) if widget else None
+        registry_url = source.get("registry_url") if source else _config_publish_registry_url()
+        result = cloud.delete_widget(args.widget_id, registry_url=registry_url)
     if "error" in result:
         err(result)
     print(f"\n  Unpublished {args.widget_id} from cloud. Local copy unchanged.\n")
@@ -2525,7 +2535,7 @@ def _build_cli() -> AgentCLI:
             "args": [
                 {"name": "--token", "default": None, "help": "API token"},
                 {"name": "--registry", "default": None,
-                 "help": "Registry prefix for company registry login (requires --token)"},
+                 "help": "Store an access token for a private registry (e.g. --registry myorg --token <key>). Does not change your publish identity."},
             ],
         },
         {

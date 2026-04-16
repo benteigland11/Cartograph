@@ -100,17 +100,20 @@ def _install_from_cloud(widget_id, dest_path, registry_url=None, owner_hint=None
     # Extract zip to destination
     zip_bytes = result["zip_bytes"]
     version = result.get("version", "0.0.0")
+    governance = result.get("governance")  # from X-Widget-Governance header, None if server doesn't send it
     try:
         os.makedirs(dest_path, exist_ok=True)
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
             zf.extractall(dest_path)
 
-        # Write sidecar so checkin knows where this came from
+        # Write sidecar: provenance (where/who/terms) for checkin routing
         from .auth import get_registry_url as _public_url
         source_meta = {
             "owner": owner,
             "registry_url": registry_url or _public_url(),
         }
+        if governance:
+            source_meta["governance"] = governance
         with open(os.path.join(dest_path, ".cartograph_source"), "w") as f:
             json.dump(source_meta, f)
 
@@ -144,6 +147,16 @@ def install(carto, widget_id, target_dir, version=None,
         parts = widget_id[1:].split("/", 1)
         if len(parts) == 2:
             owner_hint, widget_id = parts
+            # Require a registry prefix when owner is specified.
+            # @owner/bare-name is ambiguous — no sidecar, no traceability.
+            if _resolve_registry(widget_id) is None:
+                return {
+                    "error": (
+                        f"Registry prefix required when specifying an owner. "
+                        f"Use @{owner_hint}/cg-{widget_id} for the public registry "
+                        f"or @{owner_hint}/<prefix>-{widget_id} for a configured registry."
+                    )
+                }
 
     if not os.path.isabs(target_dir):
         return {"error": f"Target must be an absolute path, got: '{target_dir}'"}
