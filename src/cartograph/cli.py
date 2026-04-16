@@ -1023,7 +1023,12 @@ def cmd_cloud_unpublish(args):
         err({"error": "Not authenticated. Run: cartograph login"})
     if not getattr(args, "confirm", False):
         err({"error": f"This will remove '{args.widget_id}' from the cloud registry. Pass --confirm to proceed."})
-    result = cloud.delete_widget(args.widget_id)
+    parsed = _parse_registry_id(args.widget_id)
+    if parsed:
+        owner, registry_url, bare_id = parsed
+        result = cloud.delete_widget(bare_id, registry_url=registry_url)
+    else:
+        result = cloud.delete_widget(args.widget_id)
     if "error" in result:
         err(result)
     print(f"\n  Unpublished {args.widget_id} from cloud. Local copy unchanged.\n")
@@ -1038,14 +1043,16 @@ def cmd_rollback(args):
     widget_id = args.widget_id
     version = args.version
 
-    # Determine if this is a cloud widget (@handle/id) or local
+    # Determine if this is a cloud widget (@owner/prefix-id) or local
     owner_handle = None
+    registry_url = None
     base_id = widget_id
     if widget_id.startswith("@"):
-        parts = widget_id[1:].split("/", 1)
-        if len(parts) != 2:
-            err({"error": f"Invalid format: '{widget_id}'. Use @handle/widget_id."})
-        owner_handle, base_id = parts
+        parsed = _parse_registry_id(widget_id)
+        if parsed:
+            owner_handle, registry_url, base_id = parsed
+        else:
+            err({"error": f"Invalid format: '{widget_id}'. Use @owner/prefix-widget-id."})
 
     carto = _carto()
 
@@ -1053,7 +1060,7 @@ def cmd_rollback(args):
     if not version:
         if owner_handle:
             # Cloud: list versions from GCS
-            result = cloud.get_versions(owner_handle, base_id)
+            result = cloud.get_versions(owner_handle, base_id, registry_url=registry_url)
             if "error" in result:
                 err(result)
             versions = result.get("versions", [])
@@ -1102,7 +1109,7 @@ def cmd_rollback(args):
 
     # Cloud rollback (if @handle/id or widget is published)
     if owner_handle:
-        result = cloud.rollback_widget(owner_handle, base_id, version)
+        result = cloud.rollback_widget(owner_handle, base_id, version, registry_url=registry_url)
         if "error" in result:
             print(f"  Cloud rollback failed: {result.get('error', 'unknown error')}")
         else:
@@ -1110,11 +1117,22 @@ def cmd_rollback(args):
             nv = result.get('new_version', '?')
             print(f"  ✓ Cloud: restored v{version} as v{nv} (was v{result.get('previous_version', '?')})")
     elif auth.is_authenticated():
-        # Check if widget exists on cloud
-        info = cloud.inspect(cloud.whoami().get("owner", ""), base_id)
+        # Check if widget exists on cloud using sidecar registry if available
+        local_sidecar = {}
+        local_w = next((w for w in carto.widgets if w["id"] == base_id), None)
+        if local_w:
+            try:
+                with open(os.path.join(local_w["path"], ".cartograph_source")) as f:
+                    local_sidecar = json.load(f)
+            except Exception:
+                pass
+        sidecar_owner = local_sidecar.get("owner", "")
+        sidecar_reg = local_sidecar.get("registry_url") or None
+        check_owner = sidecar_owner or cloud.whoami().get("owner", "")
+        info = cloud.inspect(check_owner, base_id, registry_url=sidecar_reg)
         if "error" not in info:
-            owner = info.get("owner", "")
-            result = cloud.rollback_widget(owner, base_id, version)
+            owner = info.get("owner", check_owner)
+            result = cloud.rollback_widget(owner, base_id, version, registry_url=sidecar_reg)
             if "error" in result:
                 print(f"  Cloud rollback failed: {result.get('error', 'unknown error')}")
             else:
@@ -1144,14 +1162,19 @@ def cmd_cloud_settings(args):
     if not auth.is_authenticated():
         err({"error": "Not authenticated. Run: cartograph login"})
 
-    owner, wid = _parse_cloud_id(args.widget_id)
+    parsed = _parse_registry_id(args.widget_id)
+    if parsed:
+        owner, registry_url, wid = parsed
+    else:
+        owner, wid = _parse_cloud_id(args.widget_id)
+        registry_url = None
 
     visibility = getattr(args, "visibility", None)
     governance = getattr(args, "governance", None)
 
     # If no flags, show current settings
     if not governance and not visibility:
-        result = cloud.inspect(owner, wid)
+        result = cloud.inspect(owner, wid, registry_url=registry_url)
         if "error" in result:
             err(result)
         gov = result.get("governance", "-")
@@ -1168,7 +1191,7 @@ def cmd_cloud_settings(args):
     if visibility:
         kwargs["visibility"] = visibility
 
-    result = cloud.update_widget(owner, wid, **kwargs)
+    result = cloud.update_widget(owner, wid, registry_url=registry_url, **kwargs)
     if "error" in result:
         err(result)
 
@@ -1208,21 +1231,26 @@ def cmd_cloud_proposals(args):
         return
 
     # Accept or reject
-    owner, wid = _parse_cloud_id(args.widget_id)
+    parsed = _parse_registry_id(args.widget_id)
+    if parsed:
+        owner, registry_url, wid = parsed
+    else:
+        owner, wid = _parse_cloud_id(args.widget_id)
+        registry_url = None
     if getattr(args, "accept", False):
-        result = cloud.accept_proposal(owner, wid, proposal_id)
+        result = cloud.accept_proposal(owner, wid, proposal_id, registry_url=registry_url)
         if "error" in result:
             err(result)
         print(f"\n  Proposal #{proposal_id} accepted.\n")
     elif getattr(args, "reject", False):
         reason = getattr(args, "reason", "")
-        result = cloud.reject_proposal(owner, wid, proposal_id, reason=reason)
+        result = cloud.reject_proposal(owner, wid, proposal_id, reason=reason, registry_url=registry_url)
         if "error" in result:
             err(result)
         print(f"\n  Proposal #{proposal_id} rejected.\n")
     else:
         # Just viewing a specific proposal
-        result = cloud.list_proposals(owner, wid)
+        result = cloud.list_proposals(owner, wid, registry_url=registry_url)
         if "error" in result:
             err(result)
         proposals = result.get("proposals", [])

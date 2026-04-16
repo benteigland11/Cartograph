@@ -350,17 +350,10 @@ def list_widgets(top_k: int = 500) -> dict:
     return _get(f"/v1/widgets?top_k={top_k}")
 
 
-def list_my_widgets() -> list[dict]:
-    """Return the authenticated user's cloud widgets (public and private), or empty list on failure."""
-    result = _get("/v1/auth/my-widgets")
-    if "error" in result:
-        return []
-    return _validate_widgets(result.get("widgets", []), context="my-widgets")
-
-
-def _delete(path: str) -> dict:
-    url = _registry_url() + path
-    req = urllib.request.Request(url, headers=_headers(), method="DELETE")
+def _delete(path: str, registry_url: str | None = None) -> dict:
+    base = registry_url.rstrip("/") if registry_url else _registry_url()
+    url = base + path
+    req = urllib.request.Request(url, headers=_headers(registry_url), method="DELETE")
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             return json.loads(resp.read())
@@ -375,12 +368,13 @@ def _delete(path: str) -> dict:
         return {"error": str(e)}
 
 
-def delete_widget(widget_id: str) -> dict:
+def delete_widget(widget_id: str, registry_url: str | None = None) -> dict:
     """Delete a widget from the cloud registry."""
-    return _delete(f"/v1/widgets/{urllib.parse.quote(widget_id, safe='')}")
+    return _delete(f"/v1/widgets/{urllib.parse.quote(widget_id, safe='')}", registry_url=registry_url)
 
 
-def get_reviews(owner_handle: str, widget_id: str) -> dict:
+def get_reviews(owner_handle: str, widget_id: str,
+                registry_url: str | None = None) -> dict:
     """Fetch reviews for a cloud widget.
 
     Returns {"reviews": [...], "rating": avg, "review_count": n}
@@ -388,7 +382,8 @@ def get_reviews(owner_handle: str, widget_id: str) -> dict:
     """
     result = _get(
         f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
-        f"/{urllib.parse.quote(widget_id)}/reviews"
+        f"/{urllib.parse.quote(widget_id)}/reviews",
+        registry_url=registry_url,
     )
     if "error" in result:
         return {"reviews": [], "error": result["error"]}
@@ -405,7 +400,8 @@ def rate_widget(owner_handle: str, widget_id: str, score: int, comment: str = ""
                  {}, registry_url=registry_url)
 
 
-def get_versions(owner_handle: str, widget_id: str) -> dict:
+def get_versions(owner_handle: str, widget_id: str,
+                 registry_url: str | None = None) -> dict:
     """List available versions for a cloud widget.
 
     Returns {"versions": [...], "current_version": str}
@@ -413,20 +409,23 @@ def get_versions(owner_handle: str, widget_id: str) -> dict:
     """
     result = _get(
         f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
-        f"/{urllib.parse.quote(widget_id)}/versions"
+        f"/{urllib.parse.quote(widget_id)}/versions",
+        registry_url=registry_url,
     )
     if "error" in result:
         return {"versions": [], "error": result["error"]}
     return result
 
 
-def rollback_widget(owner_handle: str, widget_id: str, version: str) -> dict:
+def rollback_widget(owner_handle: str, widget_id: str, version: str,
+                    registry_url: str | None = None) -> dict:
     """Roll back a cloud widget to a previous version."""
     params = f"?version={urllib.parse.quote(version)}"
     return _post(
         f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
         f"/{urllib.parse.quote(widget_id)}/rollback{params}",
         {},
+        registry_url=registry_url,
     )
 
 
@@ -491,12 +490,14 @@ def login_with_credentials(id_token: str, refresh_token: str,
 # Governance & Proposals
 # ---------------------------------------------------------------------------
 
-def update_widget(owner_handle: str, widget_id: str, **kwargs) -> dict:
+def update_widget(owner_handle: str, widget_id: str,
+                  registry_url: str | None = None, **kwargs) -> dict:
     """PATCH a cloud widget's settings (e.g. governance)."""
     return _patch(
         f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
         f"/{urllib.parse.quote(widget_id)}",
         kwargs,
+        registry_url=registry_url,
     )
 
 
@@ -562,32 +563,44 @@ def propose(widget_path: str, owner_handle: str, widget_id: str,
     )
 
 
-def my_proposals() -> dict:
+def my_proposals(registry_url: str | None = None) -> dict:
     """List the authenticated user's proposals."""
-    return _get("/v1/auth/my-proposals")
+    return _get("/v1/auth/my-proposals", registry_url=registry_url)
 
 
-def list_proposals(owner_handle: str, widget_id: str) -> dict:
+def list_my_widgets(registry_url: str | None = None) -> list[dict]:
+    """Return the authenticated user's cloud widgets (public and private), or empty list on failure."""
+    result = _get("/v1/auth/my-widgets", registry_url=registry_url)
+    if "error" in result:
+        return []
+    return _validate_widgets(result.get("widgets", []), context="my-widgets")
+
+
+def list_proposals(owner_handle: str, widget_id: str,
+                   registry_url: str | None = None) -> dict:
     """List proposals for a widget (owner view)."""
     return _get(
         f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
-        f"/{urllib.parse.quote(widget_id)}/proposals"
+        f"/{urllib.parse.quote(widget_id)}/proposals",
+        registry_url=registry_url,
     )
 
 
 def accept_proposal(owner_handle: str, widget_id: str,
-                    proposal_id: str) -> dict:
+                    proposal_id: str, registry_url: str | None = None) -> dict:
     """Accept a proposal."""
     return _post(
         f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
         f"/{urllib.parse.quote(widget_id)}"
         f"/proposals/{urllib.parse.quote(proposal_id)}/accept",
         {},
+        registry_url=registry_url,
     )
 
 
 def reject_proposal(owner_handle: str, widget_id: str,
-                    proposal_id: str, reason: str = "") -> dict:
+                    proposal_id: str, reason: str = "",
+                    registry_url: str | None = None) -> dict:
     """Reject a proposal."""
     params = f"?reason={urllib.parse.quote(reason)}" if reason else ""
     return _post(
@@ -595,4 +608,5 @@ def reject_proposal(owner_handle: str, widget_id: str,
         f"/{urllib.parse.quote(widget_id)}"
         f"/proposals/{urllib.parse.quote(proposal_id)}/reject{params}",
         {},
+        registry_url=registry_url,
     )
