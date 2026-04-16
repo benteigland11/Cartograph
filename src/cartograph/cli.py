@@ -104,6 +104,43 @@ def _preflight_from_path(path: str) -> None:
 # Command handlers
 # ---------------------------------------------------------------------------
 
+def _search_registries(query, domain_filter, language_filter, top_k):
+    """Search public registry + all configured company registries.
+
+    Returns (all_widgets, errors) where each widget is annotated with
+    'registry_prefix' so callers can construct the correct install command.
+    """
+    from .cloud import search as cloud_search
+    from .config import get_registries, _PUBLIC_REGISTRY_PREFIX
+
+    all_widgets = []
+    errors = {}
+
+    def _fetch(prefix, registry_url):
+        result = cloud_search(query, domain_filter, language_filter,
+                              top_k=top_k, registry_url=registry_url)
+        if result.get("error"):
+            errors[prefix] = result["error"]
+        for w in result.get("widgets", []):
+            # Rewrite id to unambiguous install form: @owner/prefix-widget-name
+            wid = w.get("id", "")
+            if "/" in wid:
+                owner_part, base = wid.split("/", 1)  # "@owner", "widget-name"
+            else:
+                owner_part, base = "", wid
+            w["id"] = f"{owner_part}/{prefix}-{base}" if owner_part else f"{prefix}-{base}"
+        return result.get("widgets", [])
+
+    # Public registry (None = default URL)
+    all_widgets.extend(_fetch(_PUBLIC_REGISTRY_PREFIX, None))
+
+    # Company registries
+    for reg in get_registries():
+        all_widgets.extend(_fetch(reg["prefix"], reg["url"]))
+
+    return all_widgets, errors
+
+
 def cmd_search(args):
     local = _carto().search(
         query=args.query,
@@ -112,67 +149,74 @@ def cmd_search(args):
         top_k=args.top_k,
     )
 
-    # Search cloud if enabled
+    # Search all registries if cloud is enabled
     from .config import cloud_enabled
     if cloud_enabled():
-        from .cloud import search as cloud_search
-        cloud = cloud_search(
-            query=args.query,
-            domain_filter=args.domain,
-            language_filter=args.language,
-            top_k=args.top_k,
+        registry_widgets, registry_errors = _search_registries(
+            args.query, args.domain, args.language, args.top_k
         )
     else:
-        cloud = {"widgets": []}
+        registry_widgets, registry_errors = [], {}
 
-    # Merge: cloud version wins for published widgets, local-only stays local.
-    # Cloud results have id="@handle/widget_id", local have id="widget_id".
-    # Deduplicate on base widget_id (strip @handle/ prefix).
-    local_widgets = local.get("results", [])
-    cloud_widgets = cloud.get("widgets", [])
+    # Cloud results have id="@owner/cg-widget-name", local have id="widget-name".
+    # Strip both @owner/ and any registry prefix to get a bare comparable id.
+    from .config import get_registries, _PUBLIC_REGISTRY_PREFIX
+    _all_prefixes = [_PUBLIC_REGISTRY_PREFIX] + [r["prefix"] for r in get_registries()]
 
     def _base_id(w):
         wid = w.get("id", "")
-        return wid.split("/", 1)[1] if "/" in wid else wid
+        base = wid.split("/", 1)[1] if "/" in wid else wid
+        for pfx in _all_prefixes:
+            if base.startswith(pfx + "-"):
+                return base[len(pfx) + 1:]
+        return base
 
-    cloud_base_ids = {_base_id(w) for w in cloud_widgets}
+    local_widgets = local.get("results", [])
 
-    # Deduplicate: cloud version wins for widgets present in both.
-    seen_cloud = {}
-    for w in cloud_widgets:
-        seen_cloud[_base_id(w)] = w
+    # Dedup registry results: same (registry_prefix, base_id) → highest relevance wins.
+    # Same base_id across DIFFERENT registries stays separate (different install targets).
+    seen_registry = {}
+    for w in registry_widgets:
+        key = (w.get("registry_prefix", ""), _base_id(w))
+        existing = seen_registry.get(key)
+        if existing is None or w.get("relevance_score", 0) > existing.get("relevance_score", 0):
+            seen_registry[key] = w
+
+    # All registry base_ids (any prefix) suppress the same local widget
+    registry_base_ids = {_base_id(w) for w in seen_registry.values()}
+
+    # Local: keep only widgets not present in any registry
     seen_local = {}
     for w in local_widgets:
         bid = _base_id(w)
-        if bid not in seen_cloud:
+        if bid not in registry_base_ids:
             seen_local[bid] = w
 
     local_sorted = sorted(seen_local.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
-    cloud_sorted = sorted(seen_cloud.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
+    # All registry results pooled and sorted by relevance
+    registry_sorted = sorted(seen_registry.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
 
-    # Local fills first (up to all slots it has), cloud gets the remainder.
-    # Cloud is capped at half of top_k to prevent it from burying local results.
-    # If one source is empty, the other fills all slots.
-    _CLOUD_CAP = args.top_k // 2
-    if local_sorted and cloud_sorted:
+    # Local fills first; all registries combined share the remaining half.
+    _REGISTRY_CAP = args.top_k // 2
+    if local_sorted and registry_sorted:
         local_take = min(len(local_sorted), args.top_k)
-        cloud_take = min(len(cloud_sorted), args.top_k - local_take, _CLOUD_CAP)
+        registry_take = min(len(registry_sorted), args.top_k - local_take, _REGISTRY_CAP)
     elif local_sorted:
         local_take = min(len(local_sorted), args.top_k)
-        cloud_take = 0
+        registry_take = 0
     else:
         local_take = 0
-        cloud_take = min(len(cloud_sorted), args.top_k)
+        registry_take = min(len(registry_sorted), args.top_k)
 
-    combined = local_sorted[:local_take] + cloud_sorted[:cloud_take]
+    combined = local_sorted[:local_take] + registry_sorted[:registry_take]
 
     merged = {
         "local_count": local_take,
-        "cloud_count": cloud_take,
+        "registry_count": registry_take,
         "widgets": combined,
     }
-    if cloud.get("error"):
-        merged["cloud_error"] = cloud["error"]
+    if registry_errors:
+        merged["registry_errors"] = registry_errors
 
     if not combined:
         print(f"\n  No widgets found for '{args.query}'.")
@@ -314,8 +358,46 @@ def cmd_validate(args):
     out(result)
 
 
-def _force_push(checkin_result: dict) -> None:
-    """Push to cloud regardless of whether the widget was previously published."""
+def _read_source_meta(install_path: str) -> dict | None:
+    """Read .cartograph_source sidecar if present. Returns {owner, registry_url} or None."""
+    sidecar = os.path.join(install_path, ".cartograph_source")
+    if not os.path.isfile(sidecar):
+        return None
+    try:
+        with open(sidecar) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _resolve_publish_registry(install_path: str) -> str | None:
+    """Return the registry URL to publish to, given the widget's install path.
+
+    Derives registry from the install dir's prefix (e.g. cg/myorg-widget/ → myorg
+    registry URL). Falls back to the 'publish-registry' config key, then public.
+    Returns None to indicate public registry (default).
+    """
+    from .config import get_registries, get_registry_url_for_prefix, get_value, _PUBLIC_REGISTRY_PREFIX
+
+    dir_name = os.path.basename(install_path.rstrip(os.sep)).replace("_", "-")
+    for reg in get_registries():
+        prefix = reg["prefix"]
+        if dir_name.startswith(prefix + "-"):
+            return reg["url"]
+    if dir_name.startswith(_PUBLIC_REGISTRY_PREFIX + "-"):
+        return None  # public registry, no override needed
+
+    # No prefix in dir name - check publish-registry config
+    configured_prefix, _ = get_value("publish-registry")
+    if configured_prefix:
+        return get_registry_url_for_prefix(configured_prefix)
+
+    return None  # default: public registry
+
+
+def _force_push(checkin_result: dict, install_path: str | None = None,
+                reason: str = "") -> None:
+    """Push to cloud, or propose to origin owner if widget was installed from someone else."""
     from . import cloud, auth
     from .config import load_config
     if not auth.is_authenticated():
@@ -325,19 +407,39 @@ def _force_push(checkin_result: dict) -> None:
     widget_path = checkin_result.get("path", "")
     if not widget_id or not widget_path:
         return
+
+    # Check sidecar: if installed from another owner, route as a proposal
+    source = _read_source_meta(install_path) if install_path else None
+    if source:
+        origin_owner = source.get("owner", "")
+        current_user = cloud.whoami().get("owner", "")
+        if origin_owner and current_user and origin_owner != current_user:
+            origin_registry = source.get("registry_url")
+            print(f"  → Widget installed from @{origin_owner} - submitting as proposal...")
+            propose_result = cloud.propose(widget_path, origin_owner, widget_id,
+                                           reason=reason or "Improvement proposal",
+                                           registry_url=origin_registry)
+            if propose_result.get("error"):
+                print(f"  → Proposal failed: {propose_result['error']}")
+            else:
+                status = propose_result.get("status", "proposed")
+                print(f"  → Proposal {status}: {propose_result.get('proposal_id', '')}")
+            return
+
+    registry_url = _resolve_publish_registry(install_path) if install_path else None
     cfg = load_config()
     visibility = cfg["publish"]["visibility"]
     governance = cfg["publish"].get("governance")
     print(f"  → Pushing {widget_id} v{checkin_result.get('version', '?')} to cloud...")
     push_result = cloud.push(widget_path, widget_id, visibility=visibility,
-                             governance=governance)
+                             governance=governance, registry_url=registry_url)
     if push_result.get("error"):
         print(f"  → Push failed: {push_result['error']}")
     else:
         print(f"  → Pushed: {push_result.get('namespaced_id', widget_id)} v{push_result.get('version', '?')}")
 
 
-def _auto_push_if_published(checkin_result: dict) -> None:
+def _auto_push_if_published(checkin_result: dict, install_path: str | None = None) -> None:
     """After a successful checkin update, auto-push if the widget exists on the cloud."""
     from . import cloud, auth
     if not auth.is_authenticated() or not cloud.is_available():
@@ -346,6 +448,7 @@ def _auto_push_if_published(checkin_result: dict) -> None:
     widget_path = checkin_result.get("path", "")
     if not widget_id or not widget_path:
         return
+    registry_url = _resolve_publish_registry(install_path) if install_path else None
     profile = cloud.whoami()
     handle = profile.get("owner", "")
     if not handle:
@@ -355,7 +458,7 @@ def _auto_push_if_published(checkin_result: dict) -> None:
     if remote.get("error"):
         return  # not published — nothing to sync, this is the normal case
     print(f"  → Widget exists on cloud (v{remote.get('version', '?')}), pushing v{checkin_result.get('version', '?')}...")
-    push_result = cloud.push(widget_path, widget_id)
+    push_result = cloud.push(widget_path, widget_id, registry_url=registry_url)
     if push_result.get("error"):
         print(f"  → Auto-push failed: {push_result['error']}")
     else:
@@ -363,10 +466,10 @@ def _auto_push_if_published(checkin_result: dict) -> None:
 
 
 def cmd_checkin(args):
-    path = _resolve_widget(args.path)
-    _preflight_from_path(path)
+    install_path = _resolve_widget(args.path)
+    _preflight_from_path(install_path)
     result = _carto().checkin(
-        path=path,
+        path=install_path,
         reason=args.reason,
         version_bump=args.bump,
         override_warnings=args.override_warnings,
@@ -382,9 +485,9 @@ def cmd_checkin(args):
         cfg = load_config()
         publish = getattr(args, "publish", False) or cfg["publish"]["auto_publish"]
         if publish:
-            _force_push(result)
+            _force_push(result, install_path=install_path, reason=args.reason)
         else:
-            _auto_push_if_published(result)
+            _auto_push_if_published(result, install_path=install_path)
 
 
 def cmd_status(args):
@@ -432,6 +535,20 @@ def cmd_status(args):
 
 def cmd_login(args):
     token = args.token
+    registry_prefix = getattr(args, "registry", None)
+
+    if registry_prefix:
+        # Company registry login: store API token keyed by registry URL
+        if not token:
+            err({"error": f"--token required for registry login. Use: cartograph login --token <key> --registry {registry_prefix}"})
+        from .config import get_registry_url_for_prefix
+        registry_url = get_registry_url_for_prefix(registry_prefix)
+        if not registry_url:
+            err({"error": f"Registry '{registry_prefix}' not configured. Add it first: cartograph registry add <url>"})
+        from .auth import store_registry_token
+        store_registry_token(registry_url, token)
+        print(f"\n  Stored token for registry '{registry_prefix}' ({registry_url})\n")
+        return
 
     if token:
         # Manual token login (legacy compat - treat as id_token with no refresh)
@@ -1751,6 +1868,59 @@ def cmd_setup(args):
 # Config commands
 # ---------------------------------------------------------------------------
 
+def cmd_registry(args):
+    """Manage additional registries (config registry add/list/remove)."""
+    action = getattr(args, "action", None)
+    url = getattr(args, "url", None)
+    prefix = getattr(args, "prefix", None)
+    reg_prefix = getattr(args, "reg_prefix", None)
+
+    if action == "add":
+        if not url:
+            err({"error": "URL required: cartograph registry add <url>"})
+        from .config import add_registry
+        result_prefix, error, needs_prefix = add_registry(url, prefix=prefix)
+        if needs_prefix:
+            print(f"\n  Warning: Could not fetch prefix from {url}:")
+            print(f"    {error}")
+            print(f"\n  Add it manually once you know the prefix:")
+            print(f"    cartograph registry add {url} --prefix <name>\n")
+            return
+        if error:
+            err({"error": error})
+        print(f"\n  Registry added: {result_prefix} -> {url}\n")
+        print(f"  Install widgets: cartograph install {result_prefix}-<widget-name>\n")
+
+    elif action == "remove":
+        # reg_prefix is the second positional (url slot) when action=remove
+        target = reg_prefix or url
+        if not target:
+            err({"error": "Prefix required: cartograph registry remove <prefix>"})
+        from .config import remove_registry
+        error = remove_registry(target)
+        reg_prefix = target
+        if error:
+            err({"error": error})
+        print(f"\n  Registry '{reg_prefix}' removed.\n")
+
+    else:
+        # List
+        from .config import get_registries, _PUBLIC_REGISTRY_URL, _PUBLIC_REGISTRY_PREFIX
+        registries = get_registries()
+        print()
+        print(f"  {'PREFIX':<12}  URL")
+        print(f"  {'-'*12}  {'-'*40}")
+        print(f"  {_PUBLIC_REGISTRY_PREFIX:<12}  {_PUBLIC_REGISTRY_URL}  (public, always available)")
+        for reg in registries:
+            print(f"  {reg['prefix']:<12}  {reg['url']}")
+        print()
+        if registries:
+            print(f"  Install: cartograph install <prefix>-<widget-name>")
+        else:
+            print(f"  Add a registry: cartograph registry add <url>")
+        print()
+
+
 def cmd_config(args):
     """View or change settings. No args = list all, key = get, key value = set."""
     key = getattr(args, "key", None)
@@ -2019,6 +2189,32 @@ def _build_cli() -> AgentCLI:
 
     cli.add_commands("Config", [
         {
+            "name": "registry",
+            "help": "Manage additional widget registries",
+            "description": (
+                "Add, list, or remove company/private registries alongside the public one.\n\n"
+                "The public Cartograph registry (prefix: cg) is always available.\n"
+                "Company registries register their own prefix via a /info endpoint.\n\n"
+                "Actions:\n"
+                "  (none)   List all configured registries\n"
+                "  add      Add a registry: cartograph registry add <url>\n"
+                "           Fetches prefix automatically from the registry's /info endpoint.\n"
+                "           Override with --prefix if the registry doesn't expose /info.\n"
+                "  remove   Remove a registry: cartograph registry remove <prefix>"
+            ),
+            "handler": cmd_registry,
+            "args": [
+                {"name": "action", "nargs": "?", "default": None,
+                 "help": "add | remove (omit to list)"},
+                {"name": "url", "nargs": "?", "default": None,
+                 "help": "Registry URL (for add)"},
+                {"name": "--prefix", "default": None,
+                 "help": "Override prefix (if registry does not expose /info)"},
+                {"name": "reg_prefix", "nargs": "?", "default": None,
+                 "help": "Registry prefix to remove (for remove)"},
+            ],
+        },
+        {
             "name": "config",
             "help": "View or change settings (config [key] [value])",
             "handler": cmd_config,
@@ -2094,6 +2290,8 @@ def _build_cli() -> AgentCLI:
             "handler": cmd_login,
             "args": [
                 {"name": "--token", "default": None, "help": "API token"},
+                {"name": "--registry", "default": None,
+                 "help": "Registry prefix for company registry login (requires --token)"},
             ],
         },
         {

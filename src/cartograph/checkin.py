@@ -212,10 +212,11 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         ignore = shutil.ignore_patterns(
             "__pycache__", "*.pyc", ".pytest_cache",
             "node_modules", "package-lock.json",
-            "history", "changelog.json", _STAMP_FILE,
+            "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
         )
         for item in os.listdir(dest_path):
-            if item in ("history", "changelog.json", _STAMP_FILE, "node_modules", "package-lock.json"):
+            if item in ("history", "changelog.json", _STAMP_FILE, ".cartograph_source",
+                        "node_modules", "package-lock.json"):
                 continue
             src = os.path.join(dest_path, item)
             dst = os.path.join(history_path, item)
@@ -231,11 +232,12 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         return {"status": "error", "message": f"Could not restore canonical library_notes: {e}"}
 
     # --- Copy working copy → library (never move — leave source intact) ---
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "node_modules", "package-lock.json")
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "node_modules",
+                                    "package-lock.json", ".cartograph_source")
     os.makedirs(dest_path, exist_ok=True)
     for item in os.listdir(path):
         if item in ("history", "changelog.json", "__pycache__", ".pytest_cache", _STAMP_FILE,
-                    "node_modules", "package-lock.json"):
+                    ".cartograph_source", "node_modules", "package-lock.json"):
             continue
         src = os.path.join(path, item)
         dst = os.path.join(dest_path, item)

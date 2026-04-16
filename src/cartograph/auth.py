@@ -53,6 +53,33 @@ def get_registry_url() -> str:
     return os.environ.get("CARTOGRAPH_REGISTRY_URL", _DEFAULT_REGISTRY_URL)
 
 
+def _registry_tokens_path() -> str:
+    from .engine import _user_data_dir
+    return os.path.join(_user_data_dir(), "registry_tokens.json")
+
+
+def _read_registry_tokens() -> dict:
+    try:
+        with open(_registry_tokens_path()) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def store_registry_token(registry_url: str, token: str) -> None:
+    """Store an API token for a company registry, keyed by URL."""
+    tokens = _read_registry_tokens()
+    tokens[registry_url.rstrip("/")] = token
+    path = _registry_tokens_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(tokens, f, indent=2)
+    try:
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+
+
 def _read_credentials() -> dict:
     """Read the credentials file, or return empty dict."""
     try:
@@ -125,11 +152,18 @@ def _refresh_id_token(refresh_token: str) -> str | None:
 
 
 
-def get_token() -> str | None:
-    """Return a valid ID token, or None if not authenticated.
+def get_token(registry_url: str | None = None) -> str | None:
+    """Return a valid token for the given registry, or None if not authenticated.
 
-    Checks expiration and auto-refreshes if needed.
+    For the public Cartograph registry (default), checks expiration and
+    auto-refreshes via Google OAuth. For company registries, returns a stored
+    API token from registry_tokens.json.
     """
+    # Company registry: check per-registry token store
+    if registry_url and registry_url.rstrip("/") != _DEFAULT_REGISTRY_URL:
+        tokens = _read_registry_tokens()
+        return tokens.get(registry_url.rstrip("/")) or None
+
     env = os.environ.get("CARTOGRAPH_TOKEN")
     if env:
         return env

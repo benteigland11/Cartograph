@@ -12,12 +12,19 @@ Example config.toml:
     governance = "open"
 """
 
+import json
 import os
+import urllib.error
+import urllib.request
 
 try:
     import tomllib
 except ModuleNotFoundError:
     tomllib = None
+
+# Public registry is hardcoded - never queried for /info
+_PUBLIC_REGISTRY_URL = "https://api.cartograph.tools"
+_PUBLIC_REGISTRY_PREFIX = "cg"
 
 _DEFAULTS = {
     "library": {
@@ -43,6 +50,9 @@ _SCHEMA = {
                          "Enable cloud registry integration"),
     "show-unavailable": ("library", "show_unavailable", "bool", None,
                          "Show widgets for languages not installed on this machine"),
+    "publish-registry": ("publish", "registry", "str", None,
+                         "Default registry prefix for --publish on local widgets (e.g. myorg). "
+                         "Defaults to the public registry (cg) if not set."),
 }
 
 
@@ -157,3 +167,111 @@ def _write_toml(path: str, config: dict):
         lines.append("")
     with open(path, "w") as f:
         f.write("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Registry management
+# ---------------------------------------------------------------------------
+
+def _registries_path() -> str:
+    from .engine import _user_data_dir
+    return os.path.join(_user_data_dir(), "registries.json")
+
+
+def get_registries() -> list[dict]:
+    """Return user-configured registries (excludes the public Cartograph registry)."""
+    try:
+        with open(_registries_path()) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_registries(registries: list[dict]) -> None:
+    path = _registries_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(registries, f, indent=2)
+
+
+def _fetch_registry_info(url: str) -> dict:
+    """Fetch /info from a registry. Returns dict with at least 'prefix', or {'error': ...}."""
+    try:
+        req = urllib.request.Request(
+            url.rstrip("/") + "/info",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return {"error": f"Registry /info returned HTTP {e.code}"}
+    except Exception as e:
+        return {"error": f"Could not reach registry: {e}"}
+
+
+def add_registry(url: str, prefix: str | None = None) -> tuple[str | None, str | None, bool]:
+    """Add a registry. Auto-fetches prefix from /info if not provided.
+
+    Returns (prefix, error, needs_prefix).
+    - Success:      (prefix, None, False)
+    - Hard error:   (None, message, False)  e.g. duplicate, reserved prefix
+    - Soft failure: (None, message, True)   /info unreachable or missing prefix field
+    """
+    url = url.rstrip("/")
+
+    if url == _PUBLIC_REGISTRY_URL:
+        return None, "That is the public Cartograph registry (prefix: cg). It is always available.", False
+
+    # Always try /info first - server's prefix wins over any user-provided value
+    info = _fetch_registry_info(url)
+    if "error" not in info:
+        server_prefix = info.get("prefix")
+        if server_prefix:
+            prefix = server_prefix  # server wins, even if --prefix was passed
+    elif prefix is None:
+        # /info unreachable and no fallback prefix provided
+        return None, info["error"], True
+
+    if not prefix:
+        return None, f"Registry at {url} did not return a prefix.", True
+
+    if prefix == _PUBLIC_REGISTRY_PREFIX:
+        return None, f"Prefix '{_PUBLIC_REGISTRY_PREFIX}' is reserved for the public Cartograph registry.", False
+
+    registries = get_registries()
+    for reg in registries:
+        if reg["prefix"] == prefix:
+            return None, f"Prefix '{prefix}' already configured for {reg['url']}. Remove it first.", False
+        if reg["url"] == url:
+            return None, f"Registry {url} is already configured as '{reg['prefix']}'.", False
+
+    registries.append({"prefix": prefix, "url": url})
+    _save_registries(registries)
+    return prefix, None, False
+
+
+def get_registry_url_for_prefix(prefix: str) -> str | None:
+    """Return the URL for a given registry prefix, or None if not found.
+
+    The public prefix ('cg') always resolves to the public registry URL.
+    """
+    if prefix == _PUBLIC_REGISTRY_PREFIX:
+        return _PUBLIC_REGISTRY_URL
+    for reg in get_registries():
+        if reg["prefix"] == prefix:
+            return reg["url"]
+    return None
+
+
+def remove_registry(prefix: str) -> str | None:
+    """Remove a registry by prefix. Returns error string or None on success."""
+    if prefix == _PUBLIC_REGISTRY_PREFIX:
+        return f"Cannot remove the public Cartograph registry (prefix: {_PUBLIC_REGISTRY_PREFIX})."
+
+    registries = get_registries()
+    new_registries = [r for r in registries if r["prefix"] != prefix]
+    if len(new_registries) == len(registries):
+        return f"No registry with prefix '{prefix}' found."
+
+    _save_registries(new_registries)
+    return None

@@ -64,7 +64,7 @@ def format_results(scored_widgets: list[dict], corpus_size: int = 0) -> dict:
             "domain": res["domain"],
             "dependencies": res.get("dependencies", []),
             "rating": res.get("rating", 0),
-            "trend": res.get("trend"),
+            "trend": res.get("trend") or "insufficient data",
             "install_count": res.get("install_count", 0),
             "relevance_score": res["relevance_score"],
         }

@@ -33,9 +33,9 @@ _TIMEOUT = 10  # seconds
 # Low-level helpers
 # ---------------------------------------------------------------------------
 
-def _headers() -> dict:
+def _headers(registry_url: str | None = None) -> dict:
     from .auth import get_token
-    token = get_token()
+    token = get_token(registry_url)
     h = {"Content-Type": "application/json", "Accept": "application/json"}
     if token:
         h["Authorization"] = f"Bearer {token}"
@@ -47,9 +47,10 @@ def _registry_url() -> str:
     return get_registry_url().rstrip("/")
 
 
-def _get(path: str) -> dict:
-    url = _registry_url() + path
-    req = urllib.request.Request(url, headers=_headers())
+def _get(path: str, registry_url: str | None = None) -> dict:
+    base = registry_url.rstrip("/") if registry_url else _registry_url()
+    url = base + path
+    req = urllib.request.Request(url, headers=_headers(registry_url))
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             return json.loads(resp.read())
@@ -100,7 +101,8 @@ def _patch(path: str, data: dict) -> dict:
         return {"error": str(e)}
 
 
-def _post_multipart(path: str, fields: dict, file_data: bytes, filename: str) -> dict:
+def _post_multipart(path: str, fields: dict, file_data: bytes, filename: str,
+                    registry_url: str | None = None) -> dict:
     """POST multipart/form-data with a single file attachment."""
     boundary = b"cartograph_boundary_" + os.urandom(8).hex().encode()
     body_parts = []
@@ -121,10 +123,11 @@ def _post_multipart(path: str, fields: dict, file_data: bytes, filename: str) ->
     body_parts.append(b"--" + boundary + b"--\r\n")
 
     body = b"".join(body_parts)
-    headers = _headers()
+    headers = _headers(registry_url)
     headers["Content-Type"] = f"multipart/form-data; boundary={boundary.decode()}"
 
-    url = _registry_url() + path
+    base = registry_url.rstrip("/") if registry_url else _registry_url()
+    url = base + path
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -188,7 +191,8 @@ def _validate_widgets(widgets: list, context: str = "") -> list:
 
 
 def search(query: str, domain_filter: str | None = None,
-           language_filter: str | None = None, top_k: int = 10) -> dict:
+           language_filter: str | None = None, top_k: int = 10,
+           registry_url: str | None = None) -> dict:
     """
     Search the cloud registry (public — no auth required).
 
@@ -202,7 +206,7 @@ def search(query: str, domain_filter: str | None = None,
     if language_filter:
         params += f"&language={urllib.parse.quote(language_filter)}"
 
-    result = _get(f"/v1/widgets/search{params}")
+    result = _get(f"/v1/widgets/search{params}", registry_url=registry_url)
     if "error" in result:
         return {"widgets": [], "source": "cloud", "error": result["error"]}
 
@@ -226,7 +230,7 @@ def search_users(query: str, top_k: int = 20) -> dict:
 
 
 def push(widget_path: str, widget_id: str, visibility: str = "public",
-         governance: str | None = None) -> dict:
+         governance: str | None = None, registry_url: str | None = None) -> dict:
     """
     Push a validated widget to the cloud registry.
 
@@ -274,6 +278,7 @@ def push(widget_path: str, widget_id: str, visibility: str = "public",
         fields=fields,
         file_data=zip_bytes,
         filename=f"{widget_id}.zip",
+        registry_url=registry_url,
     )
 
 
@@ -293,18 +298,20 @@ def inspect(owner_handle: str, widget_id: str, source: bool = False) -> dict:
     return _get(path)
 
 
-def download_widget(owner_handle: str, widget_id: str) -> dict:
+def download_widget(owner_handle: str, widget_id: str,
+                    registry_url: str | None = None) -> dict:
     """Download a widget zip from the cloud registry.
 
     Returns {"zip_bytes": bytes, "version": str} on success,
     or {"error": ...} on failure.
     """
+    base = registry_url.rstrip("/") if registry_url else _registry_url()
     url = (
-        _registry_url()
+        base
         + f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
         f"/{urllib.parse.quote(widget_id)}/download"
     )
-    headers = _headers()
+    headers = _headers(registry_url)
     headers["Accept"] = "application/zip"
     req = urllib.request.Request(url, headers=headers)
     try:
@@ -508,7 +515,7 @@ def _zip_widget(widget_path: str) -> bytes:
 
 
 def propose(widget_path: str, owner_handle: str, widget_id: str,
-            reason: str) -> dict:
+            reason: str, registry_url: str | None = None) -> dict:
     """Propose a contribution to someone else's widget.
 
     Validates locally, zips the widget, and POSTs to the contribute endpoint.
@@ -546,6 +553,7 @@ def propose(widget_path: str, owner_handle: str, widget_id: str,
         fields=fields,
         file_data=zip_bytes,
         filename=f"{widget_id}.zip",
+        registry_url=registry_url,
     )
 
 

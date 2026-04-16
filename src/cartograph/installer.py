@@ -47,7 +47,28 @@ def _widget_dir(target_dir, widget_id):
     return os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(widget_id))
 
 
-def _install_from_cloud(widget_id, dest_path, owner_hint=None):
+def _resolve_registry(widget_id: str):
+    """Check if widget_id starts with a known registry prefix.
+
+    Returns (registry_url, prefix, bare_widget_id) if a prefix is recognized,
+    or None if no prefix matches (caller uses default local-first behavior).
+    """
+    from .config import get_registries, _PUBLIC_REGISTRY_PREFIX, _PUBLIC_REGISTRY_URL
+
+    if widget_id.startswith(_PUBLIC_REGISTRY_PREFIX + "-"):
+        bare_id = widget_id[len(_PUBLIC_REGISTRY_PREFIX) + 1:]
+        return _PUBLIC_REGISTRY_URL, _PUBLIC_REGISTRY_PREFIX, bare_id
+
+    for reg in get_registries():
+        prefix = reg["prefix"]
+        if widget_id.startswith(prefix + "-"):
+            bare_id = widget_id[len(prefix) + 1:]
+            return reg["url"], prefix, bare_id
+
+    return None
+
+
+def _install_from_cloud(widget_id, dest_path, registry_url=None, owner_hint=None):
     """Search cloud for a widget and install it by downloading the zip."""
     from .cloud import download_widget
 
@@ -57,7 +78,7 @@ def _install_from_cloud(widget_id, dest_path, owner_hint=None):
     else:
         # Search cloud to find the widget and its owner
         from .cloud import search as cloud_search
-        results = cloud_search(widget_id, top_k=5)
+        results = cloud_search(widget_id, top_k=5, registry_url=registry_url)
         widgets = results.get("widgets", [])
         match = next(
             (w for w in widgets
@@ -66,12 +87,13 @@ def _install_from_cloud(widget_id, dest_path, owner_hint=None):
             None,
         )
         if not match:
-            return {"error": f"Widget '{widget_id}' not found locally or in the cloud registry."}
+            registry_label = registry_url or "the cloud registry"
+            return {"error": f"Widget '{widget_id}' not found locally or in {registry_label}."}
         owner = match.get("owner", "")
         if not owner:
             return {"error": f"Widget '{widget_id}' found in cloud but missing owner info."}
 
-    result = download_widget(owner, widget_id)
+    result = download_widget(owner, widget_id, registry_url=registry_url)
     if "error" in result:
         return result
 
@@ -82,6 +104,16 @@ def _install_from_cloud(widget_id, dest_path, owner_hint=None):
         os.makedirs(dest_path, exist_ok=True)
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
             zf.extractall(dest_path)
+
+        # Write sidecar so checkin knows where this came from
+        from .auth import get_registry_url as _public_url
+        source_meta = {
+            "owner": owner,
+            "registry_url": registry_url or _public_url(),
+        }
+        with open(os.path.join(dest_path, ".cartograph_source"), "w") as f:
+            json.dump(source_meta, f)
+
         return {
             "status": "success",
             "widget_id": widget_id,
@@ -96,7 +128,12 @@ def _install_from_cloud(widget_id, dest_path, owner_hint=None):
 
 
 def install(carto, widget_id, target_dir, version=None):
-    """Install a widget into target_dir/cg/widget_id."""
+    """Install a widget into target_dir/cg/<widget_id>.
+
+    If widget_id has a known registry prefix (e.g. cg-foo, myorg-foo), the
+    install goes directly to that registry and skips the local library.
+    Unprefixed IDs use the existing local-first then cloud-fallback behavior.
+    """
     # Strip @owner/ prefix if present (cloud widget IDs are namespaced)
     owner_hint = None
     if widget_id.startswith("@"):
@@ -118,7 +155,17 @@ def install(carto, widget_id, target_dir, version=None):
     if os.path.exists(dest_path):
         return {"error": f"'{widget_id}' already installed at {dest_path}. Uninstall first to reinstall."}
 
-    # Try local library first
+    # Explicit registry prefix: skip local library, go directly to that registry
+    resolved = _resolve_registry(widget_id)
+    if resolved is not None:
+        registry_url, _prefix, bare_id = resolved
+        from .config import cloud_enabled
+        if not cloud_enabled():
+            return {"error": "Cloud is disabled. Enable it with: cartograph config cloud true"}
+        return _install_from_cloud(bare_id, dest_path, registry_url=registry_url,
+                                   owner_hint=owner_hint)
+
+    # No prefix: try local library first
     widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
     if widget:
         source_path = widget["path"]
