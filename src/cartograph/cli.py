@@ -487,7 +487,21 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
     if push_result.get("error"):
         print(f"  → Push failed: {push_result['error']}")
     else:
-        print(f"  → Pushed: {push_result.get('namespaced_id', widget_id)} v{push_result.get('version', '?')}")
+        from .config import get_registry_url_for_prefix, get_registries, _PUBLIC_REGISTRY_PREFIX
+        namespaced = push_result.get("namespaced_id", "")
+        version = push_result.get("version", "?")
+        # Reconstruct full install command: @owner/prefix-widget-name
+        if "/" in namespaced:
+            owner_part, bare = namespaced.split("/", 1)
+            prefix = _PUBLIC_REGISTRY_PREFIX
+            for reg in get_registries():
+                if (reg["url"] or "").rstrip("/") == (registry_url or "").rstrip("/"):
+                    prefix = reg["prefix"]
+                    break
+            install_id = f"{owner_part}/{prefix}-{bare}"
+        else:
+            install_id = namespaced
+        print(f"  → Published v{version}  |  install: cartograph install {install_id}")
         # Write sidecar so future checkin --publish routes to this registry
         # without having to re-infer from config.
         try:
