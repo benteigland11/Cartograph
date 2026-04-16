@@ -127,15 +127,19 @@ def _install_from_cloud(widget_id, dest_path, registry_url=None, owner_hint=None
         return {"error": f"Failed to extract widget: {e}"}
 
 
-def install(carto, widget_id, target_dir, version=None):
+def install(carto, widget_id, target_dir, version=None,
+            _owner_hint=None, _registry_url=None):
     """Install a widget into target_dir/cg/<widget_id>.
 
     If widget_id has a known registry prefix (e.g. cg-foo, myorg-foo), the
     install goes directly to that registry and skips the local library.
     Unprefixed IDs use the existing local-first then cloud-fallback behavior.
+
+    _owner_hint and _registry_url are internal params used by upgrade() to
+    re-install the correct owner's widget from the correct registry.
     """
     # Strip @owner/ prefix if present (cloud widget IDs are namespaced)
-    owner_hint = None
+    owner_hint = _owner_hint
     if widget_id.startswith("@"):
         parts = widget_id[1:].split("/", 1)
         if len(parts) == 2:
@@ -196,7 +200,8 @@ def install(carto, widget_id, target_dir, version=None):
     from .config import cloud_enabled
     if not cloud_enabled():
         return {"error": f"Widget '{widget_id}' not found in local library."}
-    return _install_from_cloud(widget_id, dest_path, owner_hint=owner_hint)
+    return _install_from_cloud(widget_id, dest_path, registry_url=_registry_url,
+                               owner_hint=owner_hint)
 
 
 def _upgrade_backup_path(widget_id: str) -> str:
@@ -215,11 +220,18 @@ def upgrade(carto, widget_id, target_dir, version=None):
     if not os.path.exists(dest_path):
         return {"error": f"'{widget_id}' not found at {dest_path}. Install it first."}
 
-    # Read current version before removing
+    # Read current version and sidecar before removing
     old_version = "unknown"
     try:
         with open(os.path.join(dest_path, "widget.json")) as f:
             old_version = json.load(f).get("meta", {}).get("version", "unknown")
+    except Exception:
+        pass
+
+    source_meta = {}
+    try:
+        with open(os.path.join(dest_path, ".cartograph_source")) as f:
+            source_meta = json.load(f)
     except Exception:
         pass
 
@@ -238,8 +250,12 @@ def upgrade(carto, widget_id, target_dir, version=None):
         shutil.rmtree(backup_path, ignore_errors=True)
         return result
 
-    # Install new copy
-    result = install(carto, widget_id, target_dir, version=version)
+    # Install new copy — pass owner and registry from sidecar so we upgrade
+    # the correct owner's widget, not just the highest-ranked search result
+    owner_hint = source_meta.get("owner") or None
+    registry_url = source_meta.get("registry_url") or None
+    result = install(carto, widget_id, target_dir, version=version,
+                     _owner_hint=owner_hint, _registry_url=registry_url)
     if "error" in result:
         # Restore from backup
         try:
