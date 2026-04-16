@@ -1574,6 +1574,9 @@ current directory (or the directory specified by `--target`).
     cloud unpublish <widget_id> [--confirm]
       Remove a widget from the cloud registry.
 
+    cloud adopt <local-id> <@owner/prefix-widget-id>
+      Link a local widget to its cloud counterpart by verifying source identity.
+
     cloud sync [--dry-run]
       Sync local library with cloud. Higher version wins.
 

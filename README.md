@@ -103,8 +103,17 @@ cartograph delete <widget_id> [--confirm]
 cartograph cloud publish [widget_id] [path] [--visibility public|private]
                                             [--governance open|protected]
 cartograph cloud unpublish <widget_id> [--confirm]
+cartograph cloud adopt <local-id> <@owner/prefix-widget-id>
 cartograph cloud sync [--dry-run]
 cartograph cloud proposals [widget_id] [--accept] [--reject] [--reason "..."]
+```
+
+**Registries**
+
+```
+cartograph registry                        # list configured registries
+cartograph registry add <url>              # add a registry (fetches prefix from /info)
+cartograph registry remove <prefix>        # remove a registry
 ```
 
 **Custom validation rules**

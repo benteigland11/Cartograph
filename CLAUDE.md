@@ -76,6 +76,10 @@ current directory (or the directory specified by `--target`).
     cloud unpublish <widget_id> [--confirm]
       Remove a widget from the cloud registry.
 
+    cloud adopt <local-id> <@owner/prefix-widget-id>
+      Link a local widget to its cloud counterpart by verifying source identity.
+      Writes .cartograph_source sidecar so future checkin --publish routes correctly.
+
     cloud sync [--dry-run]
       Sync local library with cloud. Higher version wins.
 
@@ -99,6 +103,9 @@ current directory (or the directory specified by `--target`).
 
     config [key] [value]
       View or change settings.
+
+    registry [add <url> | remove <prefix>]
+      Manage additional registries. Prefix is fetched from /info automatically.
 
     setup [--agent ...] [--file X] [--print] [--workflow]
       Write Cartograph instructions to your agent's config file.
