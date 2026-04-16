@@ -218,12 +218,16 @@ def cmd_search(args):
 
     # Only suppress a local widget if the cloud version belongs to the current user.
     # Someone else's same-named widget in a registry should not hide your local copy.
+    # Short-circuit if not authenticated to avoid a network call on every search.
+    _me = ""
     try:
+        from .auth import is_authenticated
         from .cloud import whoami as _whoami
-        _profile = _whoami()
-        _me = _profile.get("owner", "") or _profile.get("username", "")
+        if is_authenticated():
+            _profile = _whoami()
+            _me = _profile.get("owner", "") or _profile.get("username", "")
     except Exception:
-        _me = ""
+        pass
 
     registry_base_ids = set()
     for w in seen_registry.values():
