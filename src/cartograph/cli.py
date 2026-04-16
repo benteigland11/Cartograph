@@ -129,6 +129,7 @@ def _search_registries(query, domain_filter, language_filter, top_k):
             else:
                 owner_part, base = "", wid
             w["id"] = f"{owner_part}/{prefix}-{base}" if owner_part else f"{prefix}-{base}"
+            w["registry_prefix"] = prefix
         return result.get("widgets", [])
 
     # Public registry (None = default URL)
