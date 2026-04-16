@@ -165,9 +165,32 @@ def install(carto, widget_id, target_dir, version=None,
     resolved = _resolve_registry(widget_id)
     if resolved is not None:
         registry_url, _prefix, bare_id = resolved
-        from .config import cloud_enabled
+        from .config import cloud_enabled, _PUBLIC_REGISTRY_URL
         if not cloud_enabled():
             return {"error": "Cloud is disabled. Enable it with: cartograph config cloud true"}
+
+        # If the local library has this widget and its sidecar points to the
+        # same registry, install from local - no cloud call needed.
+        local_widget = next((w for w in carto.widgets if w["id"] == bare_id), None)
+        if local_widget:
+            try:
+                with open(os.path.join(local_widget["path"], ".cartograph_source")) as f:
+                    sidecar = json.load(f)
+                sidecar_reg = (sidecar.get("registry_url") or _PUBLIC_REGISTRY_URL).rstrip("/")
+                target_reg = (registry_url or _PUBLIC_REGISTRY_URL).rstrip("/")
+                if sidecar_reg == target_reg:
+                    _copy_widget(local_widget["path"], dest_path)
+                    carto._increment_install_count(bare_id)
+                    return {
+                        "status": "success",
+                        "widget_id": widget_id,
+                        "version": local_widget.get("version", "unknown"),
+                        "installed_at": dest_path,
+                        "source": "local",
+                    }
+            except Exception:
+                pass  # no sidecar or mismatch - fall through to cloud
+
         return _install_from_cloud(bare_id, dest_path, registry_url=registry_url,
                                    owner_hint=owner_hint)
 
