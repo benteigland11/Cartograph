@@ -150,24 +150,22 @@ def install(carto, widget_id, target_dir, version=None):
     if os.path.abspath(target_dir) == os.path.dirname(PACKAGE_DIR):
         return {"error": f"Cannot install into the engine source directory ({os.path.dirname(PACKAGE_DIR)})."}
 
+    dest_path = _widget_dir(target_dir, widget_id)
+
+    if os.path.exists(dest_path):
+        return {"error": f"'{widget_id}' already installed at {dest_path}. Uninstall first to reinstall."}
+
     # Explicit registry prefix: skip local library, go directly to that registry.
-    # Resolve before computing dest_path so the install dir uses the bare id.
+    # dest_path keeps the prefixed name (cg/cg-widget-name/) so prefixed and
+    # local installs coexist without collision.
     resolved = _resolve_registry(widget_id)
     if resolved is not None:
         registry_url, _prefix, bare_id = resolved
-        dest_path = _widget_dir(target_dir, bare_id)
-        if os.path.exists(dest_path):
-            return {"error": f"'{bare_id}' already installed at {dest_path}. Uninstall first to reinstall."}
         from .config import cloud_enabled
         if not cloud_enabled():
             return {"error": "Cloud is disabled. Enable it with: cartograph config cloud true"}
         return _install_from_cloud(bare_id, dest_path, registry_url=registry_url,
                                    owner_hint=owner_hint)
-
-    dest_path = _widget_dir(target_dir, widget_id)
-
-    if os.path.exists(dest_path):
-        return {"error": f"'{widget_id}' already installed at {dest_path}. Uninstall first to reinstall."}
 
     # No prefix: try local library first
     widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
