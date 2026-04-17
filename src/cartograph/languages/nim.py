@@ -90,7 +90,7 @@ class NimEngine(LanguageEngine):
         "hardcoded_ip": "Hardcoded IPs found in src/ - consider making these configurable:",
         "hardcoded_value": "Hardcoded values found in src/ - consider making these configurable:",
         "env_var": "Environment variable access found in src/ - verify it's not project-specific:",
-        "unlisted_import": "Unlisted imports found in src/ - add to dependencies or remove:",
+        "unlisted_import": "Unlisted imports - add to widget.json dependencies or remove:",
         "sleep": "Sleep/blocking calls found - widgets must not block the caller:",
         "std_import_style": "Old-style stdlib imports found - prefer std/... imports in modern Nim:",
         "top_level_var": "Top-level mutable state found - prefer local state or explicit parameters:",

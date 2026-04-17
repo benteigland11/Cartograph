@@ -261,20 +261,80 @@ class PhpEngine(LanguageEngine):
     )
     _ENVVAR_RE = re.compile(r'\bgetenv\s*\(|\$_ENV\b|\$_SERVER\b')
 
+    def _parse_autoload_namespaces(self, autoload_dir: str) -> set:
+        """Read composer's autoload_*.php files and return the lowercase set
+        of namespace roots that composer can resolve. This is the same source
+        PHP's runtime autoloader uses, so anything not in this set genuinely
+        cannot be `use`-d at runtime."""
+        roots = set()
+        # PSR-4 and PSR-0 keys look like: 'Carbon\\' => array(...)
+        psr_re = re.compile(r"'([A-Za-z_][A-Za-z0-9_\\]*?)\\\\'\s*=>")
+        for name in ("autoload_psr4.php", "autoload_namespaces.php"):
+            p = os.path.join(autoload_dir, name)
+            if not os.path.exists(p):
+                continue
+            try:
+                content = open(p).read()
+            except Exception:
+                continue
+            for m in psr_re.finditer(content):
+                key = m.group(1).replace("\\\\", "\\")
+                root = key.split("\\")[0].lower()
+                if root:
+                    roots.add(root)
+        # classmap: flat 'Fully\\Qualified\\Class' => '/path/to/file.php'
+        cm = os.path.join(autoload_dir, "autoload_classmap.php")
+        if os.path.exists(cm):
+            try:
+                content = open(cm).read()
+                fq_re = re.compile(r"'([A-Za-z_][A-Za-z0-9_]*(?:\\\\[A-Za-z_][A-Za-z0-9_]*)+)'\s*=>")
+                for m in fq_re.finditer(content):
+                    key = m.group(1).replace("\\\\", "\\")
+                    root = key.split("\\")[0].lower()
+                    if root:
+                        roots.add(root)
+            except Exception:
+                pass
+        return roots
+
+    def _resolve_provided_namespaces(self, path: str, deps: list) -> set | None:
+        """Build the ground-truth set of PHP namespace roots this widget can
+        actually resolve. Returns None if the autoload table is unavailable
+        (e.g. composer install failed), which signals callers to fall back
+        to the heuristic path."""
+        autoload_dir = os.path.join(path, "vendor", "composer")
+        autoload_file = os.path.join(autoload_dir, "autoload_psr4.php")
+        if not os.path.exists(autoload_file):
+            # Need composer install to produce the autoload table. Skip if
+            # there's nothing to install against - no composer.json or no
+            # deps means we have no ground truth to build.
+            if not os.path.exists(os.path.join(path, "composer.json")):
+                return None
+            try:
+                self.install_deps(path, deps)
+            except Exception as e:
+                log.warning(f"PHP contamination: composer install failed, "
+                            f"falling back to heuristic resolver: {e}")
+                return None
+        if not os.path.isdir(autoload_dir):
+            return None
+        return self._parse_autoload_namespaces(autoload_dir)
+
     def scan_contamination(self, path: str, widget: dict) -> dict:
         blocks, warnings = [], []
 
         deps = widget.get("dependencies", [])
-        dep_names = set()
+        dep_names = set()  # fallback heuristic if resolver unavailable
         for d in deps:
             if not isinstance(d, str):
                 continue
             bare = _dep_bare_name(d).lower()
             dep_names.add(bare)
-            # Composer packages use vendor/package format; the PHP namespace root
-            # matches the vendor prefix (e.g. "guzzlehttp/guzzle" -> "guzzlehttp").
             if "/" in bare:
                 dep_names.add(bare.split("/")[0])
+
+        # Authoritative namespace resolution via composer's autoload tables.
+        provided = self._resolve_provided_namespaces(path, deps)
 
         src_files = glob.glob(os.path.join(path, "src", "**", "*.php"), recursive=True)
         test_files = glob.glob(os.path.join(path, "tests", "**", "*.php"), recursive=True)
@@ -367,20 +427,35 @@ class PhpEngine(LanguageEngine):
                         f"consider making this a parameter"
                     )
 
-            # Unlisted require/use statements in src
-            if is_src:
-                for m in re.finditer(r'^\s*(?:use|require(?:_once)?|include(?:_once)?)\s+([^\s;(]+)', code, re.MULTILINE):
-                    token = m.group(1).strip("\"'")
-                    line_no = code[:m.start()].count("\n") + 1
-                    loc = f"{rel}:{line_no}"
-                    # Skip relative requires (vendor/autoload, local files)
-                    if token.startswith("Cartograph\\") or token.startswith("PHPUnit\\") or "autoload" in token or token.startswith("."):
-                        continue
-                    # External namespace root (e.g. "GuzzleHttp\...")
-                    top = token.split("\\")[0].lower()
-                    if top and top not in dep_names and top not in {"php", "psr", "phpunit"}:
+            # Unlisted `use` statements. Block in src/, warn in tests/examples.
+            # Authoritative resolver: composer's autoload tables. Fallback:
+            # vendor-prefix heuristic (warning only - can't confidently block
+            # when we don't know the ground truth).
+            for m in re.finditer(
+                r'^\s*use\s+(?:function\s+|const\s+)?([A-Za-z_][A-Za-z0-9_\\]*)',
+                code, re.MULTILINE,
+            ):
+                ns_path = m.group(1)
+                line_no = code[:m.start()].count("\n") + 1
+                loc = f"{rel}:{line_no}"
+                top = ns_path.split("\\")[0].lower()
+                if not top:
+                    continue
+                if provided is not None:
+                    if top not in provided:
+                        msg = (f"Unlisted namespace '{top}' in {loc} - "
+                               f"not resolvable via composer autoload; "
+                               f"add to dependencies or remove")
+                        (blocks if is_src else warnings).append(msg)
+                else:
+                    # Resolver unavailable - conservative heuristic
+                    if top not in dep_names and top not in {
+                        "php", "psr", "phpunit", "cartograph",
+                    }:
                         warnings.append(
-                            f"Unlisted import '{top}' in {loc} - add to dependencies or remove"
+                            f"Unlisted import '{top}' in {loc} - "
+                            f"add to dependencies or remove "
+                            f"(resolver unavailable)"
                         )
 
         return {"blocks": blocks, "warnings": warnings}

@@ -453,7 +453,7 @@ proc scanFile(filename: string): seq[Finding] =
         result.add(Finding(
           file: filename, kind: "unlisted_import", line: startLine,
           detail: "import " & mods.fullPath & " - not in widget.json dependencies",
-          severity: "warning"))
+          severity: if inTests or inExamples: "warning" else: "block"))
 
     if pendingImport.len > 0:
       # Continue accumulating a multi-line import regardless of indentation.

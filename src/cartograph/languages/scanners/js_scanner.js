@@ -24,6 +24,16 @@ const RISKY_IMPORTS = new Set([
   'fs', 'child_process', 'net', 'http', 'https', 'dgram', 'cluster', 'worker_threads',
 ])
 
+// Test frameworks we mandate (or that are canonical) should never be flagged
+// as unlisted in test/example files. They sit in package.json devDependencies,
+// not widget.json tech_stack dependencies, and forcing users to either
+// duplicate them or override every checkin is bad UX.
+const TEST_FRAMEWORKS = new Set([
+  'vitest', 'jest', 'mocha', 'chai', 'jasmine', 'sinon', 'supertest',
+  'playwright', '@playwright/test', 'cypress', 'karma', '@jest/globals',
+  '@vitest/ui',
+])
+
 const CREDENTIAL_RE = /(?:api_key|api_secret|secret_key|access_token|auth_token|password|passwd|credential)\s*=/i
 const ABS_PATH_RE = /(?:\/home\/|\/Users\/|\/root\/|[A-Za-z]:[/\\])/
 const URL_RE = /^https?:\/\/(?!(?:localhost|127\.0\.0\.1|[\w-]*\.?example\.com|[\w.-]+\.test(?:[\/:"'#?]|$)|schemas?\.))/i
@@ -263,7 +273,7 @@ function bareImportName(specifier) {
   return specifier.split('/')[0]
 }
 
-function addImportFinding(findings, filename, moduleName, line) {
+function addImportFinding(findings, filename, moduleName, line, unlistedSeverity, inTestOrExample) {
   const bare = bareImportName(moduleName)
   if (!bare) return
   // 'node:crypto' is the explicit built-in prefix syntax - strip it before lookup
@@ -271,12 +281,17 @@ function addImportFinding(findings, filename, moduleName, line) {
   if (RISKY_IMPORTS.has(lower)) {
     addFinding(findings, filename, 'risky_import', line, `import '${bare}' - flagged for review`)
   }
+  // Test frameworks are mandated by validation and declared in package.json
+  // devDependencies, not widget.json. Allowlist them in test/example files.
+  if (inTestOrExample && TEST_FRAMEWORKS.has(lower)) return
   if (!NODE_BUILTINS.has(lower) && !declaredDeps.has(lower)) {
-    addFinding(findings, filename, 'unlisted_import', line, `import '${bare}' - not in widget.json dependencies`, 'warning')
+    addFinding(findings, filename, 'unlisted_import', line, `import '${bare}' - not in widget.json dependencies`, unlistedSeverity)
   }
 }
 
-function detectImports(tokens, filename, findings) {
+function detectImports(tokens, filename, findings, inTests, inExamples) {
+  const unlistedSeverity = (inTests || inExamples) ? 'warning' : 'block'
+  const inTestOrExample = inTests || inExamples
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i]
     if (tok.type === 'ident' && tok.value === 'require') {
@@ -285,7 +300,7 @@ function detectImports(tokens, filename, findings) {
       const args = splitTopLevelArgs(collectArgTokens(tokens, tokens.indexOf(open)))
       const first = firstMeaningful(args[0] || [])
       if (first && first.type === 'string') {
-        addImportFinding(findings, filename, first.value, tok.line)
+        addImportFinding(findings, filename, first.value, tok.line, unlistedSeverity, inTestOrExample)
       }
       continue
     }
@@ -297,7 +312,7 @@ function detectImports(tokens, filename, findings) {
         if (cur.type === 'punct' && cur.value === ';') break
         if (cur.type === 'newline' && tokens[j - 1]?.type === 'string') break
         if (cur.type === 'string') {
-          addImportFinding(findings, filename, cur.value, cur.line)
+          addImportFinding(findings, filename, cur.value, cur.line, unlistedSeverity, inTestOrExample)
           break
         }
         j++
@@ -501,7 +516,7 @@ function scanFile(filename) {
     }
   }
 
-  detectImports(tokens, filename, findings)
+  detectImports(tokens, filename, findings, inTests, inExamples)
   detectSleepCalls(tokens, filename, findings, inTests, inExamples)
   detectAssignments(tokens, filename, findings, inTests, inExamples)
   detectStringContamination(tokens, filename, findings, inTests, inExamples)

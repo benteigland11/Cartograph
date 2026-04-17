@@ -594,9 +594,11 @@ class OpenSCADEngine(LanguageEngine):
                 elif not inc.startswith(".") and not inc.startswith("../") and not inc.startswith("src/"):
                     lib_name = inc.split("/")[0].lower()
                     if lib_name not in declared_deps:
-                        warnings.append(
-                            f"Unlisted library in {rel}:{line_no}: <{inc}> — add to widget.json dependencies"
-                        )
+                        msg = f"Unlisted library in {rel}:{line_no}: <{inc}> - add to widget.json dependencies"
+                        if is_src:
+                            blocks.append(msg)
+                        else:
+                            warnings.append(msg)
 
             for line_no, line in enumerate(content.splitlines(), 1):
                 stripped = line.strip()

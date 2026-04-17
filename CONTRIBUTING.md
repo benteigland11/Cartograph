@@ -76,7 +76,7 @@ A language engine must:
 - Run tests and report pass/fail
 - Measure code coverage (if possible to measure, it should be measured and sit at 80%)
 - Execute example files (if the language supports it)
-- Provide a native contamination scanner written in the target language (exception: languages with no file I/O capability may use a Python fallback scanner)
+- Provide a native contamination scanner written in the target language (exception: languages with no file I/O capability may use a Python fallback scanner). The scanner must enforce the shared unlisted-import policy: any import that is not stdlib, not a local src/ module, and not declared in widget.json `dependencies` must **block in src/** and **warn in tests/examples**. The fix is trivial (declare the dep or remove the import), so this is not overridable.
 - Isolate dependency installation so validation never pollutes the user's environment
 - Include a custom rules template in `src/cartograph/rules.py` so users can write validation rules in that language
 - Clean up after itself. No temp files, no compiled binaries left behind.

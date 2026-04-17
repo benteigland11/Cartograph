@@ -101,7 +101,13 @@ Nim coverage would require compiling via `--debugger:native` and running `gcov`/
 - `sleep()`/`usleep()` blocked in src/, large values warned in tests
 - `getenv()`/`$_ENV`/`$_SERVER` access warned in src/
 - Hardcoded constant assignments warned in src/
-- Unlisted namespace imports warned in src/
+- Unlisted namespace imports are resolved against composer's authoritative
+  autoload table (`vendor/composer/autoload_psr4.php`,
+  `autoload_namespaces.php`, `autoload_classmap.php`). A `use` whose root
+  namespace is not in that table genuinely cannot be resolved at runtime, so
+  it **blocks in src/** and **warns in tests/examples**. If the autoload
+  table is unavailable (e.g. `composer install` hasn't run), the scanner
+  falls back to a vendor-prefix heuristic at warning severity only.
 
 **No native scanner:** The Python scanner handles PHP contamination accurately. PHP's string and comment syntax is simple enough for line-based checks, and WordPress globals are identifiable by name without AST parsing.
 
@@ -154,8 +160,65 @@ The unifying rule for contamination checks:
 - **Tests keep real safety nets** (absolute home paths, credentials,
   unlisted imports). A real secret or real user path in a test is still
   wrong.
-- **Examples are not scanned** — they are validated by being executed
+- **Examples are not scanned** - they are validated by being executed
   (Python/JS/Nim) or rendered (OpenSCAD/SV), not by static scanning.
+
+**Unlisted imports policy (all languages):** an import that is not in
+widget.json `dependencies`, not stdlib, and not a local src/ module is
+a **block in src/** and a **warning in tests/examples**. The rationale
+is uniform: an unlisted dep means the widget breaks on install for
+anyone else. The fix is trivial (add to `dependencies` or remove the
+import), so there is no override.
+
+**Resolver ground truth, not convention.** Where a language's package
+manager can answer "what namespaces/modules can actually be resolved?",
+the scanner asks it directly instead of relying on naming conventions:
+
+- Python: `importlib.metadata.packages_distributions()` (maps import
+  name to installed package, handling `python-docx` -> `docx` etc.)
+- PHP: `vendor/composer/autoload_*.php` tables (same source PHP's own
+  runtime uses)
+
+Languages where naming convention is contractual (JS npm name = import
+specifier; Nim nimble pkg = import root) use the simpler declared-deps
+comparison - the resolver would give the same answer with more code.
+
+**Why not a JS resolver?** npm package name is the import specifier by
+spec, not convention - `package.json` `name` field is canonical and the
+import string matches it exactly (including scoped `@org/pkg` forms).
+Walking `node_modules/*/package.json` would return the same answer as
+comparing against widget.json's declared deps. Worse, it would also
+surface transitive dependencies installed under `node_modules/` that
+the widget never declared - actively weakening contamination detection.
+A widget that imports a transitive it shouldn't rely on would stop
+being flagged. The resolver pattern is only valuable when it catches
+real false positives; JS has none.
+
+Test frameworks are a separate concern: `vitest`, `jest`, `mocha`, etc.
+live in `package.json` devDependencies, not widget.json. They are
+allowlisted in test/example files by `TEST_FRAMEWORKS` in the scanner
+so users don't have to override every checkin or duplicate them into
+widget.json.
+
+**Why not an OpenSCAD resolver?** OpenSCAD "dependencies" are shared
+library directories (BOSL2, MCAD) dropped into `OPENSCADPATH`. There is
+no translation layer - `include <BOSL2/std.scad>` has `BOSL2` as its
+first path segment, which is exactly what widget.json declares. No
+mismatch possible. Beyond that, the validation pipeline runs an actual
+OpenSCAD render against the example, so any unresolved include fails
+with a real render error, not a static guess. The render is strictly
+more authoritative than any resolver we could write.
+
+**Why not a Nim resolver?** nimble enforces by spec that a package
+named `foo` must publish a top-level `foo.nim`, and `import foo`
+resolves to exactly that. The import root always matches the nimble
+package name. Popular packages (`chronos`, `jester`, `nimcrypto`,
+`karax`, `zippy`) all follow this without exception. An additional
+concern: nimble installs into a global `~/.nimble/pkgs/` path, so
+walking it would pull every package the user has ever installed
+system-wide into the "provided" set - hiding real undeclared-dep
+contamination rather than catching it. Nim's `std/unittest` lives
+in the stdlib allowlist and needs no special handling.
 
 ### Fails validation if found (src/ only unless noted)
 
@@ -173,6 +236,7 @@ The unifying rule for contamination checks:
 | when isMainModule | N/A | N/A | Yes | N/A | N/A | Nim-specific |
 | OS-specific when defined() | N/A | N/A | Yes | N/A | N/A | Nim-specific |
 | Risky stdlib imports | N/A | Yes (fs, child_process, etc.) | Yes (os, osproc, etc.) | N/A | N/A | Python does not block these |
+| Unlisted imports | Yes (AST + `packages_distributions`) | Yes | Yes | Yes (include<>/use<>) | N/A | src/ blocks, tests/examples warn. PHP uses composer autoload tables - see PHP section. |
 | Top-level geometry/control flow | N/A | N/A | N/A | Yes (src/ only) | N/A | Bleeds into consumer's scene |
 | include<> | N/A | N/A | N/A | Yes (src/ local only) | N/A | Executes full file on import; use use<>. External declared deps allowed. |
 | Global resolution ($fn/$fa/$fs) | N/A | N/A | N/A | Yes (src/ only) | N/A | Steals consumer's quality settings |
@@ -193,7 +257,6 @@ above applies.
 |---------|--------|----|-----|---------------|-------|-------|
 | Hardcoded URLs | Yes | Yes | Yes | Yes | src/ only | Excludes localhost, example.com, .test |
 | Hardcoded values (constants) | Yes (AST) | Yes (config-like names) | Yes | Yes (sized literals like 32'd115200, 8'hFF; typedef enum bodies excluded) | src/ only | Fixture values in tests are expected |
-| Unlisted imports | Yes (AST) | Yes | Yes | No | src + tests | Local src/ modules allowlisted in tests |
 | Environment variable access | Yes | Yes | Yes | N/A | src + tests | os.getenv, process.env, getEnv |
 | Old-style stdlib imports | No | No | Yes | N/A | src + tests | `import json` vs `import std/json` |
 | Top-level mutable state | No | No | Yes | N/A | src/ only | `var` at module level |

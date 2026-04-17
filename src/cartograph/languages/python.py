@@ -146,6 +146,20 @@ class PythonEngine(LanguageEngine):
 
         deps = widget.get("dependencies", [])
         dep_names = {_dep_bare_name(d).lower() for d in deps if isinstance(d, str)}
+
+        # Map declared pip packages → top-level import names they provide.
+        # Handles python-docx → docx, Pillow → PIL, beautifulsoup4 → bs4, etc.
+        # Falls back to raw dep name when metadata isn't available (dep not installed).
+        provided_modules = set(dep_names)
+        try:
+            from importlib.metadata import packages_distributions
+            mod_to_pkgs = packages_distributions()
+            for mod, pkgs in mod_to_pkgs.items():
+                if any(p.lower() in dep_names for p in pkgs):
+                    provided_modules.add(mod.lower())
+        except Exception:
+            pass
+
         own_modules = {"src"}
         src_dir = os.path.join(path, "src")
         if os.path.isdir(src_dir):
@@ -246,23 +260,24 @@ class PythonEngine(LanguageEngine):
                                 f"sleep({node.args[0].value}) in {rel}:{node.lineno} - consider reducing sleep duration"
                             )
 
-            # Unlisted imports - runs on src, tests, AND examples. Tests and
-            # examples must only import stdlib, declared deps, or local src
-            # modules. own_modules already includes every .py file in src/ so
-            # local imports from tests (e.g. `from src.mymod import ...`) and
-            # examples are allowlisted.
+            # Unlisted imports - block in src/, warn in tests/examples. An import
+            # that isn't stdlib, a declared dep (resolved via importlib.metadata),
+            # a local src module, or a test framework will fail to install for
+            # users. Not overridable - fix is always trivial (add to deps or
+            # remove).
+            unlisted_sink = blocks if is_src else warnings
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         top = alias.name.split(".")[0].lower()
-                        if top and top not in self._STDLIB and top not in dep_names and top not in own_modules and top not in self._TEST_FRAMEWORKS:
-                            warnings.append(
+                        if top and top not in self._STDLIB and top not in provided_modules and top not in own_modules and top not in self._TEST_FRAMEWORKS:
+                            unlisted_sink.append(
                                 f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
                             )
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     top = node.module.split(".")[0].lower()
-                    if top and top not in self._STDLIB and top not in dep_names and top not in own_modules and top not in self._TEST_FRAMEWORKS:
-                        warnings.append(
+                    if top and top not in self._STDLIB and top not in provided_modules and top not in own_modules and top not in self._TEST_FRAMEWORKS:
+                        unlisted_sink.append(
                             f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
                         )
 

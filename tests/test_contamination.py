@@ -394,12 +394,14 @@ class TestContaminationStandard:
     # (Not applicable to SystemVerilog - no package imports in the same sense)
 
     @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
-    def test_unlisted_import_warns(self, tmp_path, lang):
+    def test_unlisted_import_flagged(self, tmp_path, lang):
+        """Unlisted imports must be flagged (block for python, warn for others)."""
         _skip_if_missing(lang)
         result = _scan(tmp_path, lang, EXT[lang], UNLISTED_IMPORT[lang])
-        assert any("unlisted" in w.lower() or "import" in w.lower()
-                    for w in result["warnings"]), \
-            f"{lang}: unlisted import should warn: {result['warnings']}"
+        all_findings = result["warnings"] + result["blocks"]
+        assert any("unlisted" in f.lower() or "import" in f.lower()
+                    for f in all_findings), \
+            f"{lang}: unlisted import should be flagged: {result}"
 
     @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_listed_import_no_warning(self, tmp_path, lang):
@@ -533,24 +535,27 @@ class TestPythonSpecific:
             f"abs_path in test files must block: {result}"
 
     def test_unlisted_import_in_test_warns(self, tmp_path):
-        """Tests must also only use stdlib, declared deps, or local src
-        modules. A third-party import in a test that isn't declared in
-        widget.json should warn."""
+        """Tests must only use stdlib, declared deps, or local src modules.
+        A third-party import in a test warns but does not block - tests are
+        not shipped to users, so a missing dep here is diagnostic only."""
         result = _scan(tmp_path, "python", "py",
                        "def f(): return 1\n",
                        test_code="import flask\ndef test_f(): assert True\n")
         assert any("flask" in w for w in result["warnings"]), \
             f"unlisted import in test must warn: {result['warnings']}"
+        assert not any("flask" in b for b in result["blocks"]), \
+            f"unlisted import in test must not block: {result['blocks']}"
 
     def test_unlisted_import_in_example_warns(self, tmp_path):
-        """Examples must also only use stdlib, declared deps, or local src
-        modules. A third-party import in an example without declaration
-        should warn."""
+        """Examples must only use stdlib, declared deps, or local src modules.
+        A third-party import in an example warns but does not block."""
         result = _scan(tmp_path, "python", "py",
                        "def f(): return 1\n",
                        example_code="import requests\nprint(requests.__name__)\n")
         assert any("requests" in w for w in result["warnings"]), \
             f"unlisted import in example must warn: {result['warnings']}"
+        assert not any("requests" in b for b in result["blocks"]), \
+            f"unlisted import in example must not block: {result['blocks']}"
 
     def test_local_src_import_in_test_not_warned(self, tmp_path):
         """Test importing a local src/ module must not warn as unlisted."""
@@ -632,19 +637,51 @@ class TestJSSpecific:
                         "const path = require('path')\n")
         assert not any("unlisted" in w.lower() for w in result["warnings"])
 
-    def test_multiline_require_warns_unlisted(self, tmp_path):
+    def test_vitest_import_in_test_not_flagged(self, tmp_path):
+        """Regression: vitest is the mandated JS test framework. Declared
+        in package.json devDependencies, never widget.json. Must not flag
+        as unlisted in test files - forcing an override every checkin is
+        bad UX and conflicts with our own validation requirement."""
+        result = _scan(tmp_path, "javascript", "js",
+                       "export function f() { return 1 }\n",
+                       test_code="import { test, expect } from 'vitest'\n"
+                                 "test('x', () => expect(1).toBe(1))\n")
+        assert not any("vitest" in w.lower() for w in result["warnings"]), \
+            f"vitest must not warn in tests: {result['warnings']}"
+        assert not any("vitest" in b.lower() for b in result["blocks"]), \
+            f"vitest must not block in tests: {result['blocks']}"
+
+    def test_jest_import_in_test_not_flagged(self, tmp_path):
+        """Same as vitest - jest is a canonical test framework."""
+        result = _scan(tmp_path, "javascript", "js",
+                       "export function f() { return 1 }\n",
+                       test_code="import { describe, it } from '@jest/globals'\n"
+                                 "describe('x', () => it('y', () => {}))\n")
+        assert not any("jest" in w.lower() for w in result["warnings"]), \
+            f"jest must not warn in tests: {result['warnings']}"
+
+    def test_test_framework_in_src_still_flagged(self, tmp_path):
+        """Allowlist applies to tests/examples only. If someone imports
+        vitest from src/, it's a real bug - block it."""
+        result = _scan(tmp_path, "javascript", "js",
+                       "import { test } from 'vitest'\n"
+                       "export function f() { return 1 }\n")
+        assert any("vitest" in b.lower() for b in result["blocks"]), \
+            f"vitest in src/ must still block: {result}"
+
+    def test_multiline_require_blocks_unlisted(self, tmp_path):
         result = _scan(
             tmp_path, "javascript", "js",
             "const axios = require(\n  'axios'\n)\n"
         )
-        assert any("unlisted" in w.lower() for w in result["warnings"])
+        assert any("unlisted" in b.lower() for b in result["blocks"])
 
-    def test_multiline_import_warns_unlisted(self, tmp_path):
+    def test_multiline_import_blocks_unlisted(self, tmp_path):
         result = _scan(
             tmp_path, "javascript", "js",
             "import {\n  thing\n} from 'axios'\n"
         )
-        assert any("unlisted" in w.lower() for w in result["warnings"])
+        assert any("unlisted" in b.lower() for b in result["blocks"])
 
     def test_multiline_settimeout_in_src_blocks(self, tmp_path):
         result = _scan(
@@ -1627,3 +1664,78 @@ class TestPhpSpecific:
         result = self._scan(tmp_path,
             "<?php\nclass Item { private $TIMEOUT = 30; }\n")
         assert any("hardcoded" in w.lower() for w in result["warnings"])
+
+    # -- resolver-based unlisted namespace check --
+
+    def _scan_with_autoload(self, tmp_path, src_content, psr4_roots,
+                             test_content="", example_content=""):
+        """Build a widget with a pre-populated vendor/composer/autoload_psr4.php
+        containing the given namespace roots, so scan_contamination uses the
+        real-resolver path instead of the heuristic fallback."""
+        wdir = tmp_path / "widget"
+        (wdir / "src").mkdir(parents=True)
+        (wdir / "tests").mkdir()
+        (wdir / "examples").mkdir()
+        (wdir / "vendor" / "composer").mkdir(parents=True)
+        (wdir / "composer.json").write_text('{"name":"test/widget"}')
+        psr4_entries = "\n".join(
+            f"    '{root}\\\\' => array(\\$vendorDir . '/fake')," for root in psr4_roots
+        )
+        (wdir / "vendor" / "composer" / "autoload_psr4.php").write_text(
+            "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n"
+            + psr4_entries + "\n);\n"
+        )
+        (wdir / "src" / "mod.php").write_text(src_content)
+        if test_content:
+            (wdir / "tests" / "test_mod.php").write_text(test_content)
+        if example_content:
+            (wdir / "examples" / "example_usage.php").write_text(example_content)
+        engine = PhpEngine()
+        return engine.scan_contamination(
+            str(wdir), {"language": "php", "dependencies": []}
+        )
+
+    def test_resolver_blocks_unknown_namespace_in_src(self, tmp_path):
+        """When composer autoload exists and namespace is not there, src/
+        use statements must BLOCK (authoritative resolution)."""
+        result = self._scan_with_autoload(tmp_path,
+            "<?php\nuse Nesbot\\Carbon\\Carbon;\n"
+            "class Item { public function get(): mixed { return 1; } }\n",
+            psr4_roots=["Symfony"])  # Carbon is NOT in autoload
+        assert any("nesbot" in b.lower() and "unlisted" in b.lower()
+                   for b in result["blocks"]), \
+            f"unresolvable namespace must block in src/: {result}"
+
+    def test_resolver_accepts_known_namespace(self, tmp_path):
+        """When composer autoload lists the namespace root, no warning."""
+        result = self._scan_with_autoload(tmp_path,
+            "<?php\nuse Carbon\\Carbon;\n"
+            "class Item { public function get(): mixed { return 1; } }\n",
+            psr4_roots=["Carbon"])
+        assert not any("unlisted" in b.lower() for b in result["blocks"])
+        assert not any("unlisted" in w.lower() for w in result["warnings"])
+
+    def test_resolver_handles_vendor_namespace_mismatch(self, tmp_path):
+        """Regression for Nesbot\\Carbon case: composer package is nesbot/carbon
+        but namespace root is Carbon. The autoload table is ground truth and
+        reports Carbon, so a use of Carbon\\... must not flag even though the
+        vendor prefix differs."""
+        result = self._scan_with_autoload(tmp_path,
+            "<?php\nuse Carbon\\CarbonImmutable;\n"
+            "class Item { public function get(): mixed { return 1; } }\n",
+            psr4_roots=["Carbon"])
+        assert not any("unlisted" in b.lower() for b in result["blocks"])
+        assert not any("unlisted" in w.lower() for w in result["warnings"])
+
+    def test_resolver_warns_in_tests_not_blocks(self, tmp_path):
+        """Unknown namespace in tests/ warns but does not block."""
+        result = self._scan_with_autoload(tmp_path,
+            "<?php\nclass Item { public function get(): mixed { return 1; } }\n",
+            psr4_roots=["Carbon"],
+            test_content="<?php\nuse Faker\\Factory;\n"
+                         "class ItemTest extends \\PHPUnit\\Framework\\TestCase {}\n")
+        assert any("faker" in w.lower() and "unlisted" in w.lower()
+                   for w in result["warnings"]), \
+            f"unknown namespace in test must warn: {result}"
+        assert not any("faker" in b.lower() for b in result["blocks"]), \
+            f"unknown namespace in test must not block: {result}"

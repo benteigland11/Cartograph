@@ -228,7 +228,7 @@ class JavaScriptEngine(LanguageEngine):
         "hardcoded_ip": "Hardcoded IPs found in src/ - consider making these configurable:",
         "hardcoded_value": "Hardcoded values found in src/ - consider making these configurable:",
         "env_var": "Environment variable access found in src/ - verify it's not project-specific:",
-        "unlisted_import": "Unlisted imports found in src/ - add to dependencies or remove:",
+        "unlisted_import": "Unlisted imports - add to widget.json dependencies or remove:",
         "sleep": "Sleep/blocking calls found - widgets must not block the caller:",
         "risky_import": "Node.js I/O or network imports found in src/ - ensure no hardcoded paths, URLs, or commands:",
     }
