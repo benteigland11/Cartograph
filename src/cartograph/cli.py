@@ -1620,6 +1620,8 @@ current directory (or the directory specified by `--target`).
 
     checkin [path] --reason "..." [--bump patch|minor|major] [--publish]
       Push an edited widget back to the library. Runs validation if needed.
+      Version is managed by Cartograph - do NOT hand-edit the version
+      field in widget.json. Use --bump to increment.
 
     rollback <widget_id> [--version X] [--reason "..."]
       Restore a previous version of a widget from history.
