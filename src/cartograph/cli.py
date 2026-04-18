@@ -1682,39 +1682,51 @@ If you are adding a feature always consider whether it can be added into an exis
 Only project specific wiring should not be made into widgets.
 
 1. Plan what components you need before building
-2. Search the library before writing new logic
-3. Install widgets, then write glue code to connect them. Don't edit widget source directly for this step.
-4. If you do edit a widget, only do so if you intend to check it back in as an improvement for the general logic of the widget.
-5. Validate before checking in, check in before publishing
+2. Decide whether new implementation can just be an improvement on currently used widgets. Read the widgets before deciding.
+3. Search the library before writing new logic
+4. Install widgets, then write glue code to connect them. Don't edit widget source directly for this step.
+5. If you do edit a widget, only do so if you intend to check it back in as an improvement for the general logic of the widget.
+6. Validate before checking in, check in before publishing
+
+Definition of reusable code: Any code that would be written for another project. A lot of code may look "project specific" but if you peel back the logic you will realize it can be used across many projects. These are the widgets that need to be extracted, or made.
 """
 
 _AGENT_FILENAMES = {
     "claude":       "CLAUDE.md",
     "codex":        "AGENTS.md",
+    "agents":       "AGENTS.md",
     "gemini":       "GEMINI.md",
     "antigravity":  "GEMINI.md",
     "cursor":       os.path.join(".cursor", "rules", "cartograph.mdc"),
 }
 
-_AGENT_GENERIC_FILE = "AGENT.md"
+_AGENT_GENERIC_FILE = "AGENTS.md"
 
 
 def _detect_agent(directory: str) -> tuple[str | None, str | None]:
-    """Auto-detect which AI agent is in use from project files.
+    """Auto-detect which AI agent is in use.
 
     Returns (agent_name, reason) or (None, None) if nothing detected.
-    Detection order matters - first match wins.
+    Detection order: env vars (authoritative during active session) first,
+    then per-project markers. Codex is intentionally not autodetected - it
+    does not set a subprocess env var (see openai/codex#13416), and AGENTS.md
+    is the generic cross-agent convention, not codex-specific. Users who
+    want codex-specific setup pass --agent codex.
     """
+    if os.environ.get("CLAUDECODE") == "1":
+        return "claude", "CLAUDECODE env var"
+    if os.environ.get("GEMINI_CLI") == "1":
+        return "gemini", "GEMINI_CLI env var"
     if os.path.isdir(os.path.join(directory, ".claude")):
         return "claude", ".claude/ directory"
     if os.path.isfile(os.path.join(directory, "CLAUDE.md")):
         return "claude", "CLAUDE.md"
     if os.path.isdir(os.path.join(directory, ".cursor")):
         return "cursor", ".cursor/ directory"
-    if os.path.isfile(os.path.join(directory, "AGENTS.md")):
-        return "codex", "AGENTS.md"
     if os.path.isfile(os.path.join(directory, "GEMINI.md")):
         return "gemini", "GEMINI.md"
+    if os.path.isfile(os.path.join(directory, "AGENTS.md")):
+        return "agents", "AGENTS.md"
     return None, None
 
 
@@ -2034,8 +2046,8 @@ def cmd_setup(args):
             print("    cartograph setup --agent claude       specify agent explicitly")
             print("    cartograph setup --file instructions.md   write to a custom file")
             print()
-            print(f"  Or create a generic AGENT.md:")
-            print(f"    cartograph setup --file AGENT.md")
+            print(f"  Or write a generic AGENTS.md (cross-agent convention):")
+            print(f"    cartograph setup --agent agents")
             print()
             return
 

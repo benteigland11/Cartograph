@@ -126,7 +126,10 @@ If you are adding a feature always consider whether it can be added into an exis
 Only project specific wiring should not be made into widgets.
 
 1. Plan what components you need before building
-2. Search the library before writing new logic
-3. Install widgets, then write glue code to connect them. Don't edit widget source directly for this step.
-4. If you do edit a widget, only do so if you intend to check it back in as an improvement for the general logic of the widget.
-5. Validate before checking in, check in before publishing
+2. Decide whether new implementation can just be an improvement on currently used widgets. Read the widgets before deciding.
+3. Search the library before writing new logic
+4. Install widgets, then write glue code to connect them. Don't edit widget source directly for this step.
+5. If you do edit a widget, only do so if you intend to check it back in as an improvement for the general logic of the widget.
+6. Validate before checking in, check in before publishing
+
+Definition of reusable code: Any code that would be written for another project. A lot of code may look "project specific" but if you peel back the logic you will realize it can be used across many projects. These are the widgets that need to be extracted, or made.

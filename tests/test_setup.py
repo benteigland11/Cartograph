@@ -4,6 +4,23 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _clear_agent_env(monkeypatch):
+    """Clear agent env vars so tests reflect per-project marker logic only.
+    Without this, running the test suite inside an active agent session
+    (e.g. Claude Code) would make CLAUDECODE=1 leak into every test."""
+    for var in ("CLAUDECODE", "GEMINI_CLI", "AGENT"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def _clean_subprocess_env():
+    """Environment for subprocess tests with agent env vars stripped."""
+    env = os.environ.copy()
+    for var in ("CLAUDECODE", "GEMINI_CLI", "AGENT"):
+        env.pop(var, None)
+    return env
+
+
 # ---------------------------------------------------------------------------
 # _detect_agent
 # ---------------------------------------------------------------------------
@@ -15,6 +32,24 @@ def test_detect_claude_from_dotdir(tmp_path):
     agent, reason = _detect_agent(str(tmp_path))
     assert agent == "claude"
     assert ".claude/" in reason
+
+
+def test_detect_claude_from_env_var(tmp_path, monkeypatch):
+    """CLAUDECODE=1 env var takes precedence over missing per-project markers."""
+    from cartograph.cli import _detect_agent
+    monkeypatch.setenv("CLAUDECODE", "1")
+    agent, reason = _detect_agent(str(tmp_path))
+    assert agent == "claude"
+    assert "CLAUDECODE" in reason
+
+
+def test_detect_gemini_from_env_var(tmp_path, monkeypatch):
+    """GEMINI_CLI=1 env var is authoritative."""
+    from cartograph.cli import _detect_agent
+    monkeypatch.setenv("GEMINI_CLI", "1")
+    agent, reason = _detect_agent(str(tmp_path))
+    assert agent == "gemini"
+    assert "GEMINI_CLI" in reason
 
 
 def test_detect_claude_from_file(tmp_path):
@@ -35,12 +70,15 @@ def test_detect_cursor(tmp_path):
     assert ".cursor/" in reason
 
 
-def test_detect_codex(tmp_path):
-    """Detect codex from AGENTS.md file."""
+def test_detect_agents_generic(tmp_path):
+    """AGENTS.md maps to generic 'agents' (cross-agent convention), not codex.
+    Codex does not yet set a subprocess env var (openai/codex#13416) and
+    AGENTS.md is used by Codex, Amp, and others - not codex-specific."""
     from cartograph.cli import _detect_agent
     (tmp_path / "AGENTS.md").write_text("# agents")
     agent, reason = _detect_agent(str(tmp_path))
-    assert agent == "codex"
+    assert agent == "agents"
+    assert "AGENTS.md" in reason
 
 
 def test_detect_gemini(tmp_path):
@@ -79,6 +117,7 @@ def test_setup_print_mode(tmp_path):
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup", "--print"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
     assert "## Cartograph" in result.stdout
@@ -93,6 +132,7 @@ def test_setup_writes_to_detected_agent(tmp_path):
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
     assert "Appended to" in result.stdout
@@ -110,6 +150,7 @@ def test_setup_appends_not_replaces(tmp_path):
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
     content = (tmp_path / "CLAUDE.md").read_text()
@@ -125,11 +166,13 @@ def test_setup_duplicate_detection(tmp_path):
     subprocess.run(
         ["python", "-m", "cartograph", "setup"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     # Second run
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
     assert "already exists" in result.stdout
@@ -141,6 +184,7 @@ def test_setup_custom_file(tmp_path):
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup", "--file", "opencode.md"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
     assert (tmp_path / "opencode.md").exists()
@@ -154,6 +198,7 @@ def test_setup_explicit_agent(tmp_path):
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup", "--agent", "codex"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
     assert (tmp_path / "AGENTS.md").exists()
@@ -165,6 +210,7 @@ def test_setup_no_agent_no_file_shows_help(tmp_path):
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
     assert "Could not auto-detect" in result.stdout
@@ -179,6 +225,7 @@ def test_setup_with_workflow(tmp_path):
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup", "--workflow"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
     content = (tmp_path / "CLAUDE.md").read_text()
@@ -192,5 +239,6 @@ def test_setup_without_workflow_shows_tip(tmp_path):
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
         capture_output=True, text=True, cwd=str(tmp_path),
+        env=_clean_subprocess_env(),
     )
     assert "Tip: add --workflow" in result.stdout
