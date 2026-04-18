@@ -13,6 +13,8 @@ Cartograph came out of a personal frustration. Features that took 10 to 20 hours
 
 Those same widgets have now been reused across many projects and have settled into a quiet loop of continuous improvement. Each time a new edge case surfaces, the fix goes back into the library, and every project that installs it going forward starts with that bug already squashed.
 
+*Per aspera ad astra.* Through hardships to the stars. This is a tool that takes struggle to get the benefits, and they will compound.
+
 ## What is a widget?
 
 A widget is a reusable code module with tests, examples, metadata, and declared dependencies. Each widget is self-contained and language-specific.
