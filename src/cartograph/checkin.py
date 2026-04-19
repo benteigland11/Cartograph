@@ -61,8 +61,13 @@ from .contamination import scan_contamination as _scan_contamination
 
 
 def _lookup_cloud_baseline(path: str, item_id: str) -> dict | None:
-    """Return {"version": ..., "source": "cloud"} if a .cartograph_source sidecar
-    points at a cloud record for this widget, else None.
+    """Return {"version": ..., "implementation_hash": ..., "source": "cloud"} if a
+    `.cartograph_source` sidecar points at a cloud record for this widget, else None.
+
+    `implementation_hash` is only populated when the registry echoes it back in the
+    inspect response (issue #15). When present, it lets the no-op guard and the
+    three-way status view run against the cloud baseline without downloading the
+    widget zip. When absent, callers fall back to their pre-echo behavior gracefully.
 
     Sidecar-only: we don't probe the cloud for widgets that weren't installed
     from it. Falls back silently when offline, unauthenticated, or the widget
@@ -95,7 +100,11 @@ def _lookup_cloud_baseline(path: str, item_id: str) -> dict | None:
     version = remote.get("version")
     if not version:
         return None
-    return {"version": version, "source": "cloud"}
+    result = {"version": version, "source": "cloud"}
+    impl_hash = remote.get("implementation_hash")
+    if impl_hash:
+        result["implementation_hash"] = impl_hash
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -172,14 +181,22 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
                 "message": f"Version conflict: local is v{local_version} but {baseline_source} is v{baseline_version}. "
                            f"Install the latest version first, apply your changes, then checkin."
             }
-        # --- No-op guard (local only — we don't have a cloud impl hash) ---
-        if widget_record:
+        # --- No-op guard ---
+        # Runs against whichever baseline we resolved, as long as that baseline
+        # has an implementation_hash to compare against. Library always does;
+        # cloud does once the registry starts echoing it (issue #15). If the
+        # cloud baseline has no hash yet, the guard is silently skipped for
+        # that case — no false-positive bumps, no missed real changes.
+        if cloud_baseline:
+            baseline_hash = cloud_baseline.get("implementation_hash")
+        else:
+            baseline_hash = widget_record.get("implementation_hash")
+        if baseline_hash:
             current_hash = carto._calculate_implementation_hash(path)
-            library_hash = widget_record.get("implementation_hash")
-            if library_hash and current_hash == library_hash:
+            if current_hash == baseline_hash:
                 return {
                     "status": "error",
-                    "message": f"{item_id} v{baseline_version} is already in the library with identical content. "
+                    "message": f"{item_id} v{baseline_version} is already in the {baseline_source} with identical content. "
                                f"Make your changes before checking in."
                 }
 
@@ -486,10 +503,22 @@ def widget_status(carto, widget_id, target_dir):
     outdated = installed_version != library_version
     modified = installed_hash != library_hash
 
+    # Cloud three-way comparison — populated when the installed copy has a
+    # sidecar AND the registry echoes implementation_hash (issue #15). Without
+    # the echo we still surface cloud_version; modified_vs_cloud stays absent.
+    cloud_info = _lookup_cloud_baseline(installed_path, widget_id) or {}
+    cloud_version = cloud_info.get("version")
+    cloud_hash = cloud_info.get("implementation_hash")
+
     return {
         "widget_id": widget_id,
         "installed_version": installed_version,
         "library_version": library_version,
+        "cloud_version": cloud_version,
+        **({"outdated_vs_cloud": installed_version != cloud_version}
+           if cloud_version else {}),
+        **({"modified_vs_cloud": installed_hash != cloud_hash}
+           if cloud_hash else {}),
         "outdated": outdated,
         "modified": modified,
     }

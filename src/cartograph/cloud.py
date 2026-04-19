@@ -30,10 +30,48 @@ _TIMEOUT = 10  # seconds
 
 
 # ---------------------------------------------------------------------------
+# @endpoint decorator (dogfooded from infra-http-endpoint-registry-python)
+# ---------------------------------------------------------------------------
+# Loaded by file path to sidestep the `src/` namespace collision with this
+# repo's own src/cartograph/. Metadata attached to each decorated function
+# is introspected by scripts/gen_openapi.py to produce the OpenAPI spec.
+
+def _load_endpoint_decorator():
+    import importlib.util
+    here = os.path.dirname(__file__)
+    candidates = [
+        os.path.join(here, "..", "..", "cg", "infra_http_endpoint_registry_python",
+                     "src", "http_endpoint_registry.py"),
+        os.path.join(here, "..", "cg", "infra_http_endpoint_registry_python",
+                     "src", "http_endpoint_registry.py"),
+    ]
+    widget_file = next((c for c in candidates if os.path.isfile(c)), candidates[-1])
+    spec = importlib.util.spec_from_file_location("_cg_endpoint_registry", widget_file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.endpoint, module.get_endpoints
+
+
+endpoint, get_endpoints = _load_endpoint_decorator()
+
+
+# ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
+# HTTP plumbing is delegated to the dogfooded `infra-urllib-client-python`
+# widget. The five module-level helpers below (_get/_post/_patch/_delete/
+# _post_multipart) keep their names and signatures so every existing caller
+# works unchanged, but their bodies are thin wrappers around a shared
+# HTTPClient instance. Two functions stay on raw urllib and are
+# intentionally not routed through the client:
+#   * download_widget() — needs response-header access (X-Widget-Version,
+#     X-Widget-Governance) which the widget's client doesn't expose.
+#   * login_with_credentials() — distinct auth path, different endpoint
+#     surface, not worth routing through the shared client.
+# is_available() also uses raw urllib so it can skip auth entirely.
 
 def _headers(registry_url: str | None = None) -> dict:
+    """Header dict including auth, used by the raw-urllib paths above."""
     from .auth import get_token
     token = get_token(registry_url)
     h = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -47,102 +85,76 @@ def _registry_url() -> str:
     return get_registry_url().rstrip("/")
 
 
+def _auth_headers(url: str) -> dict:
+    """Auth callback for the shared HTTPClient. Called per-request with the
+    resolved base URL so token lookup respects registry-specific tokens."""
+    from .auth import get_token
+    token = get_token(url)
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _http_client():
+    """Lazily construct the shared HTTPClient. File-path import avoids the
+    `src/` namespace collision with this repo's own src/cartograph/."""
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is not None:
+        return _HTTP_CLIENT
+    import importlib.util
+    here = os.path.dirname(__file__)
+    candidates = [
+        os.path.join(here, "..", "..", "cg", "infra_urllib_client_python",
+                     "src", "urllib_client.py"),
+        os.path.join(here, "..", "cg", "infra_urllib_client_python",
+                     "src", "urllib_client.py"),
+    ]
+    widget_file = next((c for c in candidates if os.path.isfile(c)), candidates[-1])
+    spec = importlib.util.spec_from_file_location("_cg_urllib_client", widget_file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # base_url is a placeholder — every call passes base_url= explicitly so
+    # the client can target any registry via per-request override.
+    from . import __version__
+    _HTTP_CLIENT = module.HTTPClient(
+        base_url="http://placeholder.invalid",
+        auth_headers=_auth_headers,
+        default_timeout=_TIMEOUT,
+        multipart_timeout=30.0,
+        user_agent=f"cartograph/{__version__}",
+    )
+    return _HTTP_CLIENT
+
+
+_HTTP_CLIENT = None
+
+
+def _resolve_base(registry_url: str | None) -> str:
+    return registry_url.rstrip("/") if registry_url else _registry_url()
+
+
 def _get(path: str, registry_url: str | None = None) -> dict:
-    base = registry_url.rstrip("/") if registry_url else _registry_url()
-    url = base + path
-    req = urllib.request.Request(url, headers=_headers(registry_url))
-    try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        body = {}
-        try:
-            body = json.loads(e.read())
-        except Exception:
-            pass
-        return {"error": body.get("detail", str(e)), "status_code": e.code}
-    except Exception as e:
-        return {"error": str(e)}
+    return _http_client().get(path, base_url=_resolve_base(registry_url))
 
 
 def _post(path: str, data: dict, registry_url: str | None = None) -> dict:
-    base = registry_url.rstrip("/") if registry_url else _registry_url()
-    url = base + path
-    payload = json.dumps(data).encode()
-    req = urllib.request.Request(url, data=payload, headers=_headers(registry_url), method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        body = {}
-        try:
-            body = json.loads(e.read())
-        except Exception:
-            pass
-        return {"error": body.get("detail", str(e)), "status_code": e.code}
-    except Exception as e:
-        return {"error": str(e)}
+    return _http_client().post(path, data=data, base_url=_resolve_base(registry_url))
 
 
 def _patch(path: str, data: dict, registry_url: str | None = None) -> dict:
-    base = registry_url.rstrip("/") if registry_url else _registry_url()
-    url = base + path
-    payload = json.dumps(data).encode()
-    req = urllib.request.Request(url, data=payload, headers=_headers(registry_url), method="PATCH")
-    try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        body = {}
-        try:
-            body = json.loads(e.read())
-        except Exception:
-            pass
-        return {"error": body.get("detail", str(e)), "status_code": e.code}
-    except Exception as e:
-        return {"error": str(e)}
+    return _http_client().patch(path, data=data, base_url=_resolve_base(registry_url))
 
 
 def _post_multipart(path: str, fields: dict, file_data: bytes, filename: str,
                     registry_url: str | None = None) -> dict:
     """POST multipart/form-data with a single file attachment."""
-    boundary = b"cartograph_boundary_" + os.urandom(8).hex().encode()
-    body_parts = []
-
-    for key, value in fields.items():
-        body_parts.append(
-            b"--" + boundary + b"\r\n"
-            b'Content-Disposition: form-data; name="' + key.encode() + b'"\r\n\r\n'
-            + str(value).encode() + b"\r\n"
-        )
-
-    body_parts.append(
-        b"--" + boundary + b"\r\n"
-        b'Content-Disposition: form-data; name="file"; filename="' + filename.encode() + b'"\r\n'
-        b"Content-Type: application/zip\r\n\r\n"
-        + file_data + b"\r\n"
+    return _http_client().post_multipart(
+        path,
+        fields=fields,
+        file_data=file_data,
+        filename=filename,
+        file_field_name="file",
+        file_content_type="application/zip",
+        base_url=_resolve_base(registry_url),
     )
-    body_parts.append(b"--" + boundary + b"--\r\n")
-
-    body = b"".join(body_parts)
-    headers = _headers(registry_url)
-    headers["Content-Type"] = f"multipart/form-data; boundary={boundary.decode()}"
-
-    base = registry_url.rstrip("/") if registry_url else _registry_url()
-    url = base + path
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        body_resp = {}
-        try:
-            body_resp = json.loads(e.read())
-        except Exception:
-            pass
-        return {"error": body_resp.get("detail", str(e)), "status_code": e.code}
-    except Exception as e:
-        return {"error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +204,10 @@ def _validate_widgets(widgets: list, context: str = "") -> list:
     return valid
 
 
+@endpoint("GET", "/v1/widgets/search",
+          response="SearchResponse",
+          tags=["Widgets"],
+          summary="Search the widget registry")
 def search(query: str, domain_filter: str | None = None,
            language_filter: str | None = None, top_k: int = 10,
            registry_url: str | None = None) -> dict:
@@ -218,6 +234,10 @@ def search(query: str, domain_filter: str | None = None,
     return {"widgets": widgets, "source": "cloud"}
 
 
+@endpoint("GET", "/v1/users/search",
+          response="UserSearchResponse",
+          tags=["Users"],
+          summary="Search users by handle or name")
 def search_users(query: str, top_k: int = 20) -> dict:
     """
     Search the cloud registry for users by handle/name.
@@ -231,6 +251,22 @@ def search_users(query: str, top_k: int = 20) -> dict:
     return {"users": result.get("users", [])}
 
 
+@endpoint("POST", "/v1/widgets/{widget_id}/publish",
+          response="PushResponse",
+          multipart={
+              "fields": {
+                  "widget_id": "str",
+                  "visibility": "str",
+                  "stamp": "str",
+                  "allowed_extensions": "str",
+                  "implementation_hash": "str",
+                  "governance": "str",
+              },
+              "file_field": "file",
+              "required": ["widget_id", "stamp"],
+          },
+          tags=["Widgets"],
+          summary="Publish a widget version")
 def push(widget_path: str, widget_id: str, visibility: str = "public",
          governance: str | None = None, registry_url: str | None = None) -> dict:
     """
@@ -293,11 +329,19 @@ def push(widget_path: str, widget_id: str, visibility: str = "public",
     )
 
 
+@endpoint("GET", "/v1/auth/me",
+          response="WhoamiResponse",
+          tags=["Auth"],
+          summary="Return the current authenticated user's profile")
 def whoami() -> dict:
     """Return the current user's profile, or {"error": ...}."""
     return _get("/v1/auth/me")
 
 
+@endpoint("GET", "/v1/widgets/{owner_handle}/{widget_id}",
+          response="InspectResponse",
+          tags=["Widgets"],
+          summary="Fetch a widget's metadata (optionally with source)")
 def inspect(owner_handle: str, widget_id: str, source: bool = False,
             registry_url: str | None = None) -> dict:
     """Inspect a cloud widget. Public widgets don't require auth.
@@ -310,6 +354,20 @@ def inspect(owner_handle: str, widget_id: str, source: bool = False,
     return _get(path, registry_url=registry_url)
 
 
+@endpoint("GET", "/v1/widgets/{owner_handle}/{widget_id}/download",
+          responses={
+              200: {
+                  "description": "Widget zip. X-Widget-Version and X-Widget-Governance response headers carry metadata.",
+                  "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}},
+                  "headers": {
+                      "X-Widget-Version": {"schema": {"type": "string"}},
+                      "X-Widget-Governance": {"schema": {"type": "string"}},
+                  },
+              },
+              404: {"description": "Widget not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+          },
+          tags=["Widgets"],
+          summary="Download a widget's zip bundle")
 def download_widget(owner_handle: str, widget_id: str,
                     registry_url: str | None = None) -> dict:
     """Download a widget zip from the cloud registry.
@@ -342,6 +400,10 @@ def download_widget(owner_handle: str, widget_id: str,
         return {"error": f"Download failed: {e}"}
 
 
+@endpoint("GET", "/v1/registry/info",
+          response="RegistryInfoResponse",
+          tags=["Registry"],
+          summary="Advertise registry capabilities (e.g. supports_visibility)")
 def registry_info() -> dict:
     """Fetch registry capabilities (e.g. whether it validates widgets).
 
@@ -355,34 +417,32 @@ def registry_info() -> dict:
     return result
 
 
+@endpoint("GET", "/v1/widgets",
+          response="ListWidgetsResponse",
+          tags=["Widgets"],
+          summary="List all widgets in the registry")
 def list_widgets(top_k: int = 500) -> dict:
     """Return all cloud widgets, or {"error": ...}."""
     return _get(f"/v1/widgets?top_k={top_k}")
 
 
 def _delete(path: str, registry_url: str | None = None) -> dict:
-    base = registry_url.rstrip("/") if registry_url else _registry_url()
-    url = base + path
-    req = urllib.request.Request(url, headers=_headers(registry_url), method="DELETE")
-    try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        body = {}
-        try:
-            body = json.loads(e.read())
-        except Exception:
-            pass
-        return {"error": body.get("detail", str(e)), "status_code": e.code}
-    except Exception as e:
-        return {"error": str(e)}
+    return _http_client().delete(path, base_url=_resolve_base(registry_url))
 
 
+@endpoint("DELETE", "/v1/widgets/{widget_id}",
+          response="DeleteResponse",
+          tags=["Widgets"],
+          summary="Delete a widget from the registry")
 def delete_widget(widget_id: str, registry_url: str | None = None) -> dict:
     """Delete a widget from the cloud registry."""
     return _delete(f"/v1/widgets/{urllib.parse.quote(widget_id, safe='')}", registry_url=registry_url)
 
 
+@endpoint("GET", "/v1/widgets/{owner_handle}/{widget_id}/reviews",
+          response="ReviewsResponse",
+          tags=["Reviews"],
+          summary="List reviews for a widget")
 def get_reviews(owner_handle: str, widget_id: str,
                 registry_url: str | None = None) -> dict:
     """Fetch reviews for a cloud widget.
@@ -400,6 +460,10 @@ def get_reviews(owner_handle: str, widget_id: str,
     return result
 
 
+@endpoint("POST", "/v1/widgets/{owner_handle}/{widget_id}/rate",
+          response="RateResponse",
+          tags=["Reviews"],
+          summary="Rate a widget 1-5 with an optional comment")
 def rate_widget(owner_handle: str, widget_id: str, score: int, comment: str = "",
                 registry_url: str | None = None) -> dict:
     """Rate a cloud widget."""
@@ -410,6 +474,10 @@ def rate_widget(owner_handle: str, widget_id: str, score: int, comment: str = ""
                  {}, registry_url=registry_url)
 
 
+@endpoint("GET", "/v1/widgets/{owner_handle}/{widget_id}/versions",
+          response="VersionsResponse",
+          tags=["Versions"],
+          summary="List published versions of a widget")
 def get_versions(owner_handle: str, widget_id: str,
                  registry_url: str | None = None) -> dict:
     """List available versions for a cloud widget.
@@ -427,6 +495,10 @@ def get_versions(owner_handle: str, widget_id: str,
     return result
 
 
+@endpoint("POST", "/v1/widgets/{owner_handle}/{widget_id}/rollback",
+          response="RollbackResponse",
+          tags=["Versions"],
+          summary="Roll a widget back to an earlier published version")
 def rollback_widget(owner_handle: str, widget_id: str, version: str,
                     registry_url: str | None = None) -> dict:
     """Roll back a cloud widget to a previous version."""
@@ -439,11 +511,19 @@ def rollback_widget(owner_handle: str, widget_id: str, version: str,
     )
 
 
+@endpoint("GET", "/v1/auth/tos",
+          response="TosResponse",
+          tags=["Auth"],
+          summary="Fetch the registry's terms of service")
 def get_tos() -> dict:
     """Fetch current TOS text and version from registry."""
     return _get("/v1/auth/tos")
 
 
+@endpoint("POST", "/v1/auth/accept-tos",
+          response="AcceptTosResponse",
+          tags=["Auth"],
+          summary="Record that the current user has accepted the ToS")
 def accept_tos() -> dict:
     """Accept the current TOS version."""
     return _post("/v1/auth/accept-tos", {})
@@ -500,6 +580,11 @@ def login_with_credentials(id_token: str, refresh_token: str,
 # Governance & Proposals
 # ---------------------------------------------------------------------------
 
+@endpoint("PATCH", "/v1/widgets/{owner_handle}/{widget_id}",
+          response="UpdateWidgetResponse",
+          request="UpdateWidgetResponse",
+          tags=["Widgets"],
+          summary="Update a widget's settings (governance, visibility)")
 def update_widget(owner_handle: str, widget_id: str,
                   registry_url: str | None = None, **kwargs) -> dict:
     """PATCH a cloud widget's settings (e.g. governance)."""
@@ -530,6 +615,20 @@ def _zip_widget(widget_path: str) -> bytes:
     return buf.getvalue()
 
 
+@endpoint("POST", "/v1/widgets/{owner_handle}/{widget_id}/contribute",
+          response="ProposalResponse",
+          multipart={
+              "fields": {
+                  "reason": "str",
+                  "stamp": "str",
+                  "allowed_extensions": "str",
+                  "implementation_hash": "str",
+              },
+              "file_field": "file",
+              "required": ["reason", "stamp"],
+          },
+          tags=["Proposals"],
+          summary="Submit a proposal against someone else's widget")
 def propose(widget_path: str, owner_handle: str, widget_id: str,
             reason: str, registry_url: str | None = None) -> dict:
     """Propose a contribution to someone else's widget.
@@ -578,11 +677,19 @@ def propose(widget_path: str, owner_handle: str, widget_id: str,
     )
 
 
+@endpoint("GET", "/v1/auth/my-proposals",
+          response="ProposalListResponse",
+          tags=["Proposals"],
+          summary="List proposals submitted by the current user")
 def my_proposals(registry_url: str | None = None) -> dict:
     """List the authenticated user's proposals."""
     return _get("/v1/auth/my-proposals", registry_url=registry_url)
 
 
+@endpoint("GET", "/v1/auth/my-widgets",
+          response="MyWidgetsResponse",
+          tags=["Widgets"],
+          summary="List widgets owned by the current user (public and private)")
 def list_my_widgets(registry_url: str | None = None) -> list[dict]:
     """Return the authenticated user's cloud widgets (public and private), or empty list on failure."""
     result = _get("/v1/auth/my-widgets", registry_url=registry_url)
@@ -591,6 +698,10 @@ def list_my_widgets(registry_url: str | None = None) -> list[dict]:
     return _validate_widgets(result.get("widgets", []), context="my-widgets")
 
 
+@endpoint("GET", "/v1/widgets/{owner_handle}/{widget_id}/proposals",
+          response="ProposalListResponse",
+          tags=["Proposals"],
+          summary="List proposals against a widget (owner view)")
 def list_proposals(owner_handle: str, widget_id: str,
                    registry_url: str | None = None) -> dict:
     """List proposals for a widget (owner view)."""
@@ -601,6 +712,9 @@ def list_proposals(owner_handle: str, widget_id: str,
     )
 
 
+@endpoint("POST", "/v1/widgets/{owner_handle}/{widget_id}/proposals/{proposal_id}/accept",
+          tags=["Proposals"],
+          summary="Accept a proposal into the widget")
 def accept_proposal(owner_handle: str, widget_id: str,
                     proposal_id: str, registry_url: str | None = None) -> dict:
     """Accept a proposal."""
@@ -613,6 +727,9 @@ def accept_proposal(owner_handle: str, widget_id: str,
     )
 
 
+@endpoint("POST", "/v1/widgets/{owner_handle}/{widget_id}/proposals/{proposal_id}/reject",
+          tags=["Proposals"],
+          summary="Reject a proposal with an optional reason")
 def reject_proposal(owner_handle: str, widget_id: str,
                     proposal_id: str, reason: str = "",
                     registry_url: str | None = None) -> dict:
