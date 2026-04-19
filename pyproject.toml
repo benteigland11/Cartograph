@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cartograph-cli"
-version = "0.5.28"
+version = "0.5.29"
 description = "Widget library manager for AI agents — CLI"
 readme = "README.md"
 license = "MIT"
