@@ -466,6 +466,11 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
             else:
                 status = propose_result.get("status", "proposed")
                 print(f"  → Proposal {status}: {propose_result.get('proposal_id', '')}")
+                # Governance is inferred from the route the server took:
+                # "published" == origin was open (auto-merged)
+                # "proposed"  == origin was protected (queued for review)
+                inferred = "open (auto-merged)" if status == "published" else "protected (queued for review)"
+                print(f"  → governance: {inferred}  |  origin: @{origin_owner}")
             return
         # Own widget - sidecar has previously established home registry
         registry_url = source.get("registry_url")
@@ -509,6 +514,19 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
                 sidecar["governance"] = published_governance
             with open(os.path.join(widget_path, ".cartograph_source"), "w") as _f:
                 json.dump(sidecar, _f)
+            # One-line governance reminder on every cloud write. Keeps the
+            # author aware of which model their widget ships under without
+            # nagging (no actionable "change it with" text — cloud settings
+            # is in the command reference for when someone actually wants to
+            # flip it).
+            # Owner comes from the server response (namespaced_id = owner/id)
+            # — the registry is the authority on which account the widget
+            # actually landed under. No whoami fallback (that conflates "who
+            # am I" with "who owns this widget").
+            effective_gov = published_governance or governance or "protected"
+            owner_handle = namespaced.split("/", 1)[0] if "/" in namespaced else ""
+            owner_tag = f"@{owner_handle}" if owner_handle else "unknown"
+            print(f"  → governance: {effective_gov}  |  owner: {owner_tag}")
         except Exception:
             pass  # sidecar is best-effort; push already succeeded
 
@@ -551,10 +569,7 @@ def _paginate_widget():
     if _PAGINATE_FN is not None:
         return _PAGINATE_FN
     import importlib.util
-    widget_file = os.path.join(
-        os.path.dirname(__file__), "..", "..", "cg",
-        "universal_list_paginator_python", "src", "list_paginator.py",
-    )
+    widget_file = _dogfood_widget_file("universal_list_paginator_python", "list_paginator.py")
     spec = importlib.util.spec_from_file_location("_cg_list_paginator", widget_file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1619,6 +1634,28 @@ current directory (or the directory specified by `--target`).
 """
 
 
+def _dogfood_widget_file(widget_dir_name: str, module_file: str) -> str:
+    """Resolve a dogfooded widget's source file in both install layouts.
+
+    Dev/editable:  <repo>/src/cartograph/cli.py  → ../../cg/<widget>/src/<module>
+    Wheel install: site-packages/cartograph/cli.py → ../cg/<widget>/src/<module>
+
+    Hatch packages `cg/` alongside `cartograph/` at wheel root, so the walk is
+    one level shorter once installed. Returns the first candidate that exists;
+    returns the last candidate if neither does so the caller gets a sensible
+    path in the FileNotFoundError.
+    """
+    here = os.path.dirname(__file__)
+    candidates = [
+        os.path.join(here, "..", "..", "cg", widget_dir_name, "src", module_file),
+        os.path.join(here, "..", "cg", widget_dir_name, "src", module_file),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return candidates[-1]
+
+
 _CATALOG_FN = None
 
 
@@ -1629,10 +1666,7 @@ def _catalog_widget():
     if _CATALOG_FN is not None:
         return _CATALOG_FN
     import importlib.util
-    widget_file = os.path.join(
-        os.path.dirname(__file__), "..", "..", "cg",
-        "infra_command_catalog_python", "src", "command_catalog.py",
-    )
+    widget_file = _dogfood_widget_file("infra_command_catalog_python", "command_catalog.py")
     spec = importlib.util.spec_from_file_location("_cg_command_catalog", widget_file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
