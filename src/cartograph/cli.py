@@ -383,6 +383,18 @@ def cmd_create(args):
     out(result)
 
 
+def cmd_rename(args):
+    result = _carto().rename_widget(
+        old_id=args.widget_id,
+        new_name=args.name,
+        new_domain=args.domain,
+        target_dir=os.path.abspath(args.target),
+    )
+    if result.get("status") == "error":
+        err(result)
+    out(result)
+
+
 def _resolve_widget_path(args) -> str:
     """Resolve a widget path from either --lib <widget_id> or a filesystem path."""
     if getattr(args, "lib", False):
@@ -525,7 +537,8 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
             # am I" with "who owns this widget").
             effective_gov = published_governance or governance or "protected"
             owner_handle = namespaced.split("/", 1)[0] if "/" in namespaced else ""
-            owner_tag = f"@{owner_handle}" if owner_handle else "unknown"
+            # namespaced_id from the server already carries the @ prefix
+            owner_tag = owner_handle if owner_handle.startswith("@") else (f"@{owner_handle}" if owner_handle else "unknown")
             print(f"  → governance: {effective_gov}  |  owner: {owner_tag}")
         except Exception:
             pass  # sidecar is best-effort; push already succeeded
@@ -2393,6 +2406,21 @@ def _build_cli() -> AgentCLI:
                          "Defaults to the title-cased slug."},
                 {"name": "--target", "default": ".",
                  "help": "Project root to create the widget under (widget lands in <target>/cg/<widget_id>/). Default: ."},
+            ],
+        },
+        {
+            "name": "rename",
+            "help": "Rename a widget's slug or domain (local only; cloud copy untouched)",
+            "handler": cmd_rename,
+            "args": [
+                {"name": "widget_id", "help": "Current widget ID (e.g. 'infra-urllib-client-python')"},
+                {"name": "--name", "default": None,
+                 "help": "New slug segment (e.g. 'http-client'). Just the middle part, not the full ID."},
+                {"name": "--domain", "default": None,
+                 "choices": sorted(__import__('cartograph.validator', fromlist=['VALID_DOMAINS']).VALID_DOMAINS),
+                 "help": "New domain. Language is immutable; use create for a cross-language port."},
+                {"name": "--target", "default": ".",
+                 "help": "Project root; if the widget is installed here, renames its cg/ copy too. Default: ."},
             ],
         },
         {

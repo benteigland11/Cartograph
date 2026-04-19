@@ -5,6 +5,7 @@ Widget installation and uninstallation.
 import glob
 import json
 import os
+import re
 import shutil
 import zipfile
 from io import BytesIO
@@ -370,3 +371,168 @@ def uninstall(carto, widget_id, target_dir):
         return {"status": "success", "widget_id": widget_id, "removed_from": widget_path}
     except Exception as e:
         return {"error": f"Failed to remove: {e}"}
+
+
+# ---------------------------------------------------------------------------
+# rename
+# ---------------------------------------------------------------------------
+
+def rename_widget(carto, old_id: str, new_name: str | None,
+                  new_domain: str | None, target_dir: str) -> dict:
+    """Rename a scaffolded widget's slug and/or domain. Pre-checkin only.
+
+    Identifiers are permanent once a widget is checked into the library —
+    consumers elsewhere install by id, and renaming would silently orphan
+    them. This command is strictly for the "scaffolded the wrong name,
+    haven't checked in yet" case. It only touches ./cg/<old-dirname>/ in
+    `target_dir`; library and cloud are never involved.
+
+    Language is immutable (cross-language port = new widget via `create`).
+    meta.name (display name) is left alone — it's author-owned.
+    """
+    from .engine import python_dir_name, DEFAULT_INSTALL_DIR, normalize_widget_id
+    from .validator import VALID_DOMAINS
+
+    if new_name is None and new_domain is None:
+        return {"status": "error",
+                "message": "Provide --name, --domain, or both."}
+
+    old_id = normalize_widget_id(old_id)
+
+    # Hard refusal: post-checkin widgets have a permanent id.
+    if any(w["id"] == old_id for w in carto.widgets):
+        return {"status": "error",
+                "message": (f"'{old_id}' is already in the local library. Identifiers "
+                            f"are permanent after checkin — consumers install by id and "
+                            f"a rename would orphan them. Registry-level alias support "
+                            f"is planned; for now, delete + recreate if this widget has "
+                            f"no downstream users.")}
+
+    if not os.path.isabs(target_dir):
+        target_dir = os.path.abspath(target_dir)
+    old_dir = os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(old_id))
+    if not os.path.isdir(old_dir):
+        return {"status": "error",
+                "message": (f"Scaffolded widget not found at {old_dir}. `rename` "
+                            f"operates on an un-checked-in scaffold in <target>/cg/.")}
+
+    manifest_path = os.path.join(old_dir, "widget.json")
+    try:
+        with open(manifest_path) as f:
+            data = json.load(f)
+    except Exception as e:
+        return {"status": "error", "message": f"Could not read widget.json: {e}"}
+
+    language = (data.get("tech_stack", {}).get("language") or "").lower()
+    if isinstance(data.get("tech_stack", {}).get("language"), list):
+        language = data["tech_stack"]["language"][0].lower()
+    if language != "python":
+        return {"status": "error",
+                "message": (f"Rename is currently supported only for Python widgets "
+                            f"(got '{language}'). Non-Python widgets use different file "
+                            f"layouts and need per-language support.")}
+
+    old_domain = data.get("meta", {}).get("domain", "")
+    suffix = f"-{language}"
+    prefix = f"{old_domain}-"
+    if not (old_id.startswith(prefix) and old_id.endswith(suffix)):
+        return {"status": "error",
+                "message": (f"Could not parse '{old_id}' as "
+                            f"<{old_domain}>-<slug>-<{language}>.")}
+    old_slug = old_id[len(prefix):-len(suffix)]
+
+    new_slug = new_name if new_name is not None else old_slug
+    new_dom = new_domain if new_domain is not None else old_domain
+
+    if new_dom not in VALID_DOMAINS:
+        return {"status": "error",
+                "message": f"Unknown domain '{new_dom}'. Valid: {sorted(VALID_DOMAINS)}"}
+
+    new_id = f"{new_dom}-{new_slug}-{language}"
+    if new_id == old_id:
+        return {"status": "error",
+                "message": "New id matches the old id; nothing to rename."}
+
+    # Also block if the new id collides with anything already in the library.
+    if any(w["id"] == new_id for w in carto.widgets):
+        return {"status": "error",
+                "message": f"Widget '{new_id}' is already in the library."}
+
+    new_dir = os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(new_id))
+    if os.path.exists(new_dir):
+        return {"status": "error",
+                "message": f"Directory already exists: {new_dir}"}
+
+    old_module = old_slug.replace("-", "_")
+    new_module = new_slug.replace("-", "_")
+
+    shutil.move(old_dir, new_dir)
+    _rewrite_widget_dir(new_dir, new_id, new_dom, old_module, new_module)
+
+    return {
+        "status": "success",
+        "old_id": old_id,
+        "new_id": new_id,
+        "path": new_dir,
+    }
+
+
+def _rewrite_widget_dir(path: str, new_id: str, new_domain: str,
+                        old_module: str, new_module: str) -> None:
+    """Update widget.json and rename Python module files + imports in-place."""
+    manifest_path = os.path.join(path, "widget.json")
+    with open(manifest_path) as f:
+        data = json.load(f)
+    meta = data.setdefault("meta", {})
+    meta["id"] = new_id
+    meta["domain"] = new_domain
+    with open(manifest_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+    # Invalidate validation stamp — contents have changed.
+    stamp = os.path.join(path, ".validation_stamp.json")
+    if os.path.isfile(stamp):
+        os.remove(stamp)
+
+    if old_module != new_module:
+        _rename_python_module(path, old_module, new_module)
+
+
+def _rename_python_module(path: str, old_module: str, new_module: str) -> None:
+    """Rename src/<old>.py, tests/test_<old>.py, and update imports across
+    __init__.py, the renamed test file, and examples/example_usage.py."""
+    src_old = os.path.join(path, "src", f"{old_module}.py")
+    src_new = os.path.join(path, "src", f"{new_module}.py")
+    if os.path.isfile(src_old):
+        shutil.move(src_old, src_new)
+
+    test_old = os.path.join(path, "tests", f"test_{old_module}.py")
+    test_new = os.path.join(path, "tests", f"test_{new_module}.py")
+    if os.path.isfile(test_old):
+        shutil.move(test_old, test_new)
+
+    # Rewrite imports. Matches:
+    #   from .<old_module> import ...
+    #   from src.<old_module> import ...
+    #   import src.<old_module>
+    # Doesn't touch `from src import X` (that still works after module rename
+    # as long as __init__.py re-exports the same symbols).
+    from_rel = re.compile(rf"(\bfrom\s+\.){re.escape(old_module)}(\b)")
+    from_abs = re.compile(rf"(\bfrom\s+src\.){re.escape(old_module)}(\b)")
+    import_abs = re.compile(rf"(\bimport\s+src\.){re.escape(old_module)}(\b)")
+
+    for fpath in (
+        os.path.join(path, "src", "__init__.py"),
+        test_new,
+        os.path.join(path, "examples", "example_usage.py"),
+    ):
+        if not os.path.isfile(fpath):
+            continue
+        with open(fpath) as f:
+            text = f.read()
+        new_text = from_rel.sub(rf"\1{new_module}\2", text)
+        new_text = from_abs.sub(rf"\1{new_module}\2", new_text)
+        new_text = import_abs.sub(rf"\1{new_module}\2", new_text)
+        if new_text != text:
+            with open(fpath, "w") as f:
+                f.write(new_text)

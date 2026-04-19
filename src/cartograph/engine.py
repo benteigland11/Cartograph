@@ -666,3 +666,7 @@ class Cartograph:
         from .installer import delete_from_library
         widget_id = normalize_widget_id(widget_id)
         return delete_from_library(self, widget_id, confirm=confirm)
+    def rename_widget(self, old_id, new_name, new_domain, target_dir):
+        from .installer import rename_widget
+        old_id = normalize_widget_id(old_id)
+        return rename_widget(self, old_id, new_name, new_domain, target_dir)
