@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Cartograph Cloud Registry",
-    "version": "0.5.31",
+    "version": "0.6.0",
     "description": "Wire protocol for the Cartograph cloud registry. The spec is generated from the @endpoint-decorated functions in src/cartograph/cloud.py and the TypedDicts in src/cartograph/cloud_schema.py \u2014 it cannot drift from the actual client without breaking the generator."
   },
   "paths": {
