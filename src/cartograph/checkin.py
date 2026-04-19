@@ -60,6 +60,44 @@ def _restore_library_notes(manifest_path: str) -> None:
 from .contamination import scan_contamination as _scan_contamination
 
 
+def _lookup_cloud_baseline(path: str, item_id: str) -> dict | None:
+    """Return {"version": ..., "source": "cloud"} if a .cartograph_source sidecar
+    points at a cloud record for this widget, else None.
+
+    Sidecar-only: we don't probe the cloud for widgets that weren't installed
+    from it. Falls back silently when offline, unauthenticated, or the widget
+    isn't resolvable there.
+    """
+    sidecar_path = os.path.join(path, ".cartograph_source")
+    if not os.path.isfile(sidecar_path):
+        return None
+    try:
+        with open(sidecar_path) as f:
+            source = json.load(f)
+    except Exception:
+        return None
+    owner = source.get("owner")
+    registry_url = source.get("registry_url")
+    if not owner:
+        return None
+    try:
+        from . import cloud, auth
+        if not cloud.is_available():
+            return None
+    except Exception:
+        return None
+    try:
+        remote = cloud.inspect(owner, item_id, registry_url=registry_url)
+    except Exception:
+        return None
+    if not remote or remote.get("error"):
+        return None
+    version = remote.get("version")
+    if not version:
+        return None
+    return {"version": version, "source": "cloud"}
+
+
 # ---------------------------------------------------------------------------
 # checkin
 # ---------------------------------------------------------------------------
@@ -110,26 +148,40 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         if val["status"] != "success":
             return val
 
-    # --- Check for outdated base version ---
+    # --- Resolve bump baseline: cloud (via sidecar) wins over local library ---
+    # If a .cartograph_source sidecar exists, the widget was installed from the
+    # cloud and cloud is the source of truth for "what version exists." Local
+    # library is the fallback when there's no sidecar.
     widget_record = next((w for w in carto.widgets if w["id"] == item_id), None)
-    if widget_record:
+    cloud_baseline = _lookup_cloud_baseline(path, item_id)
+
+    baseline_version = None
+    baseline_source = None
+    if cloud_baseline:
+        baseline_version = cloud_baseline["version"]
+        baseline_source = "cloud"
+    elif widget_record:
+        baseline_version = widget_record.get("version", "0.0.0")
+        baseline_source = "library"
+
+    if baseline_version is not None:
         local_version = meta.get("version", "0.0.0")
-        library_version = widget_record.get("version", "0.0.0")
-        if local_version != library_version:
+        if local_version != baseline_version:
             return {
                 "status": "error",
-                "message": f"Version conflict: local is v{local_version} but library is v{library_version}. "
+                "message": f"Version conflict: local is v{local_version} but {baseline_source} is v{baseline_version}. "
                            f"Install the latest version first, apply your changes, then checkin."
             }
-        # --- No-op guard: block if nothing has changed ---
-        current_hash = carto._calculate_implementation_hash(path)
-        library_hash = widget_record.get("implementation_hash")
-        if library_hash and current_hash == library_hash:
-            return {
-                "status": "error",
-                "message": f"{item_id} v{library_version} is already in the library with identical content. "
-                           f"Make your changes before checking in."
-            }
+        # --- No-op guard (local only — we don't have a cloud impl hash) ---
+        if widget_record:
+            current_hash = carto._calculate_implementation_hash(path)
+            library_hash = widget_record.get("implementation_hash")
+            if library_hash and current_hash == library_hash:
+                return {
+                    "status": "error",
+                    "message": f"{item_id} v{baseline_version} is already in the library with identical content. "
+                               f"Make your changes before checking in."
+                }
 
     # --- Contamination scan ---
     scan = _scan_contamination(path)
@@ -155,11 +207,16 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
                 "message": "--override-reason is required when using --override-warnings."}
 
     # --- Determine update vs new ---
+    # is_update still controls local file placement (dest path, archive) and must
+    # reflect whether a local library copy exists. Bumping is gated separately
+    # on baseline_version — which includes cloud — so a widget known only to
+    # cloud still gets bumped correctly.
     is_update = widget_record is not None
+    should_bump = baseline_version is not None
 
-    # --- Version bump (only on updates, not first checkin) ---
+    # --- Version bump (whenever a baseline exists, local or cloud) ---
     version = meta.get("version", "1.0.0")
-    if is_update:
+    if should_bump:
         try:
             from packaging.version import Version as _Version
             parsed = _Version(version)
