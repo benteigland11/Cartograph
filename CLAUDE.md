@@ -45,8 +45,12 @@ current directory (or the directory specified by `--target`).
     upgrade <widget_id> [--target .] [--version X]
       Update an installed widget to the latest version.
 
-    status [widget_id] [--target .]
+    status [widget_id] [--target .] [--page N --size N | --all]
       Check if an installed widget is outdated or locally modified.
+      Without widget_id: paginated listing of all installed widgets.
+      Default page size 20. Use --all for every widget, or --page/--size
+      to step through. Response includes pagination.next_command /
+      prev_command strings the agent can run verbatim.
 
     rate <widget_id> <score 1-5> [--comment "..."]
       Rate an installed widget (1-5). Ratings affect search ranking.

@@ -10,6 +10,39 @@ import logging
 log = logging.getLogger("cartograph")
 
 
+def calculate_implementation_hash(path: str) -> str | None:
+    """Stable MD5 over src/, tests/, and examples/ bytes.
+
+    Walked deterministically (sorted filenames per directory, __pycache__ and
+    .pyc skipped) so the same widget contents always produce the same digest
+    regardless of filesystem enumeration order. Returns None if none of the
+    three directories exist.
+
+    This is the wire-format hash — callers that want to include an
+    `implementation_hash` alongside a widget payload (publish, proposals,
+    inspect responses) should use this function so client and server agree on
+    the bytes that were hashed.
+    """
+    hasher = hashlib.md5()
+    found_any = False
+    for subdir in ("src", "tests", "examples"):
+        sub_path = os.path.join(path, subdir)
+        if not os.path.exists(sub_path):
+            continue
+        found_any = True
+        for root, dirs, files in os.walk(sub_path):
+            dirs[:] = [d for d in dirs if d != '__pycache__']
+            for name in sorted(files):
+                if name.endswith('.pyc'):
+                    continue
+                filepath = os.path.join(root, name)
+                with open(filepath, 'rb') as f:
+                    hasher.update(f.read())
+    if not found_any:
+        return None
+    return hasher.hexdigest()
+
+
 def semver_key(v: str):
     """Return a sort key for a semver string using packaging.Version.
     Falls back to (0, 0, 0) for malformed strings so comparisons never crash.
@@ -211,25 +244,7 @@ class Cartograph:
 
 
     def _calculate_implementation_hash(self, path):
-        """Calculate a stable hash of src/, tests/, and examples/."""
-        hasher = hashlib.md5()
-        found_any = False
-        for subdir in ("src", "tests", "examples"):
-            sub_path = os.path.join(path, subdir)
-            if not os.path.exists(sub_path):
-                continue
-            found_any = True
-            for root, dirs, files in os.walk(sub_path):
-                dirs[:] = [d for d in dirs if d != '__pycache__']
-                for name in sorted(files):
-                    if name.endswith('.pyc'):
-                        continue
-                    filepath = os.path.join(root, name)
-                    with open(filepath, 'rb') as f:
-                        hasher.update(f.read())
-        if not found_any:
-            return None
-        return hasher.hexdigest()
+        return calculate_implementation_hash(path)
 
     def _diff_against_library(self, path, item_id):
         """Generate a unified diff of src/ files between a local widget and its library version."""

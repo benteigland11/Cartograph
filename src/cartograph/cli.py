@@ -513,34 +513,6 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
             pass  # sidecar is best-effort; push already succeeded
 
 
-def _auto_push_if_published(checkin_result: dict, install_path: str | None = None) -> None:
-    """After a successful checkin update, auto-push if the widget exists on the cloud."""
-    from . import cloud, auth
-    if not auth.is_authenticated() or not cloud.is_available():
-        return
-    widget_id = checkin_result.get("id", "")
-    widget_path = checkin_result.get("path", "")
-    if not widget_id or not widget_path:
-        return
-    # Sidecar first, config fallback
-    source = _read_source_meta(install_path) if install_path else None
-    registry_url = source.get("registry_url") if source else _config_publish_registry_url()
-    profile = cloud.whoami()
-    handle = profile.get("owner", "")
-    if not handle:
-        print("  → Auto-push skipped: could not resolve cloud owner.")
-        return
-    remote = cloud.inspect(handle, widget_id)
-    if remote.get("error"):
-        return  # not published — nothing to sync, this is the normal case
-    print(f"  → Widget exists on cloud (v{remote.get('version', '?')}), pushing v{checkin_result.get('version', '?')}...")
-    push_result = cloud.push(widget_path, widget_id, registry_url=registry_url)
-    if push_result.get("error"):
-        print(f"  → Auto-push failed: {push_result['error']}")
-    else:
-        print(f"  → Pushed to cloud: {push_result.get('namespaced_id', widget_id)} v{push_result.get('version', '?')}")
-
-
 def cmd_checkin(args):
     install_path = _resolve_widget(args.path)
     _preflight_from_path(install_path)
@@ -555,21 +527,50 @@ def cmd_checkin(args):
         err(result)
     out(result)
 
-    # Push to cloud: always if --publish or auto_publish config, otherwise only if already published
+    # Push to cloud only when the user opts in: --publish flag or auto_publish=True.
+    # The old "else: auto-push if already published" branch was removed — it
+    # silently pushed on every checkin of a cloud-originated widget regardless
+    # of the user's auto_publish setting, which contradicts auto_publish=False.
     if result.get("action") in ("updated", "registered"):
         from .config import load_config
         cfg = load_config()
         publish = getattr(args, "publish", False) or cfg["publish"]["auto_publish"]
         if publish:
             _force_push(result, install_path=install_path, reason=args.reason)
-        else:
-            _auto_push_if_published(result, install_path=install_path)
+
+
+_PAGINATE_FN = None
+
+
+def _paginate_widget():
+    """Dogfooded universal-list-paginator-python widget, loaded by file path to
+    avoid the `src/` package-name collision with this repo's own `src/cartograph/`.
+    Lazily loaded so cli.py startup stays cheap and doesn't fail if cg/ is pruned.
+    """
+    global _PAGINATE_FN
+    if _PAGINATE_FN is not None:
+        return _PAGINATE_FN
+    import importlib.util
+    widget_file = os.path.join(
+        os.path.dirname(__file__), "..", "..", "cg",
+        "universal_list_paginator_python", "src", "list_paginator.py",
+    )
+    spec = importlib.util.spec_from_file_location("_cg_list_paginator", widget_file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _PAGINATE_FN = module.paginate
+    return _PAGINATE_FN
 
 
 def cmd_status(args):
     target = os.path.abspath(args.target)
 
     if args.widget_id:
+        # Pagination flags are meaningless for a single-target lookup — flag it
+        # rather than silently ignoring, so an agent knows its call was ambiguous.
+        if args.all_widgets or args.page != 1 or args.size != 20:
+            err({"status": "error",
+                 "message": "--page/--size/--all only apply when listing all widgets (omit widget_id)."})
         result = _carto().widget_status(widget_id=args.widget_id, target_dir=target)
         if result.get("error"):
             err(result)
@@ -601,11 +602,39 @@ def cmd_status(args):
         r = carto.widget_status(widget_id=normalize_widget_id(wid), target_dir=target)
         widgets.append(r)
 
-    out({
-        "installed": len(widgets),
+    total = len(widgets)
+    aggregate = {
+        "installed": total,
         "outdated": sum(1 for w in widgets if w.get("outdated")),
         "modified": sum(1 for w in widgets if w.get("modified")),
-        "widgets": widgets,
+    }
+
+    if args.all_widgets:
+        pagination = {
+            "page": 1, "size": total, "total": total,
+            "total_pages": 1, "has_next": False, "has_prev": False,
+            "all": True,
+        }
+        page_items = widgets
+    else:
+        paginate = _paginate_widget()
+        result = paginate(widgets, page=args.page, size=args.size)
+        page_items = result.pop("items")
+        pagination = {**result, "all": False}
+        # Agent-friendly: tell the caller exactly how to get the next/prev page.
+        if pagination["has_next"]:
+            pagination["next_command"] = (
+                f"cartograph status --page {pagination['page'] + 1} --size {pagination['size']}"
+            )
+        if pagination["has_prev"]:
+            pagination["prev_command"] = (
+                f"cartograph status --page {pagination['page'] - 1} --size {pagination['size']}"
+            )
+
+    out({
+        **aggregate,
+        "pagination": pagination,
+        "widgets": page_items,
     })
 
 
@@ -1580,100 +1609,80 @@ creates `backend-retry-backoff-python`.
 {config_lines}"""
 
 
-_SETUP_INSTRUCTIONS_TAIL = """\
+_COMMANDS_HEADER = """
 
 ### Commands
 
 All commands run from your project root. Widgets install to `cg/` in the
 current directory (or the directory specified by `--target`).
 
-**Find and use widgets**
-
-    search <query> [--domain ...] [--language ...]
-      Search for widgets matching a query.
-
-    inspect <widget_id> [--source] [--reviews] [--version X]
-      View a widget's metadata, source code, or reviews.
-
-    install <widget_id> [--target .] [--version X]
-      Install a widget into your project.
-
-    uninstall <widget_id> [--target .]
-      Remove an installed widget from your project.
-
-    upgrade <widget_id> [--target .] [--version X]
-      Update an installed widget to the latest version.
-
-    status [widget_id] [--target .]
-      Check if an installed widget is outdated or locally modified.
-
-    rate <widget_id> <score 1-5> [--comment "..."]
-      Rate an installed widget (1-5). Ratings affect search ranking.
-
-**Create and publish widgets**
-
-    create <widget_id> --language <lang> --domain <domain>
-      Scaffold a new widget with the correct directory structure.
-
-    validate [path] [--lib]
-      Run tests, check for contamination, and verify widget correctness.
-
-    checkin [path] --reason "..." [--bump patch|minor|major] [--publish]
-      Push an edited widget back to the library. Runs validation if needed.
-      Version is managed by Cartograph - do NOT hand-edit the version
-      field in widget.json. Use --bump to increment.
-
-    rollback <widget_id> [--version X] [--reason "..."]
-      Restore a previous version of a widget from history.
-
-    delete <widget_id> [--confirm]
-      Remove a widget from the library and cloud.
-
-**Cloud registry**
-
-    cloud publish [widget_id] [path] [--visibility ...] [--governance ...]
-      Publish a widget to the cloud registry.
-
-    cloud unpublish <widget_id> [--confirm]
-      Remove a widget from the cloud registry.
-
-    cloud adopt <local-id> <@owner/prefix-widget-id>
-      Link a local widget to its cloud counterpart by verifying source identity.
-
-    cloud sync [--dry-run]
-      Sync local library with cloud. Higher version wins.
-
-    cloud proposals [widget_id] [--accept] [--reject] [--reason "..."]
-      Review community-submitted changes to your published widgets.
-
-**Custom validation rules**
-
-    rules
-      List all active rules files.
-
-    rules init --language <lang> [--global]
-      Create a rules file from a template. Edit it in your editor to add
-      checks. Runs automatically during `cartograph validate`.
-      Per-project: .cartograph/rules/   Global: <data_dir>/rules/
-
-    rules reset --language <lang> [--global]
-      Restore a rules file to its default template.
-
-**Configuration**
-
-    config [key] [value]
-      View or change settings.
-
-    setup [--agent ...] [--file X] [--print] [--workflow]
-      Write Cartograph instructions to your agent's config file.
-      Auto-detects agent. Appends, never replaces.
-
-    doctor
-      Check system health - library, languages, cloud connectivity.
-
-    stats
-      Show library statistics.
 """
+
+
+_CATALOG_FN = None
+
+
+def _catalog_widget():
+    """Dogfooded infra-command-catalog-python widget, loaded by file path to
+    sidestep the `src/` namespace collision with this repo's own src/cartograph/."""
+    global _CATALOG_FN
+    if _CATALOG_FN is not None:
+        return _CATALOG_FN
+    import importlib.util
+    widget_file = os.path.join(
+        os.path.dirname(__file__), "..", "..", "cg",
+        "infra_command_catalog_python", "src", "command_catalog.py",
+    )
+    spec = importlib.util.spec_from_file_location("_cg_command_catalog", widget_file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _CATALOG_FN = module.Catalog
+    return _CATALOG_FN
+
+
+def _replace_cartograph_section(existing: str, new_content: str) -> str:
+    """Splice `new_content` into `existing` in place of the ## Cartograph section.
+
+    The owned section starts at the first line that is exactly `## Cartograph`
+    and ends at the next line that begins with `## ` (a peer heading) or EOF.
+    Everything outside that range is preserved byte-for-byte.
+    """
+    lines = existing.splitlines(keepends=True)
+    start = None
+    for i, line in enumerate(lines):
+        if line.rstrip() == "## Cartograph":
+            start = i
+            break
+    if start is None:
+        # Safety net: marker went missing between check and splice; just append.
+        return existing.rstrip() + "\n\n" + new_content.lstrip()
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith("## ") and lines[i].rstrip() != "## Cartograph":
+            end = i
+            break
+    before = "".join(lines[:start])
+    after = "".join(lines[end:])
+    new_block = new_content.lstrip("\n")
+    if before and not before.endswith("\n"):
+        before += "\n"
+    if not new_block.endswith("\n"):
+        new_block += "\n"
+    return before + new_block + ("\n" + after if after else "")
+
+
+def _render_commands_block() -> str:
+    """Build the ### Commands section from the live CLI registration.
+
+    Reads groups off the AgentCLI after it's built, so there is exactly one
+    source of truth for command metadata. Adding a new command via
+    `cli.add_commands(...)` also adds it to the agent-facing documentation
+    with no extra step.
+    """
+    cli = _build_cli()
+    sections = {name: cmds for name, cmds in cli._groups}
+    Catalog = _catalog_widget()
+    return _COMMANDS_HEADER + Catalog(sections).to_agent_instructions()
 
 _WORKFLOW_SECTION = """
 ### Workflow
@@ -2054,7 +2063,7 @@ def cmd_setup(args):
             return
 
     # --- Build content ---
-    content = _build_setup_instructions() + "\n" + _SETUP_INSTRUCTIONS_TAIL
+    content = _build_setup_instructions() + _render_commands_block()
     content += _resolve_workflow(getattr(args, "workflow", None))
 
     # --- Resolve target file ---
@@ -2089,6 +2098,27 @@ def cmd_setup(args):
         with open(filepath) as f:
             existing = f.read()
         if marker in existing:
+            if getattr(args, "overwrite", False):
+                # Preserve workflow: if the existing section had one and the
+                # user didn't pass --workflow explicitly, default it in so we
+                # don't silently strip their workflow on overwrite.
+                if workflow_marker in existing and getattr(args, "workflow", None) is None:
+                    content_with_workflow = (
+                        _build_setup_instructions() + _render_commands_block()
+                        + _resolve_workflow("default")
+                    )
+                    if agent == "cursor":
+                        content_with_workflow = _cursor_mdc(content_with_workflow)
+                    overwrite_content = content_with_workflow
+                    workflow_note = " (kept existing ### Workflow)"
+                else:
+                    overwrite_content = content
+                    workflow_note = ""
+                new_file = _replace_cartograph_section(existing, overwrite_content)
+                with open(filepath, "w") as f:
+                    f.write(new_file)
+                print(f"\n  Replaced ## Cartograph section in {filepath}{workflow_note}")
+                return
             # Section exists - check if user is just adding workflow
             workflow_content = _resolve_workflow(getattr(args, "workflow", None))
             if workflow_content and workflow_marker not in existing:
@@ -2099,7 +2129,7 @@ def cmd_setup(args):
             print(f"\n  Cartograph section already exists in {filepath}")
             if workflow_marker in existing:
                 print(f"  Workflow section is already included.")
-            print(f"  Remove the existing ## Cartograph section and re-run to replace it.\n")
+            print(f"  Pass --overwrite to replace the existing section with a fresh one.\n")
             return
 
     with open(filepath, "a") as f:
@@ -2288,6 +2318,12 @@ def _build_cli() -> AgentCLI:
             "args": [
                 {"name": "widget_id", "nargs": "?", "default": None},
                 {"name": "--target", "default": ".", "help": "Project root (default: .)"},
+                {"name": "--page", "type": int, "default": 1,
+                 "help": "1-indexed page for aggregate listing (default: 1)"},
+                {"name": "--size", "type": int, "default": 20,
+                 "help": "Page size for aggregate listing (default: 20, max: 500)"},
+                {"name": "--all", "action": "store_true", "default": False, "dest": "all_widgets",
+                 "help": "Return every widget (disables pagination). Mutually exclusive with --page/--size."},
             ],
         },
         {
@@ -2550,6 +2586,8 @@ def _build_cli() -> AgentCLI:
                  "help": "Print instructions to stdout instead of writing"},
                 {"name": "--workflow", "nargs": "?", "default": None, "const": "default",
                  "help": "Include workflow (default or custom name from workflows/)"},
+                {"name": "--overwrite", "action": "store_true", "default": False,
+                 "help": "Replace the existing ## Cartograph section in place (preserves everything else in the file)"},
             ],
         },
         {

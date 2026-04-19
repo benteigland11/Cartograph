@@ -73,75 +73,24 @@ We only ship what we can validate. Every widget that enters the library has pass
 
 Supporting a language means owning its full validation pipeline, not just generating files. We add languages as those pipelines are ready, not before.
 
-## Commands
+## Common commands
 
-`<arg>` = required, `[arg]` = optional. All commands run from your project root.
-
-**Find and use widgets**
+The commands you'll reach for daily. All run from your project root.
 
 ```
-cartograph search <query> [--domain ...] [--language ...]
-cartograph inspect <widget_id> [--source] [--reviews] [--version X]
-cartograph install <widget_id> [--target .] [--version X]
-cartograph uninstall <widget_id> [--target .]
-cartograph upgrade <widget_id> [--target .] [--version X]
-cartograph status [widget_id] [--target .]
-cartograph rate <widget_id> <score 1-5> [--comment "..."]
+cartograph search <query>                              # find a widget
+cartograph install <widget_id>                         # install into cg/
+cartograph create <name> --domain <d> --language <l>   # scaffold a new widget
+cartograph validate [path]                             # run the full pipeline
+cartograph checkin [path] --reason "..."               # push edits back
+cartograph status                                      # installed widgets
+cartograph setup                                       # configure your agent
 ```
 
-**Create and publish widgets**
-
-```
-cartograph create <widget_id> --language <lang> --domain <domain>
-cartograph validate [path] [--lib]
-cartograph checkin [path] --reason "..." [--bump patch|minor|major] [--publish]
-cartograph rollback <widget_id> [--version X] [--reason "..."]
-cartograph delete <widget_id> [--confirm]
-```
-
-**Cloud registry**
-
-```
-cartograph cloud publish [widget_id] [path] [--visibility public|private]
-                                            [--governance open|protected]
-cartograph cloud unpublish <widget_id> [--confirm]
-cartograph cloud adopt <local-id> <@owner/prefix-widget-id>
-cartograph cloud sync [--dry-run]
-cartograph cloud proposals [widget_id] [--accept] [--reject] [--reason "..."]
-```
-
-**Registries**
-
-```
-cartograph registry                        # list configured registries
-cartograph registry add <url>              # add a registry (fetches prefix from /info)
-cartograph registry remove <prefix>        # remove a registry
-```
-
-**Custom validation rules**
-
-```
-cartograph rules                                  # list active rules
-cartograph rules init --language <lang> [--global] # create from template
-cartograph rules reset --language <lang> [--global] # restore default template
-```
-
-Rules files run automatically during `cartograph validate`. Per-project rules go in `.cartograph/rules/`, global rules apply to all projects. See the generated template for the full contract.
-
-**Library and configuration**
-
-```
-cartograph setup [--agent ...] [--file ...] [--print] [--workflow]
-cartograph config [key] [value]
-cartograph export [--output file.zip]
-cartograph import <file.zip> [--force]
-cartograph stats
-cartograph doctor
-cartograph dashboard
-cartograph login [--token X]
-cartograph logout
-cartograph whoami
-```
+**Full reference:** `cartograph <command> --help` for a single command, or
+`cartograph setup --print` for the complete surface grouped by section.
+The reference is generated directly from the CLI, so it never drifts from
+what the tool actually supports.
 
 ## Language support
 

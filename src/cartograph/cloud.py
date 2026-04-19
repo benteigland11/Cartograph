@@ -266,12 +266,21 @@ def push(widget_path: str, widget_id: str, visibility: str = "public",
     # Send allowed extensions so the cloud can validate dynamically
     # instead of maintaining a hardcoded whitelist per language.
     from .languages.registry import allowed_extensions
+    from .engine import calculate_implementation_hash
     fields = {
         "widget_id": widget_id,
         "visibility": visibility,
         "stamp": json.dumps(signed_stamp),
         "allowed_extensions": json.dumps(sorted(allowed_extensions())),
     }
+    # Client-computed implementation_hash. The server should echo this back
+    # verbatim in the inspect response — re-deriving on the server risks
+    # drift from zip canonicalization or file-walk ordering, so the contract
+    # is "client hashes, server stores, server echoes." Servers that don't
+    # know about this field will ignore it; no harm.
+    impl_hash = calculate_implementation_hash(widget_path)
+    if impl_hash:
+        fields["implementation_hash"] = impl_hash
     if governance:
         fields["governance"] = governance
 
@@ -548,11 +557,16 @@ def propose(widget_path: str, owner_handle: str, widget_id: str,
     zip_bytes = _zip_widget(widget_path)
 
     from .languages.registry import allowed_extensions
+    from .engine import calculate_implementation_hash
     fields = {
         "reason": reason,
         "stamp": json.dumps(signed_stamp),
         "allowed_extensions": json.dumps(sorted(allowed_extensions())),
     }
+    # See push() for rationale — client hashes, server echoes.
+    impl_hash = calculate_implementation_hash(widget_path)
+    if impl_hash:
+        fields["implementation_hash"] = impl_hash
 
     return _post_multipart(
         f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
