@@ -1,0 +1,1270 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cartograph Cloud Registry",
+    "version": "0.5.31",
+    "description": "Wire protocol for the Cartograph cloud registry. The spec is generated from the @endpoint-decorated functions in src/cartograph/cloud.py and the TypedDicts in src/cartograph/cloud_schema.py \u2014 it cannot drift from the actual client without breaking the generator."
+  },
+  "paths": {
+    "/v1/widgets/search": {
+      "get": {
+        "summary": "Search the widget registry",
+        "tags": [
+          "Widgets"
+        ],
+        "operationId": "search",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/users/search": {
+      "get": {
+        "summary": "Search users by handle or name",
+        "tags": [
+          "Users"
+        ],
+        "operationId": "search_users",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSearchResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{widget_id}/publish": {
+      "post": {
+        "summary": "Publish a widget version",
+        "tags": [
+          "Widgets"
+        ],
+        "operationId": "push",
+        "parameters": [
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "widget_id": {
+                    "type": "string"
+                  },
+                  "visibility": {
+                    "type": "string"
+                  },
+                  "stamp": {
+                    "type": "string"
+                  },
+                  "allowed_extensions": {
+                    "type": "string"
+                  },
+                  "implementation_hash": {
+                    "type": "string"
+                  },
+                  "governance": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "widget_id",
+                  "stamp"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "summary": "Return the current authenticated user's profile",
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "whoami",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhoamiResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}": {
+      "get": {
+        "summary": "Fetch a widget's metadata (optionally with source)",
+        "tags": [
+          "Widgets"
+        ],
+        "operationId": "inspect",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InspectResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update a widget's settings (governance, visibility)",
+        "tags": [
+          "Widgets"
+        ],
+        "operationId": "update_widget",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWidgetResponse"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateWidgetResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}/download": {
+      "get": {
+        "summary": "Download a widget's zip bundle",
+        "tags": [
+          "Widgets"
+        ],
+        "operationId": "download_widget",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Widget zip. X-Widget-Version and X-Widget-Governance response headers carry metadata.",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "X-Widget-Version": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Widget-Governance": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Widget not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/registry/info": {
+      "get": {
+        "summary": "Advertise registry capabilities (e.g. supports_visibility)",
+        "tags": [
+          "Registry"
+        ],
+        "operationId": "registry_info",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryInfoResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets": {
+      "get": {
+        "summary": "List all widgets in the registry",
+        "tags": [
+          "Widgets"
+        ],
+        "operationId": "list_widgets",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListWidgetsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{widget_id}": {
+      "delete": {
+        "summary": "Delete a widget from the registry",
+        "tags": [
+          "Widgets"
+        ],
+        "operationId": "delete_widget",
+        "parameters": [
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}/reviews": {
+      "get": {
+        "summary": "List reviews for a widget",
+        "tags": [
+          "Reviews"
+        ],
+        "operationId": "get_reviews",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}/rate": {
+      "post": {
+        "summary": "Rate a widget 1-5 with an optional comment",
+        "tags": [
+          "Reviews"
+        ],
+        "operationId": "rate_widget",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}/versions": {
+      "get": {
+        "summary": "List published versions of a widget",
+        "tags": [
+          "Versions"
+        ],
+        "operationId": "get_versions",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}/rollback": {
+      "post": {
+        "summary": "Roll a widget back to an earlier published version",
+        "tags": [
+          "Versions"
+        ],
+        "operationId": "rollback_widget",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollbackResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/tos": {
+      "get": {
+        "summary": "Fetch the registry's terms of service",
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "get_tos",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TosResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/accept-tos": {
+      "post": {
+        "summary": "Record that the current user has accepted the ToS",
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "accept_tos",
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptTosResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}/contribute": {
+      "post": {
+        "summary": "Submit a proposal against someone else's widget",
+        "tags": [
+          "Proposals"
+        ],
+        "operationId": "propose",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "stamp": {
+                    "type": "string"
+                  },
+                  "allowed_extensions": {
+                    "type": "string"
+                  },
+                  "implementation_hash": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "reason",
+                  "stamp"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/my-proposals": {
+      "get": {
+        "summary": "List proposals submitted by the current user",
+        "tags": [
+          "Proposals"
+        ],
+        "operationId": "my_proposals",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/my-widgets": {
+      "get": {
+        "summary": "List widgets owned by the current user (public and private)",
+        "tags": [
+          "Widgets"
+        ],
+        "operationId": "list_my_widgets",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyWidgetsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}/proposals": {
+      "get": {
+        "summary": "List proposals against a widget (owner view)",
+        "tags": [
+          "Proposals"
+        ],
+        "operationId": "list_proposals",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}/proposals/{proposal_id}/accept": {
+      "post": {
+        "summary": "Accept a proposal into the widget",
+        "tags": [
+          "Proposals"
+        ],
+        "operationId": "accept_proposal",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/v1/widgets/{owner_handle}/{widget_id}/proposals/{proposal_id}/reject": {
+      "post": {
+        "summary": "Reject a proposal with an optional reason",
+        "tags": [
+          "Proposals"
+        ],
+        "operationId": "reject_proposal",
+        "parameters": [
+          {
+            "name": "owner_handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful response"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://cartograph.cloud",
+      "description": "Public registry (default)"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "AcceptTosResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "status_code": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "InspectResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "namespaced_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rating": {
+            "type": "number"
+          },
+          "install_count": {
+            "type": "integer"
+          },
+          "governance": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          },
+          "contributors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string"
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Review"
+            }
+          },
+          "implementation_hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "namespaced_id",
+          "version",
+          "name",
+          "owner",
+          "domain",
+          "language",
+          "description",
+          "tags",
+          "rating",
+          "install_count",
+          "governance",
+          "visibility",
+          "contributors",
+          "created_at",
+          "published_at",
+          "reviews",
+          "implementation_hash"
+        ]
+      },
+      "ListWidgetsResponse": {
+        "type": "object",
+        "properties": {
+          "widgets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WidgetRecord"
+            }
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "MyWidgetsResponse": {
+        "type": "object",
+        "properties": {
+          "widgets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WidgetRecord"
+            }
+          }
+        }
+      },
+      "ProposalListResponse": {
+        "type": "object",
+        "properties": {
+          "proposals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProposalRecord"
+            }
+          }
+        }
+      },
+      "ProposalRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "widget_id": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "proposer": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "ProposalResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "proposal_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "PushResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "namespaced_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "governance": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          },
+          "implementation_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "RateResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "number"
+          }
+        }
+      },
+      "RegistryInfoResponse": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "validates": {
+            "type": "boolean"
+          },
+          "supports_visibility": {
+            "type": "boolean"
+          },
+          "supports_rename": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Review": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "number"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "ReviewsResponse": {
+        "type": "object",
+        "properties": {
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Review"
+            }
+          },
+          "avg_rating": {
+            "type": "number"
+          }
+        }
+      },
+      "RollbackResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "widgets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WidgetRecord"
+            }
+          }
+        }
+      },
+      "TosResponse": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateWidgetResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "governance": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          }
+        }
+      },
+      "UserRecord": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "string"
+          }
+        }
+      },
+      "UserSearchResponse": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserRecord"
+            }
+          }
+        }
+      },
+      "VersionEntry": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "implementation_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "VersionsResponse": {
+        "type": "object",
+        "properties": {
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionEntry"
+            }
+          }
+        }
+      },
+      "WhoamiResponse": {
+        "type": "object",
+        "properties": {
+          "authenticated": {
+            "type": "boolean"
+          },
+          "uid": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "tos_accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WidgetRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "namespaced_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rating": {
+            "type": "number"
+          },
+          "install_count": {
+            "type": "integer"
+          },
+          "governance": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          },
+          "contributors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string"
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Review"
+            }
+          },
+          "implementation_hash": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
