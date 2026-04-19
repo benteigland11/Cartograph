@@ -2410,7 +2410,7 @@ def _build_cli() -> AgentCLI:
         },
         {
             "name": "rename",
-            "help": "Rename a widget's slug or domain (local only; cloud copy untouched)",
+            "help": "Rename a scaffolded widget's slug or domain (pre-checkin, Python-only)",
             "handler": cmd_rename,
             "args": [
                 {"name": "widget_id", "help": "Current widget ID (e.g. 'infra-urllib-client-python')"},
