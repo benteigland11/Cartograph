@@ -77,7 +77,7 @@ class NimEngine(LanguageEngine):
     scanner_messages = {
         "echo": "echo found in src/ - remove debug output before checkin:",
         "quit": "quit() found in src/ - widgets must not exit the process:",
-        "ffi": "{.importc.} / {.compile.} found in src/ - C FFI makes widgets platform-dependent:",
+        "ffi": "C FFI found - Cartograph widgets are pure Nim. For C bindings, publish a nimble package and depend on it via `dependencies`:",
         "global": "{.global.} found in src/ - widgets must not use global mutable state:",
         "main_module": "when isMainModule found in src/ - widgets are libraries, not executables:",
         "os_specific": "OS-specific when defined() found in src/ - widgets must validate on all platforms:",

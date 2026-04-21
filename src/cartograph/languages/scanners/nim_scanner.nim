@@ -371,17 +371,18 @@ proc scanFile(filename: string): seq[Finding] =
         detail: "system.quit() call - widgets must not exit the process",
         severity: "error"))
 
-    # C FFI pragmas
+    # C FFI pragmas - Cartograph-for-Nim is pure-Nim by policy.
+    # For C bindings: publish a nimble package, depend on it via `dependencies`.
     if "{.importc" in code:
       result.add(Finding(
         file: filename, kind: "ffi", line: lineNo,
-        detail: "{.importc.} - C FFI makes widgets platform-dependent",
+        detail: "{.importc.} is not permitted - Cartograph widgets are pure Nim. Use std/posix or similar stdlib wrappers, or publish C bindings as a nimble package and depend on it.",
         severity: "error"))
 
     if "{.compile" in code:
       result.add(Finding(
         file: filename, kind: "ffi", line: lineNo,
-        detail: "{.compile.} - C FFI makes widgets platform-dependent",
+        detail: "{.compile.} is not permitted - Cartograph widgets are pure Nim. Shipping C source is out of scope; publish it as a nimble package instead.",
         severity: "error"))
 
     # Global mutable state

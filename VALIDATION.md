@@ -327,6 +327,15 @@ Python's stdlib (os, subprocess, etc.) is commonly used in legitimate widget cod
 **Why Nim has more checks than others?**
 Nim's compilation model (compiles to C, links native) means more things can go wrong portably. Platform-specific `when defined()`, C FFI, and global state are Nim-specific concerns.
 
+**Why ban all C FFI (`{.importc.}`, `{.compile.}`) in Nim widgets?**
+Cartograph-for-Nim is a **pure-Nim widget library by design**, not by accident. The ban is a product stance, not a temporary gap.
+
+Nim's stdlib (`std/posix`, `std/os`, `std/net`, etc.) already wraps the system primitives most widgets need — and the stdlib itself uses `importc` internally, blessed as cross-platform. So "no `importc` in widgets" does not mean "no systems access"; it means "use the stdlib as the systems interface." For most widgets this is invisible. For the `openpty`/`forkpty` convenience case, users compose `posix_openpt` + `grantpt` + `unlockpt` + `ptsname` from `std/posix` — ~30 lines of pure Nim instead of one FFI declaration.
+
+The escape valve: if a widget genuinely needs to bind to a third-party C library (libsodium, libpng, libcurl, etc.), publish those bindings as a **nimble package** and depend on it via `dependencies`. Nimble is the right ecosystem for native C interop; Cartograph widgets sit one layer above, pure.
+
+This gives Cartograph-for-Nim a distinct position: AI-composed, pure, portable, validated. Nimble handles native-binding complexity where it already lives. Two ecosystems, clean division of labor.
+
 **Why line-based scanning for Nim instead of AST?**
 The line-based scanner uses only stdlib and has no compiler dependencies. If false positives become a problem, AST parsing via `compiler/parser` can be revisited.
 

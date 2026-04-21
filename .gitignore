@@ -24,6 +24,10 @@ env/
 .pytest_cache/
 .coverage
 
+# Compiled native scanners (source .nim is committed, binary is local)
+src/cartograph/languages/scanners/nim_scanner
+src/cartograph/languages/scanners/nim_scanner.exe
+
 # Widgets installed into this repo for local testing - not part of the package.
 # The cartograph/ dir doubles as the Python package and the default install target
 # when running from source. Real subpackages are re-included below.
