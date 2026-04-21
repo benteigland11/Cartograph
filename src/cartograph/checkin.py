@@ -60,6 +60,17 @@ def _restore_library_notes(manifest_path: str) -> None:
 from .contamination import scan_contamination as _scan_contamination
 
 
+def _manifest_core(data: dict) -> dict:
+    """Normalized widget.json for no-op comparison. Strips auto-managed fields
+    that change during checkin itself (version bump, stamp writes) so legitimate
+    metadata edits (description, tags, dependencies) are detected as real content.
+    """
+    out = json.loads(json.dumps(data))  # deep copy
+    meta = out.get("meta", {})
+    meta.pop("version", None)
+    return out
+
+
 def _lookup_cloud_baseline(path: str, item_id: str) -> dict | None:
     """Return {"version": ..., "implementation_hash": ..., "source": "cloud"} if a
     `.cartograph_source` sidecar points at a cloud record for this widget, else None.
@@ -193,7 +204,23 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
             baseline_hash = widget_record.get("implementation_hash")
         if baseline_hash:
             current_hash = carto._calculate_implementation_hash(path)
-            if current_hash == baseline_hash:
+            code_identical = current_hash == baseline_hash
+            # implementation_hash covers src/tests/examples but not widget.json,
+            # so the guard also needs to compare manifest metadata (description,
+            # tags, dependencies, etc.) to catch "widget.json only" edits. Strip
+            # auto-managed fields from both sides before comparing. Meta check
+            # only runs against the library baseline; cloud widget.json isn't
+            # fetched here (cf. issue #15).
+            meta_identical = True
+            if code_identical and widget_record is not None and not cloud_baseline:
+                lib_manifest = os.path.join(widget_record["path"], "widget.json")
+                try:
+                    with open(lib_manifest) as f:
+                        lib_data = json.load(f)
+                    meta_identical = _manifest_core(data) == _manifest_core(lib_data)
+                except Exception:
+                    meta_identical = True  # can't compare, don't false-positive
+            if code_identical and meta_identical:
                 return {
                     "status": "error",
                     "message": f"{item_id} v{baseline_version} is already in the {baseline_source} with identical content. "

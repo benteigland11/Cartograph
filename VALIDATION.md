@@ -330,7 +330,7 @@ Nim's compilation model (compiles to C, links native) means more things can go w
 **Why ban all C FFI (`{.importc.}`, `{.compile.}`) in Nim widgets?**
 Cartograph-for-Nim is a **pure-Nim widget library by design**, not by accident. The ban is a product stance, not a temporary gap.
 
-Nim's stdlib (`std/posix`, `std/os`, `std/net`, etc.) already wraps the system primitives most widgets need — and the stdlib itself uses `importc` internally, blessed as cross-platform. So "no `importc` in widgets" does not mean "no systems access"; it means "use the stdlib as the systems interface." For most widgets this is invisible. For the `openpty`/`forkpty` convenience case, users compose `posix_openpt` + `grantpt` + `unlockpt` + `ptsname` from `std/posix` — ~30 lines of pure Nim instead of one FFI declaration.
+Nim's stdlib (`std/posix`, `std/os`, `std/net`, etc.) already wraps the system primitives most widgets need, and the stdlib itself uses `importc` internally, blessed as cross-platform. So "no `importc` in widgets" does not mean "no systems access"; it means "use the stdlib as the systems interface." For most widgets this is invisible. For the `openpty`/`forkpty` convenience case, users compose `posix_openpt` + `grantpt` + `unlockpt` + `ptsname` from `std/posix`, roughly 30 lines of pure Nim instead of one FFI declaration.
 
 The escape valve: if a widget genuinely needs to bind to a third-party C library (libsodium, libpng, libcurl, etc.), publish those bindings as a **nimble package** and depend on it via `dependencies`. Nimble is the right ecosystem for native C interop; Cartograph widgets sit one layer above, pure.
 
