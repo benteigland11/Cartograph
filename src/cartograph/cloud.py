@@ -320,13 +320,24 @@ def push(widget_path: str, widget_id: str, visibility: str = "public",
     if governance:
         fields["governance"] = governance
 
-    return _post_multipart(
+    result = _post_multipart(
         f"/v1/widgets/{urllib.parse.quote(widget_id, safe='')}/publish",
         fields=fields,
         file_data=zip_bytes,
         filename=f"{widget_id}.zip",
         registry_url=registry_url,
     )
+    # Rewrite the server's "bump the version" hint so agents are told to use
+    # Cartograph's own versioning flow rather than hand-editing widget.json.
+    err_text = str(result.get("error", ""))
+    if "already published" in err_text.lower():
+        result["error"] = (
+            "This version is already published to the cloud. "
+            "Cartograph manages version bumps - do not hand-edit widget.json. "
+            "To publish a change: edit the widget source, then run "
+            "`cartograph checkin <path> --bump patch --reason \"...\" --publish`."
+        )
+    return result
 
 
 @endpoint("GET", "/v1/auth/me",
