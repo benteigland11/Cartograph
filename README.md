@@ -5,6 +5,12 @@
 
 A local first reusable code registry for AI agents. Search, install, create, validate, and check in code modules across projects. Only requires Python. Other languages in the repo are native validation scanners for their respective widget types. The tool is designed to use the languages you have installed.
 
+### Demonstration of creating, installing, and composing widgets
+
+<a href="https://youtu.be/wN0v84O3wxg">
+  <img src="https://img.youtube.com/vi/wN0v84O3wxg/hqdefault.jpg" width="620" alt="Cartograph Demo">
+</a>
+
 ## Why Cartograph
 
 AI agents write a lot of code, but it disappears. Each new project starts from scratch, and agents can't naturally reuse logic across codebases without somewhere to put it.
@@ -100,7 +106,7 @@ what the tool actually supports.
 - **OpenSCAD**: renders to STL, non-empty mesh check, Python contamination scanner (OpenSCAD has no file I/O). Requires 2021.01+ for `assert()` support. BOSL2 optional.
 - **SystemVerilog**: Icarus Verilog (iverilog + vvp), `-g2012` mode. Enforces `always_comb`/`always_ff` (legacy `always @(...)` blocked). Contamination scanner checks vendor primitives, simulation-only constructs (`initial`, `#delay`, `$display`), blocking/non-blocking assignment misuse, and hardcoded constants. Vendor primitives allowed when the vendor library is declared as a dependency.
 - **Angular**: Angular CLI (`ng test` + `ng build`), Karma + Jasmine with ChromeHeadless, 80% coverage via `karma.conf.js` thresholds. Standalone components (Angular 14+). Reuses JS contamination scanner. Example validation: `ng build` (build artifact, not script execution). Requires `@angular/cli` globally and Chrome/Chromium installed.
-- **PHP** *(WIP)*: Composer + PHPUnit 11, Xdebug or PCOV for coverage, 80% threshold via `--min-coverage`. PSR-4 autoloading under `Cartograph\` namespace. Contamination scanner blocks WordPress globals (`wp_*`, `add_action`, `$wpdb`, etc.) and `echo` in src/ to enforce pure PHP utility widgets.
+- **PHP**: Composer + PHPUnit 11, Xdebug or PCOV for coverage, 80% threshold via `--min-coverage`. PSR-4 autoloading under `Cartograph\` namespace. Contamination scanner blocks WordPress globals (`wp_*`, `add_action`, `$wpdb`, etc.) and `echo` in src/ to enforce pure PHP utility widgets.
 
 Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD and SystemVerilog use Python-based scanners since neither language has general-purpose file I/O suitable for static analysis tooling.
 
