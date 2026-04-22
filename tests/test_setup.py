@@ -116,7 +116,8 @@ def test_setup_print_mode(tmp_path):
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup", "--print"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
@@ -131,7 +132,8 @@ def test_setup_writes_to_detected_agent(tmp_path):
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
@@ -149,7 +151,8 @@ def test_setup_appends_not_replaces(tmp_path):
     (tmp_path / "CLAUDE.md").write_text(existing)
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
@@ -165,13 +168,15 @@ def test_setup_duplicate_detection(tmp_path):
     # First run
     subprocess.run(
         ["python", "-m", "cartograph", "setup"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     # Second run
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
@@ -183,7 +188,8 @@ def test_setup_custom_file(tmp_path):
     import subprocess
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup", "--file", "opencode.md"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
@@ -197,7 +203,8 @@ def test_setup_explicit_agent(tmp_path):
     import subprocess
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup", "--agent", "codex"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
@@ -209,7 +216,8 @@ def test_setup_no_agent_no_file_shows_help(tmp_path):
     import subprocess
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
@@ -224,7 +232,8 @@ def test_setup_with_workflow(tmp_path):
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup", "--workflow"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     assert result.returncode == 0
@@ -238,7 +247,8 @@ def test_setup_without_workflow_shows_tip(tmp_path):
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
         ["python", "-m", "cartograph", "setup"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     assert "Tip: add --workflow" in result.stdout

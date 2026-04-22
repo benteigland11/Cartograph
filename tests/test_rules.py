@@ -268,7 +268,8 @@ def test_cli_rules_init(tmp_path):
     import subprocess
     result = subprocess.run(
         ["python", "-m", "cartograph", "rules", "init", "--language", "python"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
     )
     assert result.returncode == 0
     assert "Created" in result.stdout
@@ -283,11 +284,13 @@ def test_cli_rules_init_already_exists(tmp_path):
     import subprocess
     subprocess.run(
         ["python", "-m", "cartograph", "rules", "init", "--language", "python"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
     )
     result = subprocess.run(
         ["python", "-m", "cartograph", "rules", "init", "--language", "python"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
     )
     assert result.returncode == 0
     assert "already exists" in result.stdout
@@ -299,7 +302,8 @@ def test_cli_rules_reset(tmp_path):
     # Init, then break it
     subprocess.run(
         ["python", "-m", "cartograph", "rules", "init", "--language", "python"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
     )
     rules_file = tmp_path / ".cartograph" / "rules" / "rules.py"
     rules_file.write_text("BROKEN SYNTAX {{{{")
@@ -307,7 +311,8 @@ def test_cli_rules_reset(tmp_path):
     # Reset without --confirm should block
     result = subprocess.run(
         ["python", "-m", "cartograph", "rules", "reset", "--language", "python"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
     )
     assert result.returncode == 0
     assert "Re-run with --confirm" in result.stdout
@@ -315,7 +320,8 @@ def test_cli_rules_reset(tmp_path):
     # Reset with --confirm should succeed
     result = subprocess.run(
         ["python", "-m", "cartograph", "rules", "reset", "--language", "python", "--confirm"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
     )
     assert result.returncode == 0
     assert "Reset to default" in result.stdout
@@ -331,7 +337,8 @@ def test_cli_rules_list_shows_global(tmp_path):
     import subprocess
     result = subprocess.run(
         ["python", "-m", "cartograph", "rules"],
-        capture_output=True, text=True, cwd=str(tmp_path),
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", cwd=str(tmp_path),
     )
     assert result.returncode == 0
     assert "global" in result.stdout
