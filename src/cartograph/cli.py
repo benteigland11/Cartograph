@@ -2734,7 +2734,33 @@ def build_parser():
     return _build_cli().build_parser()
 
 
+def _force_utf8_io():
+    """Force stdout/stderr to UTF-8 on Windows.
+
+    Windows Python defaults stdout to the legacy console code page
+    (cp1252), which crashes with UnicodeEncodeError the first time we
+    print a box-drawing char, check mark, or arrow - every `doctor`
+    run, every progress line. Users can work around it with PYTHONUTF8=1
+    but most don't know that and we control the entry point.
+
+    Wrapped streams (pytest capsys, redirected pipes) may not expose
+    `reconfigure`; in that case there's nothing to fix and we leave
+    them as-is.
+    """
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main():
+    _force_utf8_io()
     _build_cli().run()
 
 

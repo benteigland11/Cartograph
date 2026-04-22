@@ -36,6 +36,77 @@ def test_config_get_set_roundtrip(tmp_path, monkeypatch):
     assert val is False
 
 
+def test_config_paths_override_roundtrip(tmp_path, monkeypatch):
+    """paths.<binary> keys should round-trip through set/get/list."""
+    monkeypatch.setattr("cartograph.config._config_path",
+                        lambda: str(tmp_path / "config.toml"))
+    from cartograph.config import (get_path_override, get_value,
+                                    list_values, set_value)
+
+    assert set_value("paths.nim", r"C:\Program Files\Nim\bin\nim.exe") is None
+    val, err = get_value("paths.nim")
+    assert err is None
+    assert val == r"C:\Program Files\Nim\bin\nim.exe"
+    assert get_path_override("nim") == r"C:\Program Files\Nim\bin\nim.exe"
+
+    # list_values surfaces configured paths so `cartograph config` shows them
+    items = list_values()
+    keys = {i["key"]: i["value"] for i in items}
+    assert "paths.nim" in keys
+    assert keys["paths.nim"] == r"C:\Program Files\Nim\bin\nim.exe"
+
+
+def test_force_utf8_io_noop_off_windows(monkeypatch):
+    """On non-Windows, _force_utf8_io must not touch stdout/stderr."""
+    import sys
+
+    from cartograph.cli import _force_utf8_io
+    monkeypatch.setattr(sys, "platform", "linux")
+    called = []
+
+    class FakeStream:
+        def reconfigure(self, **kwargs):
+            called.append(kwargs)
+
+    monkeypatch.setattr(sys, "stdout", FakeStream())
+    monkeypatch.setattr(sys, "stderr", FakeStream())
+    _force_utf8_io()
+    assert called == []
+
+
+def test_force_utf8_io_reconfigures_on_windows(monkeypatch):
+    """On Windows, reconfigure must be called with utf-8 + errors=replace."""
+    import sys
+
+    from cartograph.cli import _force_utf8_io
+    monkeypatch.setattr(sys, "platform", "win32")
+    calls = []
+
+    class FakeStream:
+        def reconfigure(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(sys, "stdout", FakeStream())
+    monkeypatch.setattr(sys, "stderr", FakeStream())
+    _force_utf8_io()
+    assert calls == [
+        {"encoding": "utf-8", "errors": "replace"},
+        {"encoding": "utf-8", "errors": "replace"},
+    ]
+
+
+def test_force_utf8_io_tolerates_wrapped_streams(monkeypatch):
+    """Wrapped streams (pytest capsys, pipes) may lack reconfigure."""
+    import sys
+
+    from cartograph.cli import _force_utf8_io
+    monkeypatch.setattr(sys, "platform", "win32")
+    # objects with no reconfigure attribute - should not raise
+    monkeypatch.setattr(sys, "stdout", object())
+    monkeypatch.setattr(sys, "stderr", object())
+    _force_utf8_io()  # must not raise
+
+
 def test_config_get_unknown_key():
     """Getting an unknown key should return an error."""
     from cartograph.config import get_value
