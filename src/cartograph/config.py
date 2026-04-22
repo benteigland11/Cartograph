@@ -90,8 +90,39 @@ def load_config() -> dict:
     return config
 
 
+def _is_path_key(key: str) -> tuple[bool, str]:
+    """Recognize the dynamic 'paths.<binary>' namespace.
+
+    Returns (is_path_key, binary_name). Binary names are free-form so we
+    can't enumerate them in _SCHEMA; instead we validate the prefix and
+    let the [paths] section in config.toml store whatever the user sets.
+    """
+    if not key.startswith("paths."):
+        return False, ""
+    binary = key[len("paths."):]
+    return bool(binary) and "/" not in binary and "\\" not in binary, binary
+
+
+def get_path_override(binary_name: str) -> str | None:
+    """Return the configured override path for a binary, or None.
+
+    Reads the [paths] section of config.toml. The resolver uses this to
+    short-circuit PATH lookup when the user has explicitly pointed at a
+    binary on disk.
+    """
+    config = load_config()
+    paths = config.get("paths", {})
+    if not isinstance(paths, dict):
+        return None
+    value = paths.get(binary_name)
+    return value if isinstance(value, str) and value else None
+
+
 def get_value(key: str):
     """Get a config value by flat key (e.g. 'auto-publish')."""
+    is_path, binary = _is_path_key(key)
+    if is_path:
+        return get_path_override(binary), None
     if key not in _SCHEMA:
         return None, f"Unknown setting: '{key}'. Run 'cartograph config list' to see available settings."
     section, toml_key, _, _, _ = _SCHEMA[key]
@@ -101,6 +132,18 @@ def get_value(key: str):
 
 def set_value(key: str, raw_value: str):
     """Set a config value by flat key. Writes config.toml."""
+    is_path, binary = _is_path_key(key)
+    if is_path:
+        value = raw_value.strip()
+        if not value:
+            return "Path override cannot be empty. Use 'cartograph config unset paths.<binary>' to clear."
+        config = load_config()
+        config.setdefault("paths", {})
+        config["paths"][binary] = value
+        path = _config_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _write_toml(path, config)
+        return None
     if key not in _SCHEMA:
         return f"Unknown setting: '{key}'. Run 'cartograph config list' to see available settings."
     section, toml_key, typ, choices, _ = _SCHEMA[key]
@@ -145,6 +188,18 @@ def list_values() -> list[dict]:
             "choices": choices,
             "description": description,
         })
+    # Configured path overrides appear as paths.<binary>. These are dynamic
+    # (users name their own binaries), so they don't live in _SCHEMA.
+    paths = config.get("paths", {}) or {}
+    for binary in sorted(paths):
+        result.append({
+            "key": f"paths.{binary}",
+            "value": paths[binary],
+            "default": None,
+            "type": "path",
+            "choices": None,
+            "description": f"Override PATH lookup for '{binary}' during validation and scanning",
+        })
     return result
 
 
@@ -161,7 +216,10 @@ def _write_toml(path: str, config: dict):
             elif isinstance(v, bool):
                 lines.append(f"{k} = {'true' if v else 'false'}")
             elif isinstance(v, str):
-                lines.append(f'{k} = "{v}"')
+                # Escape backslashes and quotes so Windows paths like
+                # C:\Program Files\Nim\bin\nim.exe round-trip correctly.
+                escaped = v.replace("\\", "\\\\").replace('"', '\\"')
+                lines.append(f'{k} = "{escaped}"')
             elif isinstance(v, (int, float)):
                 lines.append(f"{k} = {v}")
         lines.append("")

@@ -43,11 +43,24 @@ _STL_EMPTY_BYTES = 84  # 80-byte header + 4-byte triangle count = minimum binary
 def _resolve_openscad_binary() -> str | None:
     """Find the openscad executable.
 
-    The Windows installer does NOT add OpenSCAD to PATH by default, so
-    `shutil.which` alone misses standard installations. We probe PATH first
-    (covers Linux/macOS and Windows-with-PATH), then fall back to the known
-    Windows install locations.
+    Resolution order:
+      1. `paths.openscad` from config.toml - the canonical user-facing
+         override, shared with every other engine.
+      2. OPENSCAD_BINARY env var - legacy, kept for CI/test setups.
+      3. PATH lookup (covers every platform that has it wired up).
+      4. Known Windows install locations - the OpenSCAD installer
+         doesn't add itself to PATH by default.
     """
+    # Config override (canonical). Only accept it if it points at a
+    # real file - a broken value shouldn't hide a working PATH/fallback.
+    try:
+        from ..config import get_path_override
+        override = get_path_override("openscad")
+    except Exception:
+        override = None
+    if override and os.path.isfile(override):
+        return override
+
     # PATH lookup (works on all platforms when openscad is on PATH)
     for name in ("openscad", "openscad.exe", "openscad.cmd"):
         found = shutil.which(name)
@@ -60,18 +73,17 @@ def _resolve_openscad_binary() -> str | None:
             r"C:\Program Files\OpenSCAD\openscad.exe",
             r"C:\Program Files (x86)\OpenSCAD\openscad.exe",
         ]
-        # Also honor a user-provided override env var
-        override = os.environ.get("OPENSCAD_BINARY")
-        if override:
-            candidates.insert(0, override)
+        env_override = os.environ.get("OPENSCAD_BINARY")
+        if env_override:
+            candidates.insert(0, env_override)
         for path in candidates:
             if os.path.isfile(path):
                 return path
 
-    # Unix override env var (mainly for nonstandard installs / CI)
-    override = os.environ.get("OPENSCAD_BINARY")
-    if override and os.path.isfile(override):
-        return override
+    # Unix env override (mainly for nonstandard installs / CI)
+    env_override = os.environ.get("OPENSCAD_BINARY")
+    if env_override and os.path.isfile(env_override):
+        return env_override
 
     return None
 

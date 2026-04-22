@@ -1547,6 +1547,15 @@ def cmd_doctor(args):
         tag_str = f"  ({', '.join(tags)})" if tags else ""
         if available:
             lang_checks.append((lang_name, True, f"ready{tag_str}", None))
+            for binary in getattr(engine, "toolchain", {}) or {}:
+                try:
+                    resolved = engine.resolved_binary(binary)
+                except Exception:
+                    resolved = None
+                if resolved and resolved.source == "override":
+                    lang_checks.append(
+                        (f"  {binary}", True,
+                         f"{resolved.path} (paths.{binary})", "optional"))
             for label, installed, detail in engine.check_optional():
                 if not installed:
                     lang_checks.append((label, False, detail, "optional"))

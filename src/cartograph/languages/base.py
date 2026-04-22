@@ -43,7 +43,49 @@ import subprocess
 import sys
 import tempfile
 
+from cg.infra_binary_resolver_python.src.binary_resolver import (
+    ResolveError,
+    ResolvedBinary,
+    resolve as _resolve_binary,
+)
+
 log = logging.getLogger("cartograph")
+
+
+def _override_for(binary: str) -> str | None:
+    """Look up a user-configured override for a binary name.
+
+    Kept as a module-level helper so base.py stays importable during
+    pytest collection of widgets, where cartograph.config may load a
+    config.toml outside the repo.
+    """
+    try:
+        from ..config import get_path_override
+        return get_path_override(binary)
+    except Exception:
+        return None
+
+
+def _resolve_or_passthrough(binary: str) -> ResolvedBinary | None:
+    """Resolve a binary via config override + PATH, or return None.
+
+    None means "no override configured and not on PATH" - which is fine
+    for call sites like _run(), where subprocess does its own PATH
+    lookup and can surface a clearer native error. The caller only
+    substitutes when a ResolvedBinary is returned.
+    """
+    override = _override_for(binary)
+    try:
+        return _resolve_binary(binary, override=override,
+                               override_key=f"paths.{binary}")
+    except ResolveError:
+        # With an override set, ResolveError means the override is
+        # broken (missing/non-executable). Let it surface later through
+        # the normal code path; callers that need to fail loud can call
+        # resolve() themselves.
+        if override:
+            raise
+        return None
 
 
 # Compiled once at module level — used by _dep_bare_name and _check_dep_pinning.
@@ -87,21 +129,48 @@ class LanguageEngine:
         return None
 
     def check_available(self) -> tuple[bool, str]:
-        """Check that all system dependencies for this engine are installed."""
+        """Check that all system dependencies for this engine are installed.
+
+        Honors per-binary overrides from config (paths.<binary>) - if the
+        user has pointed at an installed binary that isn't on PATH, the
+        engine still counts as available.
+        """
         if not self.toolchain:
             return True, ""
-        import shutil
-        missing = [
-            name for name in self.toolchain
-            if not shutil.which(name) and not shutil.which(name + ".cmd")
-        ]
+        missing = []
+        bad_override = []
+        for name in self.toolchain:
+            try:
+                _resolve_or_passthrough(name)
+            except ResolveError as e:
+                bad_override.append(str(e))
+                continue
+            if not self._binary_available(name):
+                missing.append(name)
+        if bad_override:
+            return False, "; ".join(bad_override)
         if missing:
             hints = [self.toolchain[m] for m in missing]
             return False, (
                 f"{self.name.capitalize()} engine requires {' and '.join(missing)} - "
                 + "; ".join(hints)
+                + f" (or set paths.{missing[0]} in `cartograph config`)"
             )
         return True, ""
+
+    def _binary_available(self, name: str) -> bool:
+        """True if `name` can be resolved via override or PATH."""
+        resolved = _resolve_or_passthrough(name)
+        return resolved is not None
+
+    def resolved_binary(self, name: str) -> ResolvedBinary | None:
+        """Public accessor for doctor and similar callers.
+
+        Returns the ResolvedBinary when a binary is locatable (either via
+        a config override or via PATH), or None when it isn't found at
+        all. Raises ResolveError when an override is set but invalid.
+        """
+        return _resolve_or_passthrough(name)
 
     def check_optional(self) -> list[tuple[str, bool, str]]:
         """Return optional capability checks: [(label, installed, detail), ...].
@@ -420,12 +489,36 @@ class LanguageEngine:
         # On Windows, shell scripts like npm/npx need shell=True or the .cmd extension.
         # Using shell=True is simpler and handles both cases.
         use_shell = os.name == "nt"
+        if cmd:
+            cmd = [self._maybe_override(cmd[0]), *cmd[1:]]
         return subprocess.run(
             cmd, capture_output=True, text=True,
             timeout=timeout, cwd=cwd,
             env=env or os.environ.copy(),
             shell=use_shell,
         )
+
+    def _maybe_override(self, binary: str) -> str:
+        """Swap a bare binary name for its configured override when set.
+
+        Only reaches into config when there's a path separator-free name
+        like 'nim' or 'nimble' - absolute paths and relative paths are
+        already committed to a specific binary and pass through as-is.
+        """
+        if not binary or os.sep in binary or (os.altsep and os.altsep in binary):
+            return binary
+        override = _override_for(binary)
+        if not override:
+            return binary
+        try:
+            resolved = _resolve_binary(binary, override=override,
+                                       override_key=f"paths.{binary}")
+            return resolved.path
+        except ResolveError:
+            # Broken override - let subprocess fail on the bare name so
+            # the error surfaces in context. check_available catches the
+            # same situation earlier for users running `doctor`.
+            return binary
 
     def _fail(self, error: str) -> dict:
         return {"passed": False, "error": str(error or "Unknown error")[:3000]}
