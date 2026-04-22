@@ -22,8 +22,16 @@ _ENV_KEY = "CARTOGRAPH_SIGNING_KEY"
 _PLACEHOLDER_KEY = "cartograph-local-dev"  # not secret — just for local testing
 
 
+class MissingSigningKeyError(RuntimeError):
+    """Raised when a stamp needs to be signed but no real signing key is
+    available. The CLI catches this in the publish path and turns it into
+    an actionable "you need to login" message instead of letting a
+    placeholder-signed stamp hit the server (which would surface as the
+    confusing 403 "Invalid stamp signature")."""
+
+
 def _signing_key() -> bytes:
-    # Prefer per-user key from credentials (set during OAuth login)
+    # Prefer per-user key from credentials (set during OAuth login).
     try:
         from .auth import get_signing_key
         key = get_signing_key()
@@ -31,9 +39,17 @@ def _signing_key() -> bytes:
             return key.encode()
     except Exception:
         pass
-    # Fallback to env var (CI, tests, server-side)
-    key = os.environ.get(_ENV_KEY, _PLACEHOLDER_KEY)
-    return key.encode()
+    # Explicit env override — used by CI, tests, and server-side work.
+    env_key = os.environ.get(_ENV_KEY)
+    if env_key:
+        return env_key.encode()
+    # No per-user key AND no env override. In the past this silently fell
+    # back to a placeholder, producing an "Invalid stamp signature" at the
+    # server that looked like a server bug. Now we fail loud instead.
+    raise MissingSigningKeyError(
+        "No signing key available. Run `cartograph login` to authenticate, "
+        "or set CARTOGRAPH_SIGNING_KEY for CI/test environments."
+    )
 
 
 def _canonical(stamp: dict) -> bytes:

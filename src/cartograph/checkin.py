@@ -103,7 +103,8 @@ def _lookup_cloud_baseline(path: str, item_id: str) -> dict | None:
     except Exception:
         return None
     try:
-        remote = cloud.inspect(owner, item_id, registry_url=registry_url)
+        remote = cloud.inspect(owner, item_id, manifest=True,
+                               registry_url=registry_url)
     except Exception:
         return None
     if not remote or remote.get("error"):
@@ -115,6 +116,13 @@ def _lookup_cloud_baseline(path: str, item_id: str) -> dict | None:
     impl_hash = remote.get("implementation_hash")
     if impl_hash:
         result["implementation_hash"] = impl_hash
+    # Raw widget.json from the cloud zip. When present, the no-op guard
+    # can detect metadata-only edits (description/tags/deps). When absent
+    # (older server, missing zip), guard falls back to skipping the meta
+    # compare — no false positives.
+    manifest = remote.get("manifest")
+    if isinstance(manifest, dict):
+        result["manifest"] = manifest
     return result
 
 
@@ -208,18 +216,27 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
             # implementation_hash covers src/tests/examples but not widget.json,
             # so the guard also needs to compare manifest metadata (description,
             # tags, dependencies, etc.) to catch "widget.json only" edits. Strip
-            # auto-managed fields from both sides before comparing. Meta check
-            # only runs against the library baseline; cloud widget.json isn't
-            # fetched here (cf. issue #15).
-            meta_identical = True
-            if code_identical and widget_record is not None and not cloud_baseline:
-                lib_manifest = os.path.join(widget_record["path"], "widget.json")
-                try:
-                    with open(lib_manifest) as f:
-                        lib_data = json.load(f)
-                    meta_identical = _manifest_core(data) == _manifest_core(lib_data)
-                except Exception:
-                    meta_identical = True  # can't compare, don't false-positive
+            # auto-managed fields from both sides before comparing. For cloud
+            # baselines, widget.json is fetched via ?include_manifest=true on
+            # inspect (closes issue #15); for library baselines, it's read
+            # from disk. If the baseline manifest can't be obtained, the meta
+            # compare is skipped rather than false-positive as identical.
+            meta_identical = False
+            if code_identical:
+                baseline_manifest = None
+                if cloud_baseline:
+                    baseline_manifest = cloud_baseline.get("manifest")
+                elif widget_record is not None:
+                    lib_manifest = os.path.join(widget_record["path"], "widget.json")
+                    try:
+                        with open(lib_manifest) as f:
+                            baseline_manifest = json.load(f)
+                    except Exception:
+                        baseline_manifest = None
+                if baseline_manifest is not None:
+                    meta_identical = (
+                        _manifest_core(data) == _manifest_core(baseline_manifest)
+                    )
             if code_identical and meta_identical:
                 return {
                     "status": "error",
@@ -386,11 +403,16 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     action = "updated" if is_update else "registered"
     log.info("Successfully %s %s → v%s", action, item_id, new_version)
 
+    messages = {
+        "registered": f"Added {item_id} v{new_version} to local library (first-time entry).",
+        "updated": f"Bumped {item_id} to v{new_version} in local library.",
+    }
     result = {
         "status": "success",
         "id": item_id,
         "version": new_version,
         "action": action,
+        "message": messages[action],
         "path": dest_path,
     }
     if scan["warnings"] and override_warnings:

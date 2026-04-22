@@ -279,7 +279,7 @@ def push(widget_path: str, widget_id: str, visibility: str = "public",
     """
     from .auth import is_authenticated
     from .validation_stamp import read_stamp
-    from .trust import sign_stamp
+    from .trust import sign_stamp, MissingSigningKeyError
 
     if not is_authenticated():
         return {"error": "Not authenticated. Run: cartograph login"}
@@ -293,8 +293,19 @@ def push(widget_path: str, widget_id: str, visibility: str = "public",
             )
         }
 
-    # Sign the stamp
-    signature = sign_stamp(stamp)
+    # Sign the stamp. A missing signing key means the credentials file
+    # was written by an older CLI (id_token only) or got corrupted — the
+    # ID token can still satisfy is_authenticated() while the signing key
+    # is gone. Surface this as an actionable re-login prompt instead of
+    # letting a placeholder-signed stamp hit the server.
+    try:
+        signature = sign_stamp(stamp)
+    except MissingSigningKeyError as e:
+        return {"error": (
+            "Your credentials are missing a signing key. Run "
+            "`cartograph login` to re-authenticate. "
+            f"(Details: {e})"
+        )}
     signed_stamp = {**stamp, "signature": signature}
 
     zip_bytes = _zip_widget(widget_path)
@@ -328,13 +339,16 @@ def push(widget_path: str, widget_id: str, visibility: str = "public",
         registry_url=registry_url,
     )
     # Rewrite the server's "bump the version" hint so agents are told to use
-    # Cartograph's own versioning flow rather than hand-editing widget.json.
+    # Cartograph's own versioning flow. The version field in widget.json is
+    # managed by the CLI; other fields (description, tags, etc.) are free
+    # to edit — this message only guards the version field.
     err_text = str(result.get("error", ""))
     if "already published" in err_text.lower():
         result["error"] = (
             "This version is already published to the cloud. "
-            "Cartograph manages version bumps - do not hand-edit widget.json. "
-            "To publish a change: edit the widget source, then run "
+            "Cartograph manages the version field in widget.json — don't "
+            "bump it by hand. To publish a change (including edits to "
+            "description, tags, tests, or examples), run "
             "`cartograph checkin <path> --bump patch --reason \"...\" --publish`."
         )
     return result
@@ -354,14 +368,22 @@ def whoami() -> dict:
           tags=["Widgets"],
           summary="Fetch a widget's metadata (optionally with source)")
 def inspect(owner_handle: str, widget_id: str, source: bool = False,
+            manifest: bool = False,
             registry_url: str | None = None) -> dict:
     """Inspect a cloud widget. Public widgets don't require auth.
 
     Pass source=True to include extracted src/ file contents in the result.
+    Pass manifest=True to include the raw widget.json as stored in the zip
+    (used by the checkin no-op guard to compare metadata-only edits).
     """
     path = f"/v1/widgets/{urllib.parse.quote(owner_handle)}/{urllib.parse.quote(widget_id)}"
+    params = []
     if source:
-        path += "?include_source=true"
+        params.append("include_source=true")
+    if manifest:
+        params.append("include_manifest=true")
+    if params:
+        path += "?" + "&".join(params)
     return _get(path, registry_url=registry_url)
 
 
@@ -652,7 +674,7 @@ def propose(widget_path: str, owner_handle: str, widget_id: str,
     """
     from .auth import is_authenticated
     from .validation_stamp import read_stamp
-    from .trust import sign_stamp
+    from .trust import sign_stamp, MissingSigningKeyError
 
     if not is_authenticated():
         return {"error": "Not authenticated. Run: cartograph login"}
@@ -661,7 +683,14 @@ def propose(widget_path: str, owner_handle: str, widget_id: str,
     if stamp is None:
         return {"error": f"No validation stamp at {widget_path}. Run 'cartograph validate' first."}
 
-    signature = sign_stamp(stamp)
+    try:
+        signature = sign_stamp(stamp)
+    except MissingSigningKeyError as e:
+        return {"error": (
+            "Your credentials are missing a signing key. Run "
+            "`cartograph login` to re-authenticate. "
+            f"(Details: {e})"
+        )}
     signed_stamp = {**stamp, "signature": signature}
 
     zip_bytes = _zip_widget(widget_path)
