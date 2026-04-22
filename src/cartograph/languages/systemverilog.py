@@ -327,14 +327,11 @@ class SystemVerilogEngine(LanguageEngine):
     }
 
     def runtime_version(self) -> str | None:
-        import shutil
-        import subprocess
-        if not shutil.which("iverilog"):
+        if not self._binary_available("iverilog"):
             return None
         try:
-            res = subprocess.run(
-                ["iverilog", "-V"], capture_output=True, text=True, timeout=10
-            )
+            # Through self._run so paths.iverilog (if configured) wins.
+            res = self._run(["iverilog", "-V"], cwd=os.getcwd(), timeout=10)
             output = (res.stderr or res.stdout or "").strip()
             for line in output.splitlines():
                 if "Icarus Verilog" in line or "iverilog" in line.lower():

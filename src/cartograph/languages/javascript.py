@@ -153,13 +153,11 @@ class JavaScriptEngine(LanguageEngine):
         return None
 
     def check_optional(self) -> list[tuple[str, bool, str]]:
-        import subprocess
         checks = []
         try:
-            r = subprocess.run(
-                ["npx", "playwright", "--version"],
-                capture_output=True, timeout=15,
-            )
+            # Through self._run so paths.npx (if configured) is honored.
+            r = self._run(["npx", "playwright", "--version"],
+                          cwd=os.getcwd(), timeout=15)
             installed = r.returncode == 0
         except Exception:
             installed = False
