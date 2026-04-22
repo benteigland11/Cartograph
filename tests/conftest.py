@@ -215,6 +215,19 @@ def _write(path, content):
         f.write(content)
 
 
+def _stamp_widget(widget_dir, language):
+    """Write a validation stamp for a fixture widget so the library-integrity
+    gate in _load_library() admits it. Fixture widgets are constructed from
+    known-good content but never run through `cartograph checkin`, so without
+    this helper they would be filtered out as unstamped."""
+    from cartograph.languages import get_engine
+    from cartograph.validation_stamp import write_stamp
+    engine = get_engine(language)
+    if engine is None:
+        return
+    write_stamp(widget_dir, language, engine)
+
+
 def _make_nim_widget(base, widget_id, name, version, domain, tags,
                      description, nimble_name, src_name, src_content,
                      test_content, example_content):
@@ -234,6 +247,7 @@ def _make_nim_widget(base, widget_id, name, version, domain, tags,
     _write(os.path.join(wdir, "src", src_name), src_content)
     _write(os.path.join(wdir, "tests", f"test_{nimble_name}.nim"), test_content)
     _write(os.path.join(wdir, "examples", "example_usage.nim"), example_content)
+    _stamp_widget(wdir, "nim")
     return wdir
 
 
@@ -256,6 +270,7 @@ def _make_js_widget(base, widget_id, name, version, domain, tags,
     _write(os.path.join(wdir, "src", src_name), src_content)
     _write(os.path.join(wdir, "tests", f"test_{src_name}"), test_content)
     _write(os.path.join(wdir, "examples", "example_usage.js"), example_content)
+    _stamp_widget(wdir, "javascript")
     return wdir
 
 
@@ -285,6 +300,7 @@ def _make_widget(base, widget_id, name, version, domain, language, tags,
     _write(os.path.join(wdir, "src", src_name), src_content)
     _write(os.path.join(wdir, "tests", f"test_{src_name}"), test_content)
     _write(os.path.join(wdir, "examples", "example_usage.py"), example_content)
+    _stamp_widget(wdir, language)
     return wdir
 
 

@@ -659,11 +659,24 @@ def cmd_status(args):
                 f"cartograph status --page {pagination['page'] - 1} --size {pagination['size']}"
             )
 
-    out({
+    # Surface library-integrity gate hits: widgets present in the library
+    # directory but excluded from search/install because they lack a valid
+    # validation stamp. Gives the user a feedback loop when "my widget
+    # disappeared from search" — run `cartograph checkin` to restamp.
+    unstamped = getattr(carto, "unstamped_widgets", []) or []
+    aggregate["unstamped_in_library"] = len(unstamped)
+
+    payload = {
         **aggregate,
         "pagination": pagination,
         "widgets": page_items,
-    })
+    }
+    if unstamped:
+        payload["unstamped_library_widgets"] = [
+            {"id": u["id"], "path": u["path"], "language": u["language"]}
+            for u in unstamped
+        ]
+    out(payload)
 
 
 def cmd_login(args):

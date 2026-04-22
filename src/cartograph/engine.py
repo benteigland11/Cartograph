@@ -229,6 +229,7 @@ class Cartograph:
     def __init__(self, library_path):
         self.library_path = library_path
         self.widgets = []
+        self.unstamped_widgets = []
         self.install_stats = self._load_install_stats()
         self._load_library()
 
@@ -239,6 +240,7 @@ class Cartograph:
     def reload(self):
         """Re-scan the library from disk and rebuild the search index."""
         self.widgets = []
+        self.unstamped_widgets = []
         self._load_library()
         self._search_backend.build(self.widgets)
 
@@ -497,6 +499,31 @@ class Cartograph:
                 item_id = meta.get('id', os.path.basename(widget_path))
                 tags = meta.get('tags', [])
                 desc = data.get('description', '')
+
+                # Library integrity gate: require a valid validation stamp.
+                # Widgets dropped into the library without going through
+                # `cartograph checkin` (e.g. by a misbehaving agent) have no
+                # stamp and are excluded from the index entirely — invisible
+                # to search, inspect, and install. Tampered-with widgets also
+                # fail because the fingerprint stops matching.
+                language = data.get('tech_stack', {}).get('language', 'unknown')
+                if isinstance(language, list):
+                    language = language[0] if language else 'unknown'
+                from .validation_stamp import has_valid_stamp
+                if not has_valid_stamp(widget_path, language):
+                    # log.info rather than warning: printed widgets are
+                    # surfaced via `cartograph status` as the canonical UX.
+                    # Warning-on-every-invocation was stderr spam.
+                    log.info(
+                        "Skipping unstamped widget %s at %s",
+                        item_id, widget_path,
+                    )
+                    self.unstamped_widgets.append({
+                        "id": item_id,
+                        "path": widget_path,
+                        "language": language,
+                    })
+                    continue
 
                 # Check cache: compare mtimes to decide if we can skip expensive ops
                 manifest_mtime = os.path.getmtime(manifest_path)

@@ -65,3 +65,33 @@ def is_stamp_valid(widget_path: str, language: str, engine) -> bool:
     if not valid:
         log.debug("Validation stamp is stale or missing")
     return valid
+
+
+def has_valid_stamp(widget_path: str, language: str) -> bool:
+    """Lightweight scan-time check: does this widget carry a stamp whose
+    fingerprint still matches its files?
+
+    Used by the library-integrity gate (Day 40). Unlike is_stamp_valid(),
+    this does NOT match on engine_version or language — a stale stamp still
+    proves the widget was run through `cartograph checkin` at some point,
+    which is what we care about here. A widget that was never checked in
+    (attacker drops files into Widget_Library/) has no stamp at all and
+    fails this check.
+
+    Returns False on any error (missing engine, unreadable files, etc.)
+    so unresolvable widgets stay out of the index.
+    """
+    try:
+        from .languages import get_engine
+        engine = get_engine(language)
+        if engine is None:
+            return False
+        patterns = engine.watched_patterns(widget_path)
+    except Exception:
+        return False
+    return _is_stamp_valid(
+        widget_path,
+        metadata_match=None,
+        stamp_name=STAMP_FILE,
+        patterns=patterns,
+    )

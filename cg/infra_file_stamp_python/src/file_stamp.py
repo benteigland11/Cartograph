@@ -21,6 +21,31 @@ STAMP_FILE = ".file_stamp.json"
 _SKIP_EXTENSIONS = frozenset({".pyc", ".pyo", ".o", ".so", ".dylib"})
 _SKIP_DIRS = frozenset({"__pycache__", ".pytest_cache", ".git", "node_modules"})
 
+# Magic-byte signatures for compiled executables that compilers leave behind
+# without an extension (e.g. `nimble c -r tests/foo` produces `tests/foo` as an
+# ELF binary on Linux). These aren't source and must not feed the fingerprint
+# or the stamp goes stale the moment a post-validation cleanup removes them.
+_BINARY_MAGIC_PREFIXES = (
+    b"\x7fELF",          # ELF (Linux / *BSD)
+    b"MZ",               # PE (Windows .exe / .dll, incl. console & GUI subsystems)
+    b"\xfe\xed\xfa\xce", # Mach-O 32-bit big-endian
+    b"\xfe\xed\xfa\xcf", # Mach-O 64-bit big-endian
+    b"\xce\xfa\xed\xfe", # Mach-O 32-bit little-endian
+    b"\xcf\xfa\xed\xfe", # Mach-O 64-bit little-endian
+    b"\xca\xfe\xba\xbe", # Mach-O universal / fat binary
+    b"\x00asm",          # WebAssembly
+)
+
+
+def _is_compiled_binary(path):
+    """Return True if *path* starts with an executable-format magic signature."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4)
+    except OSError:
+        return False
+    return any(head.startswith(sig) for sig in _BINARY_MAGIC_PREFIXES)
+
 
 def collect_files(root, patterns=None, skip_dirs=None, skip_extensions=None):
     """Return sorted absolute paths matching glob patterns under root.
@@ -61,6 +86,8 @@ def collect_files(root, patterns=None, skip_dirs=None, skip_extensions=None):
             if any(part in skip_dirs for part in rel_parts):
                 continue
             if os.path.splitext(f)[1] in skip_extensions:
+                continue
+            if _is_compiled_binary(f):
                 continue
             files.add(os.path.abspath(f))
     return sorted(files)

@@ -46,6 +46,38 @@ def test_collect_files_skips_pycache(tmp_path):
         assert "__pycache__" not in f
 
 
+def test_collect_files_skips_compiled_binaries(tmp_path):
+    """Extensionless executables (nimble test artifacts, native builds) must
+    not feed the fingerprint — they're transient and get cleaned up between
+    validate and re-read, which would invalidate the stamp instantly."""
+    root = _make_tree(tmp_path)
+    # Simulate a compiled test binary Nim leaves in tests/
+    elf = tmp_path / "tests" / "test_main"
+    elf.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 32)
+    # And a Windows PE artifact
+    pe = tmp_path / "tests" / "test_win"
+    pe.write_bytes(b"MZ\x90\x00" + b"\x00" * 32)
+    # And a WASM artifact
+    wasm = tmp_path / "tests" / "test_wasm"
+    wasm.write_bytes(b"\x00asm\x01\x00\x00\x00")
+    files = collect_files(str(root))
+    assert str(elf) not in files
+    assert str(pe) not in files
+    assert str(wasm) not in files
+    # Sanity: real source is still there
+    assert any(f.endswith("test_main.py") for f in files)
+
+
+def test_fingerprint_stable_after_binary_added(tmp_path):
+    """Dropping a compiled binary into tests/ must NOT change the fingerprint —
+    otherwise the stamp would go stale the instant cleanup runs."""
+    root = _make_tree(tmp_path)
+    fp_before = fingerprint(str(root))
+    (tmp_path / "tests" / "test_main").write_bytes(b"\x7fELF" + b"\x00" * 100)
+    fp_after = fingerprint(str(root))
+    assert fp_before == fp_after
+
+
 def test_collect_files_custom_patterns(tmp_path):
     root = _make_tree(tmp_path)
     patterns = [os.path.join(str(root), "src", "*.py")]
