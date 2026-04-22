@@ -1,8 +1,8 @@
 """JavaScript / TypeScript language engine - uses npm + vitest.
 
-React detection: if 'react' appears in tech_stack.dependencies, the engine
-automatically enables the JSX transform (@vitejs/plugin-react) and jsdom
-environment in vitest, and runs examples via react-dom/server + esbuild.
+The engine handles JS/JSX/TS/TSX syntax; framework choices (React, Preact,
+Solid, etc.) are the widget's business and must be declared in its own
+package.json devDependencies plus widget.json tech_stack.dependencies.
 
 Source scanning is handled by scanners/js_scanner.js (native JS) for
 string/comment/template-literal-aware detection.
@@ -87,13 +87,6 @@ import {{ {module} }} from '../src/{module}'
 const result = {module}('hello')
 console.log(`Result: ${{result}}`)
 '''
-
-_REACT_DEV_DEPS = {
-    "@vitejs/plugin-react": "^4.0.0",
-    "@testing-library/react": "^14.0.0",
-    "jsdom": "^24.0.0",
-    "esbuild": "^0.20.0",
-}
 
 _COVERAGE_THRESHOLD = 80
 
@@ -203,20 +196,6 @@ class JavaScriptEngine(LanguageEngine):
 
     # ------------------------------------------------------------------ helpers
 
-    @staticmethod
-    def _has_react(dependencies: list) -> bool:
-        for dep in dependencies:
-            if _dep_bare_name(dep).lower() == "react":
-                return True
-        return False
-
-    def _read_deps(self, path: str) -> list:
-        try:
-            with open(os.path.join(path, "widget.json")) as f:
-                return json.load(f).get("tech_stack", {}).get("dependencies", [])
-        except Exception:
-            return []
-
     # ------------------------------------------------------------------ validation
 
     scanner_warning_messages = {
@@ -291,15 +270,22 @@ class JavaScriptEngine(LanguageEngine):
         return files
 
     def example_filename(self, path: str = "") -> str:
-        if path and self._has_react(self._read_deps(path)):
-            return "example_usage.jsx"
+        """Find the widget's example file.
+
+        Widgets pick the extension themselves (`.js`, `.jsx`, `.ts`, `.tsx`).
+        Scaffold default is returned when no example exists yet.
+        """
+        if path:
+            for ext in ("jsx", "tsx", "ts", "js"):
+                candidate = os.path.join(path, "examples", f"example_usage.{ext}")
+                if os.path.exists(candidate):
+                    return f"example_usage.{ext}"
         return "example_usage.js"
 
     # ------------------------------------------------------------------ install
 
     def install_deps(self, path: str, dependencies: list) -> None:
-        has_react = self._has_react(dependencies)
-        log.debug("Installing npm packages (react=%s)...", has_react)
+        log.debug("Installing npm packages...")
 
         package_json_path = os.path.join(path, "package.json")
 
@@ -311,8 +297,6 @@ class JavaScriptEngine(LanguageEngine):
                 "dependencies": {},
                 "devDependencies": {"vitest": "^1.0.0", "@vitest/coverage-v8": "^1.0.0"},
             }
-            if has_react:
-                pkg["devDependencies"].update(_REACT_DEV_DEPS)
             for dep in dependencies:
                 bare = _dep_bare_name(dep)
                 ver_part = dep[len(bare):].strip() or "*"
@@ -328,11 +312,6 @@ class JavaScriptEngine(LanguageEngine):
             if "vitest" not in dev and "vitest" not in pkg.get("dependencies", {}):
                 dev["vitest"] = "^1.0.0"
                 changed = True
-            if has_react:
-                for dep_name, dep_ver in _REACT_DEV_DEPS.items():
-                    if dep_name not in dev and dep_name not in pkg.get("dependencies", {}):
-                        dev[dep_name] = dep_ver
-                        changed = True
             if changed:
                 with open(package_json_path, "w") as f:
                     json.dump(pkg, f, indent=2)
@@ -395,41 +374,22 @@ class JavaScriptEngine(LanguageEngine):
 
     # ------------------------------------------------------------------ example
 
-    def _run_example_with_runner(self, path: str, runner_cmd: list) -> dict:
-        """Run an example file, using esbuild for React projects."""
-        example_path = os.path.join(path, "examples", self.example_filename(path))
-
-        if not self._has_react(self._read_deps(path)):
-            res = self._run(runner_cmd + [example_path], cwd=path, timeout=30)
-            if res.returncode != 0:
-                return self._fail(res.stderr or res.stdout)
-            return self._ok()
-
-        # React: bundle with esbuild, run with node
-        with tempfile.NamedTemporaryFile(suffix=".cjs", delete=False, dir=path) as f:
-            bundle_path = f.name
-        try:
-            esbuild_name = "esbuild.cmd" if os.name == "nt" else "esbuild"
-            esbuild = os.path.join(path, "node_modules", ".bin", esbuild_name)
-            build = self._run(
-                [esbuild, example_path,
-                 "--bundle", "--platform=node", "--jsx=automatic",
-                 f"--outfile={bundle_path}"],
-                cwd=path, timeout=30,
-            )
-            if build.returncode != 0:
-                return self._fail(f"esbuild failed:\n{build.stderr or build.stdout}")
-
-            run = self._run(["node", bundle_path], cwd=path, timeout=30)
-            if run.returncode != 0:
-                return self._fail(run.stderr or run.stdout)
-            return self._ok()
-        finally:
-            if os.path.exists(bundle_path):
-                os.remove(bundle_path)
+    @staticmethod
+    def _runner_for(example_file: str) -> list:
+        """`node` for plain .js; `npx tsx` for anything that needs JSX/TS."""
+        ext = os.path.splitext(example_file)[1].lower()
+        if ext in (".jsx", ".ts", ".tsx"):
+            return ["npx", "tsx"]
+        return ["node"]
 
     def run_example(self, path: str) -> dict:
-        return self._run_example_with_runner(path, ["node"])
+        example_file = self.example_filename(path)
+        example_path = os.path.join(path, "examples", example_file)
+        runner = self._runner_for(example_file)
+        res = self._run(runner + [example_path], cwd=path, timeout=30)
+        if res.returncode != 0:
+            return self._fail(res.stderr or res.stdout)
+        return self._ok()
 
     # ------------------------------------------------------------------ cleanup
 
@@ -465,9 +425,10 @@ class TypeScriptEngine(JavaScriptEngine):
             f.write(_TS_EXAMPLE.format(name=display_name, module=module_name))
 
     def example_filename(self, path: str = "") -> str:
-        if path and self._has_react(self._read_deps(path)):
-            return "example_usage.tsx"
+        """Find the widget's example file. TS default is `.ts`."""
+        if path:
+            for ext in ("tsx", "jsx", "ts", "js"):
+                candidate = os.path.join(path, "examples", f"example_usage.{ext}")
+                if os.path.exists(candidate):
+                    return f"example_usage.{ext}"
         return "example_usage.ts"
-
-    def run_example(self, path: str) -> dict:
-        return self._run_example_with_runner(path, ["npx", "tsx"])
