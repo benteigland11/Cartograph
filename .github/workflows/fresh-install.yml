@@ -1,9 +1,7 @@
 name: Fresh Install Test
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
 
 jobs:
   fresh-install:

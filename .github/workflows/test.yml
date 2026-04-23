@@ -5,6 +5,13 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_call:
+    inputs:
+      full_install:
+        description: "Skip path filtering and install every engine tool (used by release pipeline)."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -45,23 +52,23 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install iverilog (Linux)
-        if: matrix.os == 'ubuntu-latest' && (steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
+        if: matrix.os == 'ubuntu-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
         run: sudo apt-get update && sudo apt-get install -y iverilog
 
       - name: Install iverilog (macOS)
-        if: matrix.os == 'macos-latest' && (steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
+        if: matrix.os == 'macos-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
         run: brew install icarus-verilog
 
       - name: Install iverilog (Windows)
-        if: matrix.os == 'windows-latest' && (steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
+        if: matrix.os == 'windows-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
         run: choco install iverilog -y || (sleep 15 && choco install iverilog -y)
 
       - name: Install Angular CLI
-        if: steps.changes.outputs.core == 'true' || steps.changes.outputs.angular == 'true'
+        if: inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.angular == 'true'
         run: npm install -g @angular/cli
 
       - name: Install PHP and Composer
-        if: steps.changes.outputs.core == 'true' || steps.changes.outputs.php == 'true'
+        if: inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.php == 'true'
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
