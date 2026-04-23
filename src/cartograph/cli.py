@@ -2402,27 +2402,57 @@ def cmd_registry(args):
 def cmd_config(args):
     """View or change settings. No args = list all, key = get, key value = set.
 
-    Emits JSON so the MCP config tool can wrap this path directly without
-    reimplementing the config store.
+    Default output is human-friendly aligned prose. Pass --json for structured
+    output (used by the MCP config tool and anything else that needs to parse
+    the result).
     """
     key = getattr(args, "key", None)
     value = getattr(args, "value", None)
+    as_json = getattr(args, "as_json", False)
 
     if not key:
         from .config import list_values
-        out({"status": "success", "settings": list_values()})
+        items = list_values()
+        if as_json:
+            out({"status": "success", "settings": items})
+            return
+        def _display_value(item):
+            val = item["value"]
+            # Empty string counts as unset for display purposes (happens when
+            # a string key has never been set or was cleared via `config <k> ""`).
+            if val is not None and val != "":
+                return str(val)
+            default = item.get("default")
+            if default is not None and default != "":
+                return f"{default} (default)"
+            return "-"
+
+        max_key = max((len(i["key"]) for i in items), default=0)
+        max_val = max((len(_display_value(i)) for i in items), default=0)
+        print()
+        for item in items:
+            choices = f"  {' | '.join(item['choices'])}" if item["choices"] else ""
+            print(f"  {item['key']:<{max_key}}   {_display_value(item):<{max_val}}   {item['description']}{choices}")
+        print()
     elif value is None:
         from .config import get_value
         val, error = get_value(key)
         if error:
             err({"error": error})
-        out({"status": "success", "key": key, "value": val})
+        if as_json:
+            out({"status": "success", "key": key, "value": val})
+            return
+        display = val if val is not None else "(not set)"
+        print(f"\n  {key} = {display}\n")
     else:
         from .config import set_value
         error = set_value(key, value)
         if error:
             err({"error": error})
-        out({"status": "success", "key": key, "value": value})
+        if as_json:
+            out({"status": "success", "key": key, "value": value})
+            return
+        print(f"\n  Set {key} = {value}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -2729,6 +2759,8 @@ def _build_cli() -> AgentCLI:
                  "help": "Setting name (e.g. auto-publish)"},
                 {"name": "value", "nargs": "?", "default": None,
                  "help": "Value to set (omit to read)"},
+                {"name": "--json", "action": "store_true", "default": False,
+                 "dest": "as_json", "help": "Emit JSON for machine consumption (used by the MCP layer)"},
             ],
         },
         {

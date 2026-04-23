@@ -81,18 +81,33 @@ def test_inspect_emits_json(cli_env, tmp_path):
            or (result.get("meta") or {}).get("id") == "http-client"
 
 
-def test_config_list_emits_json(cli_env, tmp_path):
+def test_config_list_prose_default(cli_env, tmp_path):
+    """Without --json, config list emits human-friendly prose, not JSON."""
     rc, stdout, stderr = _run(["config"], cli_env, str(tmp_path))
+    assert rc == 0
+    # Prose output lists keys; should not parse as JSON
+    assert "auto-publish" in stdout
+    import json as _json
+    try:
+        _json.loads(stdout)
+        pytest.fail("config list without --json should emit prose, got parseable JSON")
+    except _json.JSONDecodeError:
+        pass  # expected
+
+
+def test_config_list_json_flag(cli_env, tmp_path):
+    """With --json, config list emits structured settings for MCP consumption."""
+    rc, stdout, stderr = _run(["config", "--json"], cli_env, str(tmp_path))
     result = _parse_json_stdout(stdout, stderr)
     assert result.get("status") == "success"
     settings = result.get("settings", [])
     assert isinstance(settings, list) and len(settings) > 0
-    # each row should have key + value + description
     row = settings[0]
     assert "key" in row and "description" in row
 
 
 def test_config_get_unknown_key_emits_json_error(cli_env, tmp_path):
+    """Errors always emit JSON via err(), regardless of --json flag."""
     rc, stdout, stderr = _run(["config", "nonexistent-key-xyz"], cli_env, str(tmp_path))
     assert rc != 0
     result = _parse_json_stdout(stdout, stderr)

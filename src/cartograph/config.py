@@ -172,6 +172,37 @@ def set_value(key: str, raw_value: str):
     return None
 
 
+_DISPLAY_DEFAULTS = {
+    # Keys whose effective default differs from _DEFAULTS (usually because
+    # `None` has a special "fall back to public" meaning in the code but is
+    # confusing to display). Surface the human-facing default here.
+    "publish-registry": _PUBLIC_REGISTRY_PREFIX,
+}
+
+
+def _known_engine_binaries() -> list[tuple[str, str]]:
+    """Return (binary_name, owning_engine_name) pairs for every binary any
+    registered engine declares in its toolchain. Used by list_values() to
+    advertise discoverable paths.<binary> overrides even before the user
+    sets them."""
+    try:
+        from .languages.registry import supported_languages, get_engine
+    except Exception:
+        return []
+    pairs = []
+    seen = set()
+    for lang in supported_languages():
+        engine = get_engine(lang)
+        if engine is None:
+            continue
+        for binary in getattr(engine, "toolchain", {}) or {}:
+            if binary in seen:
+                continue
+            seen.add(binary)
+            pairs.append((binary, lang))
+    return sorted(pairs)
+
+
 def list_values() -> list[dict]:
     """Return all config keys with current values and defaults."""
     config = load_config()
@@ -180,6 +211,8 @@ def list_values() -> list[dict]:
         section, toml_key, typ, choices, description = _SCHEMA[key]
         current = config.get(section, {}).get(toml_key)
         default = _DEFAULTS.get(section, {}).get(toml_key)
+        if default is None and key in _DISPLAY_DEFAULTS:
+            default = _DISPLAY_DEFAULTS[key]
         result.append({
             "key": key,
             "value": current,
@@ -188,10 +221,27 @@ def list_values() -> list[dict]:
             "choices": choices,
             "description": description,
         })
-    # Configured path overrides appear as paths.<binary>. These are dynamic
-    # (users name their own binaries), so they don't live in _SCHEMA.
+    # paths.<binary> namespace. Two sources:
+    #   1. binaries every registered engine declares — show up even when
+    #      unset so agents/humans can discover the override surface.
+    #   2. extra binaries the user has already overridden that aren't in any
+    #      engine's toolchain (unusual, but don't hide them).
     paths = config.get("paths", {}) or {}
+    engine_binaries = _known_engine_binaries()
+    advertised = set()
+    for binary, lang in engine_binaries:
+        advertised.add(binary)
+        result.append({
+            "key": f"paths.{binary}",
+            "value": paths.get(binary),
+            "default": None,
+            "type": "path",
+            "choices": None,
+            "description": f"Override PATH lookup for '{binary}' ({lang} engine)",
+        })
     for binary in sorted(paths):
+        if binary in advertised:
+            continue
         result.append({
             "key": f"paths.{binary}",
             "value": paths[binary],
