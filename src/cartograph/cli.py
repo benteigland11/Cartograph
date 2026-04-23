@@ -324,7 +324,7 @@ def cmd_install(args):
         target_dir=os.path.abspath(args.target),
         version=args.version,
     )
-    if result.get("status") == "error":
+    if result.get("status") == "error" or "error" in result:
         err(result)
     out(result)
     _cloud_install_note(result)
@@ -363,7 +363,7 @@ def _resolve_installed_widget(widget_dir: str, default_target: str):
 def cmd_uninstall(args):
     widget_id, target_dir = _resolve_installed_widget(args.widget_dir, os.getcwd())
     result = _carto().uninstall(widget_id=widget_id, target_dir=target_dir)
-    if result.get("status") == "error":
+    if result.get("status") == "error" or "error" in result:
         err(result)
     out(result)
 
@@ -375,7 +375,7 @@ def cmd_upgrade(args):
         target_dir=target_dir,
         version=args.version,
     )
-    if result.get("status") == "error":
+    if result.get("status") == "error" or "error" in result:
         err(result)
     out(result)
     _cloud_install_note(result)
@@ -386,7 +386,7 @@ def cmd_delete(args):
         widget_id=args.widget_id,
         confirm=args.confirm,
     )
-    if result.get("status") == "error":
+    if result.get("status") == "error" or "error" in result:
         err(result)
 
     # Also remove from cloud if published
@@ -426,7 +426,7 @@ def cmd_create(args):
         name=args.name,
         target_dir=target_abs,
     )
-    if result.get("status") == "error":
+    if result.get("status") == "error" or "error" in result:
         err(result)
     out(result)
 
@@ -438,7 +438,7 @@ def cmd_rename(args):
         new_domain=args.domain,
         target_dir=os.path.abspath(args.target),
     )
-    if result.get("status") == "error":
+    if result.get("status") == "error" or "error" in result:
         err(result)
     out(result)
 
@@ -458,7 +458,7 @@ def cmd_validate(args):
     path = _resolve_widget_path(args)
     _preflight_from_path(path)
     result = _carto().validate_item(path=path)
-    if result.get("status") == "error":
+    if result.get("status") == "error" or "error" in result:
         err(result)
     if result.get("warnings"):
         print("\nWarnings:", file=sys.stderr)
@@ -601,7 +601,7 @@ def cmd_checkin(args):
         override_warnings=args.override_warnings,
         override_reason=args.override_reason or "",
     )
-    if result.get("status") == "error":
+    if result.get("status") == "error" or "error" in result:
         err(result)
     out(result)
 
@@ -1335,7 +1335,7 @@ def cmd_rollback(args):
     local_widget = next((w for w in carto.widgets if w["id"] == base_id), None)
     if local_widget:
         result = restore(carto, base_id, version, reason=args.reason or f"Rollback to v{version}")
-        if result.get("status") == "error":
+        if result.get("status") == "error" or "error" in result:
             print(f"  Local rollback failed: {result.get('message', 'unknown error')}")
         else:
             rolled_local = True
@@ -2037,7 +2037,7 @@ def cmd_stats(args):
     widgets = _carto().widgets
 
     if not widgets:
-        print("\n  Library is empty.\n")
+        out({"status": "success", "widget_count": 0, "message": "Library is empty."})
         return
 
     by_language = defaultdict(int)
@@ -2053,42 +2053,27 @@ def cmd_stats(args):
         by_domain[w.get("domain", "unknown")] += 1
 
         if w.get("rating", 0):
-            rated.append((w["name"], w["rating"]))
+            rated.append({"name": w["name"], "rating": w["rating"]})
         if w.get("install_count", 0):
-            installed.append((w["name"], w["install_count"]))
+            installed.append({"name": w["name"], "installs": w["install_count"]})
 
-    rated.sort(key=lambda x: x[1], reverse=True)
-    installed.sort(key=lambda x: x[1], reverse=True)
+    rated.sort(key=lambda x: x["rating"], reverse=True)
+    installed.sort(key=lambda x: x["installs"], reverse=True)
 
     all_ratings = [w.get("rating", 0) for w in widgets if w.get("rating", 0)]
     avg_rating  = round(sum(all_ratings) / len(all_ratings), 1) if all_ratings else 0
     total_installs = sum(w.get("install_count", 0) for w in widgets)
 
-    print()
-    print(f"  Library  {len(widgets)} widgets  |  {total_installs} total installs  |  avg rating {avg_rating}/5.0")
-    print()
-
-    print("  By language")
-    for lang, count in sorted(by_language.items()):
-        print(f"    {lang:<16}  {count}")
-    print()
-
-    print("  By domain")
-    for domain, count in sorted(by_domain.items()):
-        print(f"    {domain:<16}  {count}")
-    print()
-
-    if installed:
-        print("  Most installed")
-        for name, count in installed[:5]:
-            print(f"    {name:<32}  {count} installs")
-        print()
-
-    if rated:
-        print("  Top rated")
-        for name, rating in rated[:5]:
-            print(f"    {name:<32}  {rating}/5.0")
-        print()
+    out({
+        "status": "success",
+        "widget_count": len(widgets),
+        "total_installs": total_installs,
+        "avg_rating": avg_rating,
+        "by_language": dict(sorted(by_language.items())),
+        "by_domain": dict(sorted(by_domain.items())),
+        "most_installed": installed[:5],
+        "top_rated": rated[:5],
+    })
 
 
 def cmd_sync(args):
