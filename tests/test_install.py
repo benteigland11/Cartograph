@@ -101,3 +101,47 @@ def test_install_js_has_package_json(fresh_carto):
     assert result.get("status") == "success"
     widget_dir = result["installed_at"]
     assert os.path.exists(os.path.join(widget_dir, "package.json"))
+
+
+# ---------------------------------------------------------------------------
+# Prefixed install: commands use the prefixed id throughout
+# ---------------------------------------------------------------------------
+
+def test_uninstall_prefixed_id(fresh_carto, fixture_library):
+    """Uninstalling a widget using its prefixed id should work.
+
+    The installed dir name IS the widget_id — cg-http-client installs to
+    cg/cg-http-client/ and is uninstalled the same way.
+    """
+    import json
+    from cartograph import Cartograph
+    from cartograph.installer import _widget_dir
+    carto, target = fresh_carto
+
+    # Simulate a prefixed install: the dir name matches the prefixed id
+    prefixed_id = "cg-http-client"
+    wdir = _widget_dir(target, prefixed_id)
+    os.makedirs(os.path.join(wdir, "src"), exist_ok=True)
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump({"meta": {"id": "http-client", "version": "1.0.0"}}, f)
+
+    result = carto.uninstall(prefixed_id, target)
+    assert result.get("status") == "success", result
+    assert not os.path.isdir(wdir)
+
+
+def test_status_prefixed_id(fresh_carto, fixture_library):
+    """Status check with a prefixed id resolves the library entry via bare id."""
+    import json
+    from cartograph.installer import _widget_dir
+    carto, target = fresh_carto
+
+    prefixed_id = "cg-http-client"
+    wdir = _widget_dir(target, prefixed_id)
+    os.makedirs(os.path.join(wdir, "src"), exist_ok=True)
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump({"meta": {"id": "http-client", "version": "1.2.0"}}, f)
+
+    result = carto.widget_status(widget_id=prefixed_id, target_dir=target)
+    assert "error" not in result, result
+    assert result["widget_id"] == prefixed_id

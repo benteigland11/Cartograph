@@ -673,10 +673,10 @@ class Cartograph:
         from .checkin import add_review
         widget_id = normalize_widget_id(widget_id)
         return add_review(self, widget_id, target_dir, score, comment=comment)
-    def widget_status(self, widget_id, target_dir):
+    def widget_status(self, widget_id, target_dir, check_cloud=True):
         from .checkin import widget_status
         widget_id = normalize_widget_id(widget_id)
-        return widget_status(self, widget_id, target_dir)
+        return widget_status(self, widget_id, target_dir, check_cloud=check_cloud)
     def install(self, widget_id, target_dir, version=None):
         from .installer import install
         widget_id = normalize_widget_id(widget_id)

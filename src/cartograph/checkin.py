@@ -71,7 +71,8 @@ def _manifest_core(data: dict) -> dict:
     return out
 
 
-def _lookup_cloud_baseline(path: str, item_id: str) -> dict | None:
+def _lookup_cloud_baseline(path: str, item_id: str,
+                           library_path: str | None = None) -> dict | None:
     """Return {"version": ..., "implementation_hash": ..., "source": "cloud"} if a
     `.cartograph_source` sidecar points at a cloud record for this widget, else None.
 
@@ -80,13 +81,17 @@ def _lookup_cloud_baseline(path: str, item_id: str) -> dict | None:
     three-way status view run against the cloud baseline without downloading the
     widget zip. When absent, callers fall back to their pre-echo behavior gracefully.
 
-    Sidecar-only: we don't probe the cloud for widgets that weren't installed
-    from it. Falls back silently when offline, unauthenticated, or the widget
-    isn't resolvable there.
+    Checks `path` for a sidecar first (cloud-installed widgets), then falls back to
+    `library_path` (widgets installed from the local library whose library copy was
+    published to cloud). Falls back silently when offline, unauthenticated, or the
+    widget isn't resolvable in the registry.
     """
     sidecar_path = os.path.join(path, ".cartograph_source")
     if not os.path.isfile(sidecar_path):
-        return None
+        if library_path:
+            sidecar_path = os.path.join(library_path, ".cartograph_source")
+        if not os.path.isfile(sidecar_path):
+            return None
     try:
         with open(sidecar_path) as f:
             source = json.load(f)
@@ -514,9 +519,14 @@ def add_review(carto, widget_id, target_dir, score, comment=None):
     if not os.path.exists(installed_path):
         return {"error": f"'{widget_id}' not found at {installed_path}. Install it first."}
 
-    widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
+    # Strip registry prefix (e.g. cg-foo-python -> foo-python) for library lookup
+    from .installer import _resolve_registry
+    resolved = _resolve_registry(widget_id)
+    library_id = resolved[2] if resolved else widget_id
+
+    widget = next((w for w in carto.widgets if w["id"] == library_id), None)
     if not widget:
-        return {"error": f"Widget '{widget_id}' not found in library."}
+        return {"error": f"Widget '{library_id}' not found in library."}
 
     try:
         score = float(score)
@@ -528,16 +538,21 @@ def add_review(carto, widget_id, target_dir, score, comment=None):
     return write_review(widget["path"], score, widget.get("version", "unknown"), comment)
 
 
-def widget_status(carto, widget_id, target_dir):
+def widget_status(carto, widget_id, target_dir, check_cloud=True):
     """Check the status of an installed widget against the library."""
-    widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
-    if not widget:
-        return {"error": f"'{widget_id}' not found in library."}
-
     from .engine import python_dir_name, DEFAULT_INSTALL_DIR
     installed_path = os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(widget_id))
     if not os.path.exists(installed_path):
         return {"error": f"'{widget_id}' not found at {installed_path}."}
+
+    # Strip registry prefix (e.g. cg-foo-python -> foo-python) for library lookup
+    from .installer import _resolve_registry
+    resolved = _resolve_registry(widget_id)
+    library_id = resolved[2] if resolved else widget_id
+
+    widget = next((w for w in carto.widgets if w["id"] == library_id), None)
+    if not widget:
+        return {"error": f"'{library_id}' not found in library."}
 
     try:
         with open(os.path.join(installed_path, "widget.json")) as f:
@@ -552,10 +567,11 @@ def widget_status(carto, widget_id, target_dir):
     outdated = installed_version != library_version
     modified = installed_hash != library_hash
 
-    # Cloud three-way comparison — populated when the installed copy has a
-    # sidecar AND the registry echoes implementation_hash (issue #15). Without
-    # the echo we still surface cloud_version; modified_vs_cloud stays absent.
-    cloud_info = _lookup_cloud_baseline(installed_path, widget_id) or {}
+    # Cloud three-way comparison. Falls back to library sidecar so locally-installed
+    # widgets whose library copy is published to cloud also get a cloud version check.
+    cloud_info = (_lookup_cloud_baseline(installed_path, library_id,
+                                        library_path=widget.get("path"))
+                  or {}) if check_cloud else {}
     cloud_version = cloud_info.get("version")
     cloud_hash = cloud_info.get("implementation_hash")
 
@@ -563,8 +579,8 @@ def widget_status(carto, widget_id, target_dir):
         "widget_id": widget_id,
         "installed_version": installed_version,
         "library_version": library_version,
-        "cloud_version": cloud_version,
-        **({"outdated_vs_cloud": installed_version != cloud_version}
+        **({"cloud_version": cloud_version,
+            "outdated_vs_cloud": installed_version != cloud_version}
            if cloud_version else {}),
         **({"modified_vs_cloud": installed_hash != cloud_hash}
            if cloud_hash else {}),

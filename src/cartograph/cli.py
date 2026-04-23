@@ -327,20 +327,49 @@ def cmd_install(args):
     _cloud_install_note(result)
 
 
+def _resolve_installed_widget(widget_dir: str, default_target: str):
+    """Resolve a widget directory path into (widget_id, target_dir).
+
+    Requires a path to an installed widget directory (e.g. cg/infra_file_stamp_python).
+    The widget_id is read from widget.json meta.id and the project root is derived
+    as the parent-of-parent (widgets live at <root>/cg/<widget_dir>/).
+
+    Always use the dir path — never a bare widget_id. The dir is unambiguous even
+    when multiple registry prefixes are installed (cg-foo vs myorg-foo).
+    """
+    candidate = os.path.abspath(widget_dir)
+    if not os.path.isdir(candidate):
+        err({"error": (
+            f"'{widget_dir}' is not a directory. Pass the installed widget directory, "
+            f"e.g. cg/infra_file_stamp_python or /abs/path/to/cg/infra_file_stamp_python. "
+            f"Run 'cartograph status --all' to see installed widget paths."
+        )})
+    manifest = os.path.join(candidate, "widget.json")
+    try:
+        with open(manifest) as f:
+            widget_id = json.load(f).get("meta", {}).get("id", "")
+        if not widget_id:
+            err({"error": f"widget.json at {manifest} is missing meta.id"})
+    except Exception as e:
+        err({"error": f"Could not read widget.json at {manifest}: {e}"})
+    from .engine import DEFAULT_INSTALL_DIR
+    target_dir = os.path.dirname(os.path.dirname(candidate))
+    return widget_id, target_dir
+
+
 def cmd_uninstall(args):
-    result = _carto().uninstall(
-        widget_id=args.widget_id,
-        target_dir=os.path.abspath(args.target),
-    )
+    widget_id, target_dir = _resolve_installed_widget(args.widget_dir, os.getcwd())
+    result = _carto().uninstall(widget_id=widget_id, target_dir=target_dir)
     if result.get("status") == "error":
         err(result)
     out(result)
 
 
 def cmd_upgrade(args):
+    widget_id, target_dir = _resolve_installed_widget(args.widget_dir, os.getcwd())
     result = _carto().upgrade(
-        widget_id=args.widget_id,
-        target_dir=os.path.abspath(args.target),
+        widget_id=widget_id,
+        target_dir=target_dir,
         version=args.version,
     )
     if result.get("status") == "error":
@@ -591,15 +620,16 @@ def _paginate_widget():
 
 
 def cmd_status(args):
-    target = os.path.abspath(args.target)
+    target = os.getcwd()
 
-    if args.widget_id:
+    if args.widget_dir:
         # Pagination flags are meaningless for a single-target lookup — flag it
         # rather than silently ignoring, so an agent knows its call was ambiguous.
         if args.all_widgets or args.page != 1 or args.size != 20:
             err({"status": "error",
-                 "message": "--page/--size/--all only apply when listing all widgets (omit widget_id)."})
-        result = _carto().widget_status(widget_id=args.widget_id, target_dir=target)
+                 "message": "--page/--size/--all only apply when listing all widgets (omit widget_dir)."})
+        widget_id, target = _resolve_installed_widget(args.widget_dir, target)
+        result = _carto().widget_status(widget_id=widget_id, target_dir=target)
         if result.get("error"):
             err(result)
         out(result)
@@ -623,30 +653,128 @@ def cmd_status(args):
         print(f"  Run 'cartograph install <widget_id>' to install one.\n")
         return
 
-    from .engine import normalize_widget_id
+    from .engine import normalize_widget_id, python_dir_name, DEFAULT_INSTALL_DIR
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     carto = _carto()
-    widgets = []
-    for wid in sorted(widget_ids):
-        r = carto.widget_status(widget_id=normalize_widget_id(wid), target_dir=target)
-        widgets.append(r)
+    library_by_id = {w["id"]: w for w in carto.widgets}
 
-    total = len(widgets)
+    def _has_sidecar(wid):
+        """True if this widget has a cloud sidecar in its installed dir or library dir."""
+        canonical = normalize_widget_id(wid)
+        installed = os.path.join(install_dir, wid, ".cartograph_source")
+        if os.path.isfile(installed):
+            return True
+        # Strip registry prefix to find library entry
+        from .installer import _resolve_registry
+        resolved = _resolve_registry(canonical)
+        lib_id = resolved[2] if resolved else canonical
+        lib_widget = library_by_id.get(lib_id)
+        if lib_widget:
+            lib_sidecar = os.path.join(lib_widget["path"], ".cartograph_source")
+            return os.path.isfile(lib_sidecar)
+        return False
+
+    cloud_wids = [wid for wid in sorted(widget_ids) if _has_sidecar(wid)]
+    local_wids = [wid for wid in sorted(widget_ids) if wid not in cloud_wids]
+
+    results = {}
+    for wid in local_wids:
+        results[wid] = carto.widget_status(widget_id=normalize_widget_id(wid),
+                                           target_dir=target, check_cloud=False)
+
+    if cloud_wids:
+        def _status_cloud(wid):
+            return carto.widget_status(widget_id=normalize_widget_id(wid), target_dir=target)
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(_status_cloud, wid): wid for wid in cloud_wids}
+            for fut in as_completed(futures):
+                wid = futures[fut]
+                try:
+                    results[wid] = fut.result()
+                except Exception as e:
+                    results[wid] = {"error": str(e)}
+
+    all_widgets = []
+    for wid in sorted(widget_ids):
+        r = results[wid]
+        if "error" not in r:
+            all_widgets.append(r)
+
+    total = len(all_widgets)
     aggregate = {
         "installed": total,
-        "outdated": sum(1 for w in widgets if w.get("outdated")),
-        "modified": sum(1 for w in widgets if w.get("modified")),
+        "outdated": sum(1 for w in all_widgets if w.get("outdated")),
+        "modified": sum(1 for w in all_widgets if w.get("modified")),
     }
 
+    def _has_issue(w):
+        return w.get("outdated") or w.get("modified") or w.get("outdated_vs_cloud")
+
+    from .engine import python_dir_name
+
+    def _ver(s):
+        try:
+            return tuple(int(x) for x in str(s).split("."))
+        except Exception:
+            return (0,)
+
+    def _suggest(w):
+        wid = w["widget_id"]
+        outdated = w.get("outdated", False)
+        modified = w.get("modified", False)
+        outdated_vs_cloud = w.get("outdated_vs_cloud", False)
+        widget_dir = os.path.join(target, DEFAULT_INSTALL_DIR, python_dir_name(wid))
+
+        installed_v = _ver(w.get("installed_version", "0"))
+        library_v = _ver(w.get("library_version", "0"))
+        cloud_v = _ver(w.get("cloud_version", "0")) if w.get("cloud_version") else None
+
+        # Installed is ahead of library but matches cloud — local library is stale.
+        if outdated and cloud_v and cloud_v == installed_v and installed_v > library_v:
+            return "Local library is behind cloud. Run: cartograph cloud sync"
+
+        # Cloud has a newer version than what's installed.
+        if outdated_vs_cloud:
+            return (f"Cloud registry has a newer version. Run: "
+                    f"cartograph cloud sync && cartograph upgrade {widget_dir}")
+
+        # Installed is behind library AND has local changes — need to inspect and merge.
+        if outdated and modified and installed_v < library_v:
+            return (f"Local changes conflict with a newer library version. "
+                    f"Inspect what changed: "
+                    f"cartograph inspect {wid} --source --version {w['library_version']} "
+                    f"then upgrade and re-apply your changes: "
+                    f"cartograph upgrade {widget_dir}")
+
+        # Installed is simply behind the library.
+        if outdated and installed_v < library_v:
+            return f"cartograph upgrade {widget_dir}"
+
+        # Local modifications only — suggest checkin if intentional.
+        if modified:
+            return (f"Local modifications detected. Check in if intentional: "
+                    f"cartograph checkin {widget_dir} --reason \"...\"")
+        return None
+
+    for w in all_widgets:
+        suggestion = _suggest(w)
+        if suggestion:
+            w["suggestion"] = suggestion
+
     if args.all_widgets:
+        # --all: show every widget regardless of status, no pagination
         pagination = {
             "page": 1, "size": total, "total": total,
             "total_pages": 1, "has_next": False, "has_prev": False,
             "all": True,
         }
-        page_items = widgets
+        page_items = all_widgets
     else:
+        # Default: only surface widgets with issues
+        problem_widgets = [w for w in all_widgets if _has_issue(w)]
         paginate = _paginate_widget()
-        result = paginate(widgets, page=args.page, size=args.size)
+        result = paginate(problem_widgets, page=args.page, size=args.size)
         page_items = result.pop("items")
         pagination = {**result, "all": False}
         # Agent-friendly: tell the caller exactly how to get the next/prev page.
@@ -659,23 +787,13 @@ def cmd_status(args):
                 f"cartograph status --page {pagination['page'] - 1} --size {pagination['size']}"
             )
 
-    # Surface library-integrity gate hits: widgets present in the library
-    # directory but excluded from search/install because they lack a valid
-    # validation stamp. Gives the user a feedback loop when "my widget
-    # disappeared from search" — run `cartograph checkin` to restamp.
-    unstamped = getattr(carto, "unstamped_widgets", []) or []
-    aggregate["unstamped_in_library"] = len(unstamped)
-
-    payload = {
-        **aggregate,
-        "pagination": pagination,
-        "widgets": page_items,
-    }
-    if unstamped:
-        payload["unstamped_library_widgets"] = [
-            {"id": u["id"], "path": u["path"], "language": u["language"]}
-            for u in unstamped
-        ]
+    payload = {**aggregate, "pagination": pagination, "widgets": page_items}
+    if not args.all_widgets:
+        payload["note"] = (
+            "Showing widgets with issues only. Run with --all to see all installed widgets."
+            if aggregate["outdated"] or aggregate["modified"] else
+            "All widgets are up to date."
+        )
     out(payload)
 
 
@@ -971,10 +1089,11 @@ def cmd_rate(args):
         print(f"\n  Rated {widget_id}: {args.score}/5\n")
         return
 
-    # Local widget
+    # Local widget — requires dir path
+    widget_id, target_dir = _resolve_installed_widget(widget_id, os.getcwd())
     result = _carto().add_review(
         widget_id=widget_id,
-        target_dir=os.path.abspath(args.target),
+        target_dir=target_dir,
         score=args.score,
         comment=args.comment,
     )
@@ -2366,8 +2485,7 @@ def _build_cli() -> AgentCLI:
             "help": "Remove a widget from your project",
             "handler": cmd_uninstall,
             "args": [
-                {"name": "widget_id"},
-                {"name": "--target", "default": ".", "help": "Project root (default: .)"},
+                {"name": "widget_dir", "help": "Path to installed widget dir (e.g. cg/infra_foo_python)"},
             ],
         },
         {
@@ -2375,18 +2493,17 @@ def _build_cli() -> AgentCLI:
             "help": "Upgrade an installed widget to the latest version",
             "handler": cmd_upgrade,
             "args": [
-                {"name": "widget_id"},
-                {"name": "--target", "default": ".", "help": "Project root (default: .)"},
+                {"name": "widget_dir", "help": "Path to installed widget dir (e.g. cg/infra_foo_python)"},
                 {"name": "--version", "default": None},
             ],
         },
         {
             "name": "status",
-            "help": "Check installed widget(s) - omit widget_id to scan all",
+            "help": "Check installed widget(s) - omit widget_dir to scan all",
             "handler": cmd_status,
             "args": [
-                {"name": "widget_id", "nargs": "?", "default": None},
-                {"name": "--target", "default": ".", "help": "Project root (default: .)"},
+                {"name": "widget_dir", "nargs": "?", "default": None,
+                 "help": "Path to installed widget dir, or omit to scan all"},
                 {"name": "--page", "type": int, "default": 1,
                  "help": "1-indexed page for aggregate listing (default: 1)"},
                 {"name": "--size", "type": int, "default": 20,
@@ -2397,13 +2514,12 @@ def _build_cli() -> AgentCLI:
         },
         {
             "name": "rate",
-            "help": "Rate a widget (local or @handle/widget-id for cloud)",
+            "help": "Rate a widget (local dir path or @handle/widget-id for cloud)",
             "handler": cmd_rate,
             "args": [
-                {"name": "widget_id", "help": "Widget ID or @handle/widget-id"},
+                {"name": "widget_id", "help": "Widget dir path or @handle/widget-id for cloud"},
                 {"name": "score", "type": float, "help": "Score from 1.0 to 5.0"},
                 {"name": "--comment", "default": None},
-                {"name": "--target", "default": ".", "help": "Project root (default: .)"},
             ],
         },
     ])
