@@ -81,6 +81,24 @@ def test_inspect_emits_json(cli_env, tmp_path):
            or (result.get("meta") or {}).get("id") == "http-client"
 
 
+def test_config_list_emits_json(cli_env, tmp_path):
+    rc, stdout, stderr = _run(["config"], cli_env, str(tmp_path))
+    result = _parse_json_stdout(stdout, stderr)
+    assert result.get("status") == "success"
+    settings = result.get("settings", [])
+    assert isinstance(settings, list) and len(settings) > 0
+    # each row should have key + value + description
+    row = settings[0]
+    assert "key" in row and "description" in row
+
+
+def test_config_get_unknown_key_emits_json_error(cli_env, tmp_path):
+    rc, stdout, stderr = _run(["config", "nonexistent-key-xyz"], cli_env, str(tmp_path))
+    assert rc != 0
+    result = _parse_json_stdout(stdout, stderr)
+    assert "error" in result or result.get("status") == "error"
+
+
 def test_stats_emits_json(cli_env, tmp_path):
     rc, stdout, stderr = _run(["stats"], cli_env, str(tmp_path))
     result = _parse_json_stdout(stdout, stderr)

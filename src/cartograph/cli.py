@@ -2400,38 +2400,29 @@ def cmd_registry(args):
 
 
 def cmd_config(args):
-    """View or change settings. No args = list all, key = get, key value = set."""
+    """View or change settings. No args = list all, key = get, key value = set.
+
+    Emits JSON so the MCP config tool can wrap this path directly without
+    reimplementing the config store.
+    """
     key = getattr(args, "key", None)
     value = getattr(args, "value", None)
 
     if not key:
-        # List all
         from .config import list_values
-        items = list_values()
-        max_key = max((len(i["key"]) for i in items), default=0)
-        max_val = max((len(str(i["value"] if i["value"] is not None else "-")) for i in items), default=0)
-        print()
-        for item in items:
-            val = item["value"]
-            display = str(val) if val is not None else "-"
-            choices = f"  {' | '.join(item['choices'])}" if item["choices"] else ""
-            print(f"  {item['key']:<{max_key}}   {display:<{max_val}}   {item['description']}{choices}")
-        print()
+        out({"status": "success", "settings": list_values()})
     elif value is None:
-        # Get
         from .config import get_value
         val, error = get_value(key)
         if error:
             err({"error": error})
-        display = val if val is not None else "(not set)"
-        print(f"\n  {key} = {display}\n")
+        out({"status": "success", "key": key, "value": val})
     else:
-        # Set
         from .config import set_value
         error = set_value(key, value)
         if error:
             err({"error": error})
-        print(f"\n  Set {key} = {value}\n")
+        out({"status": "success", "key": key, "value": value})
 
 
 # ---------------------------------------------------------------------------
