@@ -30,6 +30,7 @@ _DEFAULTS = {
     "library": {
         "show_unavailable": True,
         "cloud": True,
+        "auto_update": True,
     },
     "publish": {
         "auto_publish": False,
@@ -48,6 +49,8 @@ _SCHEMA = {
                      "Default contribution governance model"),
     "cloud":            ("library", "cloud", "bool", None,
                          "Enable cloud registry integration"),
+    "auto-update":      ("library", "auto_update", "bool", None,
+                         "Check for new Cartograph CLI releases and recommend upgrades"),
     "show-unavailable": ("library", "show_unavailable", "bool", None,
                          "Show widgets for languages not installed on this machine"),
     "publish-registry": ("publish", "registry", "str", None,

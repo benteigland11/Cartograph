@@ -12,6 +12,7 @@ def test_config_defaults():
     assert "publish" in cfg
     assert "library" in cfg
     assert cfg["library"]["show_unavailable"] is True
+    assert cfg["library"]["auto_update"] is True
 
 
 def test_config_list_values_not_empty():
@@ -32,6 +33,17 @@ def test_config_get_set_roundtrip(tmp_path, monkeypatch):
     err = set_value("show-unavailable", "false")
     assert err is None
     val, err = get_value("show-unavailable")
+    assert err is None
+    assert val is False
+
+
+def test_config_auto_update_roundtrip(tmp_path, monkeypatch):
+    """auto-update should be configurable like other boolean settings."""
+    monkeypatch.setattr("cartograph.config._config_path",
+                        lambda: str(tmp_path / "config.toml"))
+    from cartograph.config import get_value, set_value
+    assert set_value("auto-update", "false") is None
+    val, err = get_value("auto-update")
     assert err is None
     assert val is False
 

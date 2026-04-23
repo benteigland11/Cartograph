@@ -3109,6 +3109,8 @@ def _force_utf8_io():
 
 def main():
     _force_utf8_io()
+    from .update_check import maybe_recommend_update
+    maybe_recommend_update()
     _build_cli().run()
 
 

@@ -63,6 +63,9 @@ checkouts/
 # Claude Code marketplace distribution, but lives here for convenience.
 cartograph-plugin/
 
+# Codex scratch marker
+.codex
+
 # Scratch plans
 plugin_plan.md
 
