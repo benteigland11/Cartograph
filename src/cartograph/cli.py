@@ -272,10 +272,13 @@ def cmd_search(args):
         merged["registry_errors"] = registry_errors
 
     if not combined:
-        print(f"\n  No widgets found for '{args.query}'.")
-        if args.domain or args.language:
-            print("  Try broadening your search by removing --domain or --language filters.")
-        print("  Run 'cartograph doctor' to check available language engines.\n")
+        out({
+            "local_count": 0,
+            "registry_count": 0,
+            "widgets": [],
+            "message": f"No widgets found for \'{args.query}\'.",
+            "suggestion": "Try broadening your search by removing --domain or --language filters." if args.domain or args.language else "Run \'cartograph doctor\' to check available language engines."
+        })
         return
 
     out(merged)
@@ -312,7 +315,7 @@ def _cloud_install_note(result):
     from .cloud import registry_info
     info = registry_info()
     if not info.get("validates", False):
-        print("    Note: Code is validated locally by the uploader. Review before use.")
+        print("    Note: Code is validated locally by the uploader. Review before use.", file=sys.stderr)
 
 
 def cmd_install(args):
@@ -400,12 +403,28 @@ def cmd_delete(args):
 
 def cmd_create(args):
     _preflight_language(args.language)
+    target_abs = os.path.abspath(args.target)
+    # Block creating directly inside the library. Widgets must be built in a
+    # project dir and checked in via `cartograph checkin` so they go through
+    # validation and version management. Creating in the library bypasses both.
+    from .engine import LIBRARY_PATH
+    lib_abs = os.path.abspath(LIBRARY_PATH)
+    try:
+        in_library = os.path.commonpath([target_abs, lib_abs]) == lib_abs
+    except ValueError:
+        in_library = False
+    if in_library:
+        err({"error": (
+            f"Refusing to create a widget inside the library at {lib_abs}. "
+            f"Run the command from your project root without --target (defaults to .); "
+            f"then `cartograph checkin` publishes it to the library."
+        )})
     result = _carto().create(
         item_id=args.widget_id,
         language=args.language,
         domain=args.domain,
         name=args.name,
-        target_dir=os.path.abspath(args.target),
+        target_dir=target_abs,
     )
     if result.get("status") == "error":
         err(result)
@@ -442,11 +461,10 @@ def cmd_validate(args):
     if result.get("status") == "error":
         err(result)
     if result.get("warnings"):
-        import sys as _sys
-        print("\nWarnings:", file=_sys.stderr)
+        print("\nWarnings:", file=sys.stderr)
         for w in result["warnings"]:
-            print(f"  {w}", file=_sys.stderr)
-        print("", file=_sys.stderr)
+            print(f"  {w}", file=sys.stderr)
+        print("", file=sys.stderr)
     out(result)
 
 
@@ -498,20 +516,20 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
         current_user = cloud.whoami().get("owner", "")
         if origin_owner and current_user and origin_owner != current_user:
             origin_registry = source.get("registry_url")
-            print(f"  → Widget installed from @{origin_owner} - submitting as proposal...")
+            print(f"  → Widget installed from @{origin_owner} - submitting as proposal...", file=sys.stderr)
             propose_result = cloud.propose(widget_path, origin_owner, widget_id,
                                            reason=reason or "Improvement proposal",
                                            registry_url=origin_registry)
             if propose_result.get("error"):
-                print(f"  → Proposal failed: {propose_result['error']}")
+                print(f"  → Proposal failed: {propose_result['error']}", file=sys.stderr)
             else:
                 status = propose_result.get("status", "proposed")
-                print(f"  → Proposal {status}: {propose_result.get('proposal_id', '')}")
+                print(f"  → Proposal {status}: {propose_result.get('proposal_id', '')}", file=sys.stderr)
                 # Governance is inferred from the route the server took:
                 # "published" == origin was open (auto-merged)
                 # "proposed"  == origin was protected (queued for review)
                 inferred = "open (auto-merged)" if status == "published" else "protected (queued for review)"
-                print(f"  → governance: {inferred}  |  origin: @{origin_owner}")
+                print(f"  → governance: {inferred}  |  origin: @{origin_owner}", file=sys.stderr)
             return
         # Own widget - sidecar has previously established home registry
         registry_url = source.get("registry_url")
@@ -521,11 +539,11 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
     cfg = load_config()
     visibility = cfg["publish"]["visibility"]
     governance = cfg["publish"].get("governance")
-    print(f"  → Pushing {widget_id} v{checkin_result.get('version', '?')} to cloud...")
+    print(f"  → Pushing {widget_id} v{checkin_result.get('version', '?')} to cloud...", file=sys.stderr)
     push_result = cloud.push(widget_path, widget_id, visibility=visibility,
                              governance=governance, registry_url=registry_url)
     if push_result.get("error"):
-        print(f"  → Push failed: {push_result['error']}")
+        print(f"  → Push failed: {push_result['error']}", file=sys.stderr)
     else:
         from .config import get_registry_url_for_prefix, get_registries, _PUBLIC_REGISTRY_PREFIX
         namespaced = push_result.get("namespaced_id", "")
@@ -541,7 +559,7 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
             install_id = f"{owner_part}/{prefix}-{bare}"
         else:
             install_id = namespaced
-        print(f"  → Published v{version}  |  install: cartograph install {install_id}")
+        print(f"  → Published v{version}  |  install: cartograph install {install_id}", file=sys.stderr)
         # Write sidecar: records home registry, owner, and governance as declared at publish time
         try:
             from .config import _PUBLIC_REGISTRY_URL
@@ -568,7 +586,7 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
             owner_handle = namespaced.split("/", 1)[0] if "/" in namespaced else ""
             # namespaced_id from the server already carries the @ prefix
             owner_tag = owner_handle if owner_handle.startswith("@") else (f"@{owner_handle}" if owner_handle else "unknown")
-            print(f"  → governance: {effective_gov}  |  owner: {owner_tag}")
+            print(f"  → governance: {effective_gov}  |  owner: {owner_tag}", file=sys.stderr)
         except Exception:
             pass  # sidecar is best-effort; push already succeeded
 
@@ -639,8 +657,12 @@ def cmd_status(args):
     from .engine import DEFAULT_INSTALL_DIR
     install_dir = os.path.join(target, DEFAULT_INSTALL_DIR)
     if not os.path.isdir(install_dir):
-        print(f"\n  No widgets installed at {target}.")
-        print(f"  Run 'cartograph install <widget_id>' to install one.\n")
+        out({
+            "status": "success",
+            "widgets": [],
+            "message": f"No widgets installed at {target}.",
+            "suggestion": "Run \'cartograph install <widget_id>\' to install one."
+        })
         return
 
     widget_ids = [
@@ -649,8 +671,12 @@ def cmd_status(args):
     ]
 
     if not widget_ids:
-        print(f"\n  No widgets installed at {target}.")
-        print(f"  Run 'cartograph install <widget_id>' to install one.\n")
+        out({
+            "status": "success",
+            "widgets": [],
+            "message": f"No widgets installed at {target}.",
+            "suggestion": "Run \'cartograph install <widget_id>\' to install one."
+        })
         return
 
     from .engine import normalize_widget_id, python_dir_name, DEFAULT_INSTALL_DIR
@@ -1086,7 +1112,7 @@ def cmd_rate(args):
                                    registry_url=registry_url)
         if "error" in result:
             err(result)
-        print(f"\n  Rated {widget_id}: {args.score}/5\n")
+        out({"status": "success", "widget_id": widget_id, "score": args.score})
         return
 
     # Local widget — requires dir path
