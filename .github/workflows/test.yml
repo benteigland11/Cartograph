@@ -78,6 +78,17 @@ jobs:
       - name: Install dependencies
         run: pip install -e . && pip install pytest pytest-cov
 
+      # cg/ must remain a PEP 420 namespace package — a stray
+      # cg/__init__.py here would ship in the wheel and shadow every
+      # other package that contributes widgets under cg/ on users'
+      # machines (including cartograph-mcp). Catch it at the source.
+      - name: Guard cg/ namespace
+        run: |
+          if [ -f cg/__init__.py ]; then
+            echo "::error file=cg/__init__.py::cg/__init__.py must not exist — cg/ is a namespace package. Remove it."
+            exit 1
+          fi
+
       - name: Run tests
         run: pytest --tb=short -q
 
