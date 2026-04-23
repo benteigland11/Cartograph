@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - "v*"
+  # Invoked by test.yml's auto-tag job with --ref v<version>. Needed because
+  # tags pushed by GITHUB_TOKEN don't fire the `push` trigger above (anti-loop
+  # safety), so the auto-tag chain would otherwise stall here.
+  workflow_dispatch:
 
 jobs:
   # Full 9-cell matrix on the tagged commit. Blocks PyPI upload.

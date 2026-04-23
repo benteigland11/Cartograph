@@ -104,6 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -138,3 +139,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
+
+      # Tags pushed by GITHUB_TOKEN don't trigger workflows, so the push above
+      # won't fire publish.yml on its own. Dispatch it explicitly at the new
+      # tag ref so PyPI -> fresh-install -> release fires end to end.
+      - name: Dispatch publish workflow
+        if: steps.tagcheck.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.ver.outputs.version }}
+        run: gh workflow run publish.yml --ref "$TAG"
