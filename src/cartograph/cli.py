@@ -13,7 +13,41 @@ import urllib.parse
 import zipfile
 from io import BytesIO
 
-from cg.infra_agent_cli_python.src.agent_cli import AgentCLI, out, err
+try:
+    from cg.infra_agent_cli_python.src.agent_cli import AgentCLI, out, err
+except ModuleNotFoundError as _e:
+    # Most common cause: another installed package (or the user's own
+    # project cwd) contains a top-level cg/__init__.py. That turns cg/
+    # into a regular package and shadows cartograph's bundled widgets.
+    # Surface the real cause instead of a stdlib-flavored traceback.
+    if _e.name and _e.name.startswith("cg"):
+        import json as _json
+        import sys as _sys
+        import cg as _cg_mod  # type: ignore
+        cg_paths = list(getattr(_cg_mod, "__path__", []) or [])
+        shadowers = [
+            os.path.join(p, "__init__.py")
+            for p in cg_paths
+            if os.path.isfile(os.path.join(p, "__init__.py"))
+        ]
+        msg = (
+            "cartograph cannot find its bundled widgets under the cg/ "
+            "namespace. This almost always means a cg/__init__.py file "
+            "is present on the Python path and has turned cg/ into a "
+            "regular package, shadowing every other contributor."
+        )
+        payload = {
+            "status": "error",
+            "error": msg,
+            "cg_paths": cg_paths,
+            "offending_init_files": shadowers,
+            "fix": "Remove any cg/__init__.py in your project or in an "
+                   "installed package. cg/ must remain a PEP 420 namespace "
+                   "package.",
+        }
+        print(_json.dumps(payload, indent=2))
+        _sys.exit(1)
+    raise
 
 
 def _check_and_prompt_tos():
@@ -454,9 +488,38 @@ def _resolve_widget_path(args) -> str:
     return _resolve_widget(args.path)
 
 
+def _check_cg_namespace_hygiene(root: str) -> str | None:
+    """Return an error message if <root>/cg/__init__.py exists, else None.
+
+    A top-level cg/__init__.py turns the cg/ namespace into a regular
+    package. If this project is later installed or packaged, that file
+    shadows every other contributor to the cg/ namespace on the user's
+    system — silently breaking Cartograph (and any other package that
+    ships widgets under cg/). Agents often scaffold __init__.py out of
+    habit, so we catch it before it propagates.
+    """
+    bad = os.path.join(root, "cg", "__init__.py")
+    if os.path.isfile(bad):
+        return (
+            f"cg/__init__.py detected at {bad}. "
+            "Remove it — the cg/ directory must stay a namespace package "
+            "(PEP 420). Shipping this file breaks Cartograph on every "
+            "machine this project installs to."
+        )
+    return None
+
+
 def cmd_validate(args):
     path = _resolve_widget_path(args)
     _preflight_from_path(path)
+    # Project-level hygiene check — the user's cwd is where a toxic
+    # cg/__init__.py would live. Hard block because validate is the gate
+    # before checkin/publish, and the cost of this file shipping into
+    # anyone else's environment is much worse than making the user
+    # delete a one-line file.
+    hygiene_error = _check_cg_namespace_hygiene(os.getcwd())
+    if hygiene_error:
+        err({"status": "error", "error": hygiene_error})
     result = _carto().validate_item(path=path)
     if result.get("status") == "error" or "error" in result:
         err(result)
@@ -639,6 +702,15 @@ def _paginate_widget():
 
 def cmd_status(args):
     target = os.getcwd()
+    # Soft check — surface as a warning on the response so agents/users
+    # see it whether they run status on one widget or the full listing.
+    # Validate is the hard gate; status is the early heads-up.
+    hygiene_warning = _check_cg_namespace_hygiene(target)
+
+    def _out(payload: dict) -> None:
+        if hygiene_warning:
+            payload.setdefault("warnings", []).append(hygiene_warning)
+        out(payload)
 
     if args.widget_dir:
         # Pagination flags are meaningless for a single-target lookup — flag it
@@ -650,14 +722,14 @@ def cmd_status(args):
         result = _carto().widget_status(widget_id=widget_id, target_dir=target)
         if result.get("error"):
             err(result)
-        out(result)
+        _out(result)
         return
 
     # No widget_id — scan all installed widgets
     from .engine import DEFAULT_INSTALL_DIR
     install_dir = os.path.join(target, DEFAULT_INSTALL_DIR)
     if not os.path.isdir(install_dir):
-        out({
+        _out({
             "status": "success",
             "widgets": [],
             "message": f"No widgets installed at {target}.",
@@ -671,7 +743,7 @@ def cmd_status(args):
     ]
 
     if not widget_ids:
-        out({
+        _out({
             "status": "success",
             "widgets": [],
             "message": f"No widgets installed at {target}.",
@@ -820,7 +892,7 @@ def cmd_status(args):
             if aggregate["outdated"] or aggregate["modified"] else
             "All widgets are up to date."
         )
-    out(payload)
+    _out(payload)
 
 
 def cmd_login(args):
@@ -1495,9 +1567,83 @@ def cmd_cloud_proposals(args):
         out(match)
 
 
+def _rules_dir_for_scope(scope: str) -> str:
+    if scope == "global":
+        from .engine import _user_data_dir
+        return os.path.join(_user_data_dir(), "rules")
+    return os.path.join(os.getcwd(), ".cartograph", "rules")
+
+
 def cmd_rules(args):
-    """List or initialize custom validation rules."""
+    """List, read, or write custom validation rules.
+
+    Actions: (none) list | init | get | write | reset.
+    All actions accept --json for structured output so the MCP layer can
+    drive the rules surface. `get` and `write` are the read/write pair an
+    agent uses to codify project conventions.
+    """
     action = getattr(args, "action", None)
+    as_json = getattr(args, "as_json", False)
+
+    if action == "get":
+        from .rules import get_rules_filename
+        language = getattr(args, "language", None)
+        scope = getattr(args, "scope", "project")
+        if not language:
+            err({"error": "Usage: cartograph rules get --language python [--global]"})
+        filename = get_rules_filename(language)
+        if not filename:
+            err({"error": f"No rules support for language '{language}'"})
+        filepath = os.path.join(_rules_dir_for_scope(scope), filename)
+        if not os.path.exists(filepath):
+            err({"error": f"No rules file at {filepath}. Run 'cartograph rules init --language {language}" + (" --global" if scope == "global" else "") + "' to create one."})
+        with open(filepath) as f:
+            content = f.read()
+        if as_json:
+            out({"status": "success", "language": language, "scope": scope, "path": filepath, "content": content})
+            return
+        print(f"\n  {filepath}\n")
+        print(content)
+        return
+
+    if action == "write":
+        from .rules import get_rules_filename
+        language = getattr(args, "language", None)
+        scope = getattr(args, "scope", "project")
+        content = getattr(args, "content", None)
+        from_file = getattr(args, "from_file", None)
+        confirm = getattr(args, "confirm", False)
+        if not language:
+            err({"error": "Usage: cartograph rules write --language python [--global] --content '<rules>' | --from-file <path>"})
+        filename = get_rules_filename(language)
+        if not filename:
+            err({"error": f"No rules support for language '{language}'"})
+        if from_file:
+            try:
+                with open(from_file) as f:
+                    content = f.read()
+            except OSError as e:
+                err({"error": f"Could not read {from_file}: {e}"})
+        elif content is None:
+            # Read from stdin when neither --content nor --from-file given;
+            # makes shell piping work cleanly (cat rules.py | cartograph rules write ...)
+            import sys as _sys
+            if _sys.stdin.isatty():
+                err({"error": "Provide content via --content, --from-file, or stdin."})
+            content = _sys.stdin.read()
+
+        rules_dir = _rules_dir_for_scope(scope)
+        filepath = os.path.join(rules_dir, filename)
+        if os.path.exists(filepath) and not confirm:
+            err({"error": f"Rules file already exists at {filepath}. Re-run with --confirm to overwrite."})
+        os.makedirs(rules_dir, exist_ok=True)
+        with open(filepath, "w") as f:
+            f.write(content)
+        if as_json:
+            out({"status": "success", "language": language, "scope": scope, "path": filepath, "bytes": len(content)})
+            return
+        print(f"\n  Wrote {len(content)} bytes to {filepath}\n")
+        return
 
     if action == "reset":
         language = getattr(args, "language", None)
@@ -1511,28 +1657,22 @@ def cmd_rules(args):
         if not filename:
             err({"error": f"No rules support for language '{language}'"})
 
-        if scope == "global":
-            from .engine import _user_data_dir
-            rules_dir = os.path.join(_user_data_dir(), "rules")
-        else:
-            rules_dir = os.path.join(os.getcwd(), ".cartograph", "rules")
-
+        rules_dir = _rules_dir_for_scope(scope)
         filepath = os.path.join(rules_dir, filename)
         if not os.path.exists(filepath):
-            print(f"\n  No rules file at {filepath}. Use `cartograph rules init` to create one.\n")
-            return
+            err({"error": f"No rules file at {filepath}. Run 'cartograph rules init --language {language}" + (" --global" if scope == "global" else "") + "' to create one."})
 
         confirm = getattr(args, "confirm", False)
         if not confirm:
-            print(f"\n  This will overwrite your custom rules at:")
-            print(f"    {filepath}")
-            print(f"\n  Re-run with --confirm to proceed.\n")
-            return
+            err({"error": f"This would overwrite your custom rules at {filepath}. Re-run with --confirm to proceed."})
 
         template = get_template(language)
         with open(filepath, "w") as f:
             f.write(template)
 
+        if as_json:
+            out({"status": "success", "language": language, "scope": scope, "path": filepath, "action": "reset"})
+            return
         print(f"\n  Reset to default template: {filepath}\n")
         return
 
@@ -1552,32 +1692,40 @@ def cmd_rules(args):
         if template is None:
             err({"error": f"No rules template for language '{language}'"})
 
-        if scope == "global":
-            from .engine import _user_data_dir
-            rules_dir = os.path.join(_user_data_dir(), "rules")
-        else:
-            rules_dir = os.path.join(os.getcwd(), ".cartograph", "rules")
-
+        rules_dir = _rules_dir_for_scope(scope)
         os.makedirs(rules_dir, exist_ok=True)
         filepath = os.path.join(rules_dir, filename)
 
-        if os.path.exists(filepath):
+        already_existed = os.path.exists(filepath)
+        if not already_existed:
+            with open(filepath, "w") as f:
+                f.write(template)
+
+        if as_json:
+            out({
+                "status": "success",
+                "language": language,
+                "scope": scope,
+                "path": filepath,
+                "created": not already_existed,
+            })
+            return
+        if already_existed:
             print(f"\n  Rules file already exists: {filepath}")
             print(f"  Open it in your editor to add or modify checks.\n")
-            return
-
-        with open(filepath, "w") as f:
-            f.write(template)
-
-        print(f"\n  Created: {filepath}")
-        print(f"  Open it in your editor and uncomment or add checks.")
-        print(f"  It runs automatically during `cartograph validate`.\n")
+        else:
+            print(f"\n  Created: {filepath}")
+            print(f"  Open it in your editor and uncomment or add checks.")
+            print(f"  It runs automatically during `cartograph validate`.\n")
         return
 
     # Default: list rules files
     from .rules import find_rules
 
     rules = find_rules()
+    if as_json:
+        out({"status": "success", "rules": rules})
+        return
     print()
     print("  Rules run automatically during `cartograph validate` and `cartograph checkin`.")
     print()
@@ -2783,14 +2931,21 @@ def _build_cli() -> AgentCLI:
             "handler": cmd_rules,
             "args": [
                 {"name": "action", "nargs": "?", "default": None,
-                 "help": "init | reset (omit to list)"},
+                 "help": "init | get | write | reset (omit to list)"},
                 {"name": "--language", "default": None,
                  "help": "Language for the rules file (e.g. python, javascript, css)"},
                 {"name": "--global", "action": "store_const", "const": "global",
                  "default": "project", "dest": "scope",
                  "help": "Target the global rules file instead of the project one"},
                 {"name": "--confirm", "action": "store_true", "default": False,
-                 "help": "Confirm reset (required - reset overwrites your edits)"},
+                 "help": "Confirm overwrite (required for reset, and for write when a rules file already exists)"},
+                {"name": "--content", "default": None,
+                 "help": "Rules content for 'write' action (string). Use --from-file or stdin for longer payloads."},
+                {"name": "--from-file", "default": None, "dest": "from_file",
+                 "help": "Read 'write' content from a file path instead of --content."},
+                {"name": "--json", "action": "store_true", "default": False,
+                 "dest": "as_json",
+                 "help": "Emit JSON for machine consumption (used by the MCP layer)."},
             ],
         },
         {
