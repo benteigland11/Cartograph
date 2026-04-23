@@ -18,26 +18,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Detect which engines are affected by this change so we can skip
+      # unneeded tool installs on unrelated commits. Any edit to a cross-
+      # cutting file (base.py, registry.py, validator.py, contamination.py,
+      # pyproject.toml, or the workflow itself) triggers every install.
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            core:
+              - 'src/cartograph/languages/base.py'
+              - 'src/cartograph/languages/registry.py'
+              - 'src/cartograph/validator.py'
+              - 'src/cartograph/contamination.py'
+              - 'pyproject.toml'
+              - '.github/workflows/**'
+            systemverilog:
+              - 'src/cartograph/languages/systemverilog.py'
+            angular:
+              - 'src/cartograph/languages/angular.py'
+            php:
+              - 'src/cartograph/languages/php.py'
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install iverilog (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && (steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
         run: sudo apt-get update && sudo apt-get install -y iverilog
 
       - name: Install iverilog (macOS)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && (steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
         run: brew install icarus-verilog
 
       - name: Install iverilog (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && (steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
         run: choco install iverilog -y || (sleep 15 && choco install iverilog -y)
 
       - name: Install Angular CLI
+        if: steps.changes.outputs.core == 'true' || steps.changes.outputs.angular == 'true'
         run: npm install -g @angular/cli
 
       - name: Install PHP and Composer
+        if: steps.changes.outputs.core == 'true' || steps.changes.outputs.php == 'true'
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
