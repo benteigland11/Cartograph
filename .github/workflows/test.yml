@@ -80,3 +80,49 @@ jobs:
 
       - name: Run tests
         run: pytest --tb=short -q
+
+  # After tests pass on master, auto-tag if pyproject.toml's version was
+  # bumped. The tag push then fires publish.yml (PyPI -> fresh-install ->
+  # GitHub release) on its own. Skipped on PRs and on workflow_call from
+  # publish.yml (that workflow already triggered from a tag).
+  auto-tag:
+    name: Auto-tag on version bump
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from pyproject.toml
+        id: ver
+        run: |
+          version=$(grep -E '^version = "' pyproject.toml | head -1 | sed -E 's/version = "(.*)"/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version in pyproject.toml: $version"
+
+      - name: Check if tag already exists
+        id: tagcheck
+        env:
+          TAG: v${{ steps.ver.outputs.version }}
+        run: |
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG already exists - nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG does not exist - will create."
+          fi
+
+      - name: Create and push tag
+        if: steps.tagcheck.outputs.exists == 'false'
+        env:
+          TAG: v${{ steps.ver.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
