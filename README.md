@@ -138,11 +138,10 @@ Run `cartograph doctor` to check that all language engine dependencies (pytest, 
 
 ### Pre-push checks and release preflight
 
-The tracked `.githooks/pre-push` hook runs three fast checks in ~20-30 seconds before every push:
+The tracked `.githooks/pre-push` hook runs two fast checks in ~20-30 seconds before every push:
 
 1. Import smoke (catches syntax errors).
-2. OpenAPI spec freshness (`docs/cloud_api.json` must match what `scripts/gen_openapi.py` produces from `src/cartograph/cloud.py` + `src/cartograph/cloud_schema.py`).
-3. Wheel-install smoke (build into a tempdir venv, verify `cartograph setup --print` still works — catches the dogfood-path-resolution class of bug that v0.5.29 shipped).
+2. Wheel-install smoke (build into a tempdir venv, verify `cartograph setup --print` still works — catches the dogfood-path-resolution class of bug that v0.5.29 shipped).
 
 For a release push, run the full gauntlet first (~5-6 minutes, includes pytest):
 
@@ -151,5 +150,3 @@ For a release push, run the full gauntlet first (~5-6 minutes, includes pytest):
 # then tag:
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
-
-The wire protocol is in `docs/cloud_api.json` (OpenAPI 3.1, generated from source). View it locally by opening `docs/index.html` in a browser — it loads Redoc from CDN and renders the spec.

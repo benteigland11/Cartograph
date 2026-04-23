@@ -19,29 +19,17 @@ fail() { printf "%s✗%s %s\n" "$red" "$off" "$1" >&2; exit 1; }
 # Catches syntax errors and missing-module regressions instantly.
 say "import smoke"
 python - <<'PY' 2>/dev/null || fail "import failed — syntax error or missing module"
-from cartograph import cli, cloud, cloud_schema
+from cartograph import cli, cloud
 PY
 pass "imports ok"
 
-# ---- 2. OpenAPI spec freshness ----
-# Any decorator or schema edit that isn't accompanied by a regenerated
-# docs/cloud_api.json will fail CI. Catch it before the push.
-say "openapi spec freshness"
-tmp_spec=$(mktemp)
-trap 'rm -f "$tmp_spec"' EXIT
-python scripts/gen_openapi.py --stdout > "$tmp_spec"
-if ! diff -q "$tmp_spec" docs/cloud_api.json >/dev/null 2>&1; then
-    fail "docs/cloud_api.json is stale. Run: python scripts/gen_openapi.py && git add docs/cloud_api.json"
-fi
-pass "spec is fresh"
-
-# ---- 3. Wheel install smoke ----
+# ---- 2. Wheel install smoke ----
 # The exact failure mode that killed v0.5.29: dogfood path resolution works
 # in editable install, fails in a real wheel. Rebuild into a tempdir venv
 # and confirm cartograph setup --print renders the generated commands.
 say "wheel install smoke"
 workdir=$(mktemp -d)
-trap 'rm -f "$tmp_spec"; rm -rf "$workdir"' EXIT
+trap 'rm -rf "$workdir"' EXIT
 python -m venv "$workdir/venv" >/dev/null 2>&1
 "$workdir/venv/bin/pip" install --quiet . >/dev/null 2>&1 \
     || fail "pip install . failed"

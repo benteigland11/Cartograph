@@ -2,8 +2,8 @@
 #
 # Release-readiness gauntlet. ~5-6 minutes.
 #
-# Runs everything the pre-push hook runs (import, openapi drift, wheel
-# install smoke) plus the full pytest suite. Use before tagging a
+# Runs everything the pre-push hook runs (import, wheel install smoke)
+# plus the full pytest suite. Use before tagging a
 # release:
 #     ./scripts/preflight.sh && git push origin master
 #     # if green: git tag vX.Y.Z && git push origin vX.Y.Z

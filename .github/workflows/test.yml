@@ -47,16 +47,5 @@ jobs:
       - name: Install dependencies
         run: pip install -e . && pip install pytest pytest-cov
 
-      - name: OpenAPI spec freshness
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        shell: bash
-        run: |
-          python scripts/gen_openapi.py
-          if ! git diff --quiet docs/cloud_api.json; then
-            echo "::error::docs/cloud_api.json is stale — run 'python scripts/gen_openapi.py' and commit the result"
-            git diff docs/cloud_api.json
-            exit 1
-          fi
-
       - name: Run tests
         run: pytest --tb=short -q
