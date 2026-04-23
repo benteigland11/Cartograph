@@ -2559,9 +2559,17 @@ def cmd_config(args):
     as_json = getattr(args, "as_json", False)
 
     if not key:
-        from .config import list_values
+        from .config import list_values, visibility_has_effect
         items = list_values()
+        vis_effective, active_registry = visibility_has_effect()
         if as_json:
+            for item in items:
+                if item["key"] == "visibility" and not vis_effective:
+                    item["effective"] = False
+                    item["note"] = (
+                        f"No effect: publish-registry is '{active_registry}', "
+                        f"which treats all widgets as public."
+                    )
             out({"status": "success", "settings": items})
             return
         def _display_value(item):
@@ -2580,7 +2588,10 @@ def cmd_config(args):
         print()
         for item in items:
             choices = f"  {' | '.join(item['choices'])}" if item["choices"] else ""
-            print(f"  {item['key']:<{max_key}}   {_display_value(item):<{max_val}}   {item['description']}{choices}")
+            suffix = ""
+            if item["key"] == "visibility" and not vis_effective:
+                suffix = f"  (no effect on '{active_registry}' registry; all widgets public)"
+            print(f"  {item['key']:<{max_key}}   {_display_value(item):<{max_val}}   {item['description']}{choices}{suffix}")
         print()
     elif value is None:
         from .config import get_value
@@ -2593,14 +2604,33 @@ def cmd_config(args):
         display = val if val is not None else "(not set)"
         print(f"\n  {key} = {display}\n")
     else:
-        from .config import set_value
+        from .config import set_value, visibility_has_effect
         error = set_value(key, value)
         if error:
             err({"error": error})
+        # `visibility` is a no-op while publish-registry is the public `cg`
+        # community registry (everything is public there). Accept the set
+        # either way so the preference is kept if the user later switches
+        # to a self-hosted registry, but flag it loudly.
+        warning = None
+        if key == "visibility":
+            vis_effective, active_registry = visibility_has_effect()
+            if not vis_effective:
+                warning = (
+                    f"visibility is a no-op on the '{active_registry}' registry "
+                    f"(all widgets are public there). This setting will take "
+                    f"effect if you publish to a self-hosted registry."
+                )
         if as_json:
-            out({"status": "success", "key": key, "value": value})
+            payload = {"status": "success", "key": key, "value": value}
+            if warning:
+                payload["warning"] = warning
+            out(payload)
             return
-        print(f"\n  Set {key} = {value}\n")
+        print(f"\n  Set {key} = {value}")
+        if warning:
+            print(f"  Note: {warning}")
+        print()
 
 
 # ---------------------------------------------------------------------------

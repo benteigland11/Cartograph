@@ -180,6 +180,19 @@ _DISPLAY_DEFAULTS = {
 }
 
 
+def visibility_has_effect() -> tuple[bool, str]:
+    """Whether the `visibility` setting is currently load-bearing.
+
+    The `cg` community registry treats every widget as public, so setting
+    visibility while publish-registry=cg is a no-op. Self-hosted and
+    third-party registries honor it normally. Returns (has_effect, active
+    publish-registry prefix) so callers can phrase the right warning.
+    """
+    config = load_config()
+    target = config.get("publish", {}).get("registry") or _PUBLIC_REGISTRY_PREFIX
+    return (target != _PUBLIC_REGISTRY_PREFIX, target)
+
+
 def _known_engine_binaries() -> list[tuple[str, str]]:
     """Return (binary_name, owning_engine_name) pairs for every binary any
     registered engine declares in its toolchain. Used by list_values() to

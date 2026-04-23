@@ -59,6 +59,13 @@ checkouts/
 *.swp
 *.swo
 
+# Sibling repo: cartograph-plugin is maintained as its own git repo for
+# Claude Code marketplace distribution, but lives here for convenience.
+cartograph-plugin/
+
+# Scratch plans
+plugin_plan.md
+
 # Playwright
 node_modules/
 /test-results/
