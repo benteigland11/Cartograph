@@ -83,9 +83,10 @@ jobs:
       # other package that contributes widgets under cg/ on users'
       # machines (including cartograph-mcp). Catch it at the source.
       - name: Guard cg/ namespace
+        shell: bash
         run: |
           if [ -f cg/__init__.py ]; then
-            echo "::error file=cg/__init__.py::cg/__init__.py must not exist — cg/ is a namespace package. Remove it."
+            echo "::error file=cg/__init__.py::cg/__init__.py must not exist - cg/ is a namespace package. Remove it."
             exit 1
           fi
 
