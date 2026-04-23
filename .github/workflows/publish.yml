@@ -57,7 +57,34 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+          # Find the previous tag (skip the one we just cut) so we can list
+          # commits since then. Falls back to the whole history if this is
+          # the first tag ever.
+          prev=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+          if [ -n "$prev" ]; then
+            range="${prev}..${TAG}"
+            compare="https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${TAG}"
+          else
+            range="${TAG}"
+            compare=""
+          fi
+
+          # One bullet per non-merge commit: "- subject (hash)".
+          # gh CLI doesn't need markdown escaping here; subjects are fine as-is.
+          commits=$(git log "$range" --no-merges --pretty=format:"- %s (%h)")
+
+          {
+            echo "## What's Changed"
+            echo ""
+            echo "$commits"
+            if [ -n "$compare" ]; then
+              echo ""
+              echo "**Full Changelog**: $compare"
+            fi
+          } > release-notes.md
+
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes-file release-notes.md
