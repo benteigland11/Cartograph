@@ -130,7 +130,12 @@ def get_value(key: str):
         return None, f"Unknown setting: '{key}'. Run 'cartograph config list' to see available settings."
     section, toml_key, _, _, _ = _SCHEMA[key]
     config = load_config()
-    return config.get(section, {}).get(toml_key), None
+    value = config.get(section, {}).get(toml_key)
+    # publish-registry defaults to the public registry (cg) when unset, so
+    # readers see the effective target instead of an ambiguous empty string.
+    if key == "publish-registry" and not value:
+        value = _PUBLIC_REGISTRY_PREFIX
+    return value, None
 
 
 def set_value(key: str, raw_value: str):
