@@ -1533,18 +1533,33 @@ def cmd_cloud_proposals(args):
             widget = p.get("widget_id", "?")
             owner = p.get("owner", "?")
             pid = p.get("id", "?")
+            submitter = p.get("submitter_handle", "?")
+            version = p.get("version", "?")
+            summary = p.get("diff_summary") or {}
+            ins = summary.get("insertions", 0)
+            dels = summary.get("deletions", 0)
+            changed = len(summary.get("files_modified", [])) + len(summary.get("files_added", [])) + len(summary.get("files_deleted", []))
+            wj = " widget.json" if summary.get("widget_json_changed") else ""
             print(f"  [{status}]  @{owner}/{widget}  #{pid}")
-        print(f"\n  Use --accept <id> or --reject <id> to act on a proposal.\n")
+            print(f"            from @{submitter}  v{version}  {changed} file(s), +{ins}/-{dels}{wj}")
+        print(f"\n  View:   cartograph cloud proposals <widget_id> <id>")
+        print(f"  Diff:   cartograph cloud proposals <widget_id> <id> --diff")
+        print(f"  Decide: cartograph cloud proposals <widget_id> <id> --accept | --reject --reason \"...\"\n")
         return
 
-    # Accept or reject
+    # Accept, reject, or view
     parsed = _parse_registry_id(args.widget_id)
     if parsed:
         owner, registry_url, wid = parsed
     else:
         owner, wid = _parse_cloud_id(args.widget_id)
         registry_url = None
-    if getattr(args, "accept", False):
+    if getattr(args, "diff", False):
+        result = cloud.proposal_diff(owner, wid, proposal_id, registry_url=registry_url)
+        if "error" in result:
+            err(result)
+        print(result.get("diff", ""))
+    elif getattr(args, "accept", False):
         result = cloud.accept_proposal(owner, wid, proposal_id, registry_url=registry_url)
         if "error" in result:
             err(result)
@@ -2897,6 +2912,8 @@ def _build_cli() -> AgentCLI:
                 {"name": "--reject", "action": "store_true", "default": False,
                  "help": "Reject the proposal"},
                 {"name": "--reason", "default": "", "help": "Reason for rejection"},
+                {"name": "--diff", "action": "store_true", "default": False,
+                 "help": "Fetch and print the unified diff for a proposal"},
             ],
         },
     ])

@@ -752,6 +752,39 @@ def list_proposals(owner_handle: str, widget_id: str,
     )
 
 
+@endpoint("GET", "/v1/widgets/{owner_handle}/{widget_id}/proposals/{proposal_id}/diff",
+          tags=["Proposals"],
+          summary="Fetch a proposal's unified diff (text)")
+def proposal_diff(owner_handle: str, widget_id: str,
+                  proposal_id: str, registry_url: str | None = None) -> dict:
+    """Fetch the unified diff for a proposal.
+
+    Returns {"diff": str} on success, or {"error": ...} on failure.
+    """
+    base = registry_url.rstrip("/") if registry_url else _registry_url()
+    url = (
+        base
+        + f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(widget_id)}"
+        f"/proposals/{urllib.parse.quote(proposal_id)}/diff"
+    )
+    headers = _headers(registry_url)
+    headers["Accept"] = "text/plain"
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return {"diff": resp.read().decode("utf-8", errors="replace")}
+    except urllib.error.HTTPError as e:
+        body = {}
+        try:
+            body = json.loads(e.read())
+        except Exception:
+            pass
+        return {"error": body.get("detail", str(e)), "status_code": e.code}
+    except Exception as e:
+        return {"error": f"Diff fetch failed: {e}"}
+
+
 @endpoint("POST", "/v1/widgets/{owner_handle}/{widget_id}/proposals/{proposal_id}/accept",
           tags=["Proposals"],
           summary="Accept a proposal into the widget")
