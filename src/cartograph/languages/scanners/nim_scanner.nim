@@ -451,6 +451,12 @@ proc scanFile(filename: string): seq[Finding] =
           continue
         if root in localModules or full in localModules:
           continue
+        # Relative imports (../src/foo, ./foo, src/foo) target the widget's
+        # own modules, not external deps. Take the basename and re-check.
+        if root == ".." or root == "." or root == "src":
+          let basename = full.rsplit('/', 1)[^1]
+          if basename in localModules:
+            continue
         result.add(Finding(
           file: filename, kind: "unlisted_import", line: startLine,
           detail: "import " & mods.fullPath & " - not in widget.json dependencies",

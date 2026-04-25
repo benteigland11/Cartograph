@@ -895,6 +895,26 @@ class TestNimSpecific:
         assert not unlisted, \
             f"local src/ module should not warn as unlisted: {result['warnings']}"
 
+    def test_relative_src_import_from_tests_not_warned(self, tmp_path):
+        """A test file using a relative-path import (`../src/foo`) into the
+        widget's own src/ tree is not an unlisted external dep. The bare
+        basename match alone isn't enough — relative-path imports skip
+        the bare-name check because root='..' / '.' / 'src'. The scanner
+        must take the basename and re-check against localModules.
+        Regression for frontend-glfw-input-nim (test imports ../src/glfw_input_lib)."""
+        src_code = "func handle*(x: int): int = x + 1\n"
+        test_code = ("import std/unittest\n"
+                     "import ../src/glfw_input_lib\n"
+                     "suite \"g\":\n  test \"t\":\n    check handle(1) == 2\n")
+        wdir = _make_widget(tmp_path, "nim", "glfw_input_lib.nim", src_code,
+                            test_code=test_code)
+        engine = NimEngine()
+        result = engine.scan_contamination(wdir, {"language": "nim", "dependencies": []})
+        unlisted = [w for w in result["warnings"]
+                    if "glfw_input_lib" in w and "unlisted" in w.lower()]
+        assert not unlisted, \
+            f"relative src/ import from tests must not warn: {result['warnings']}"
+
     def test_brace_group_stdlib_import_not_warned(self, tmp_path):
         """`import std/[options, terminal]` must be parsed as two stdlib
         imports, not as the bogus modules `[options` and `terminal]`.
