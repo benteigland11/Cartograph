@@ -52,6 +52,20 @@ cartograph setup
 
 This auto-detects your agent (Claude, Cursor, Codex, Gemini) and appends Cartograph instructions to the appropriate config file. Use `--print` to preview without writing.
 
+### Codex
+
+For Codex, you can either let Cartograph write the agent instructions:
+
+```bash
+cartograph setup --agent codex
+```
+
+Or register Cartograph directly as an MCP server:
+
+```bash
+codex mcp add cartograph -- cartograph
+```
+
 ## Example workflow
 
 ```bash
