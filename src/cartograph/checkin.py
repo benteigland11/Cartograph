@@ -538,6 +538,42 @@ def add_review(carto, widget_id, target_dir, score, comment=None):
     return write_review(widget["path"], score, widget.get("version", "unknown"), comment)
 
 
+def _modified_files(installed_path: str, library_path: str) -> dict:
+    """Return a per-file breakdown of how an installed widget differs from
+    its library version. Hashes each file under src/, tests/, examples/
+    and reports added/removed/changed lists. __pycache__ and .pyc are
+    skipped — same exclusions as the implementation hash, so flags only
+    fire on real content drift."""
+    import hashlib
+
+    def collect(base: str) -> dict:
+        out = {}
+        for subdir in ("src", "tests", "examples"):
+            root_path = os.path.join(base, subdir)
+            if not os.path.isdir(root_path):
+                continue
+            for root, dirs, files in os.walk(root_path):
+                dirs[:] = [d for d in dirs if d != "__pycache__"]
+                for name in files:
+                    if name.endswith(".pyc"):
+                        continue
+                    full = os.path.join(root, name)
+                    rel = os.path.relpath(full, base)
+                    try:
+                        with open(full, "rb") as f:
+                            out[rel] = hashlib.md5(f.read()).hexdigest()
+                    except Exception:
+                        out[rel] = None
+        return out
+
+    lib = collect(library_path)
+    local = collect(installed_path)
+    added = sorted(set(local) - set(lib))
+    removed = sorted(set(lib) - set(local))
+    changed = sorted(p for p in (set(lib) & set(local)) if lib[p] != local[p])
+    return {"added": added, "removed": removed, "changed": changed}
+
+
 def widget_status(carto, widget_id, target_dir, check_cloud=True):
     """Check the status of an installed widget against the library."""
     from .engine import python_dir_name, DEFAULT_INSTALL_DIR
@@ -575,7 +611,7 @@ def widget_status(carto, widget_id, target_dir, check_cloud=True):
     cloud_version = cloud_info.get("version")
     cloud_hash = cloud_info.get("implementation_hash")
 
-    return {
+    response = {
         "widget_id": widget_id,
         "installed_version": installed_version,
         "library_version": library_version,
@@ -587,3 +623,8 @@ def widget_status(carto, widget_id, target_dir, check_cloud=True):
         "outdated": outdated,
         "modified": modified,
     }
+    # When modified, surface which files actually differ. Saves the user
+    # from "modified=True, but what?" debugging. Library is the baseline.
+    if modified:
+        response["modifications"] = _modified_files(installed_path, widget["path"])
+    return response

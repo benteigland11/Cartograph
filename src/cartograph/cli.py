@@ -384,17 +384,19 @@ def _resolve_installed_widget(widget_dir: str, default_target: str):
 
     candidate = os.path.abspath(widget_dir)
     if not os.path.isdir(candidate):
-        # Try as a bare basename under <default_target>/cg/
-        fallback = os.path.abspath(
-            os.path.join(default_target, DEFAULT_INSTALL_DIR, widget_dir)
-        )
-        if os.path.isdir(fallback):
-            candidate = fallback
-        else:
+        # Try, in order: bare basename under cg/, then widget_id form
+        # (hyphens) translated to its dir form (underscores for python/nim).
+        cg_dir = os.path.join(default_target, DEFAULT_INSTALL_DIR)
+        attempts = [
+            os.path.abspath(os.path.join(cg_dir, widget_dir)),
+            os.path.abspath(os.path.join(cg_dir, python_dir_name(widget_dir))),
+        ]
+        candidate = next((p for p in attempts if os.path.isdir(p)), None)
+        if candidate is None:
             err({"error": (
-                f"'{widget_dir}' not found. Pass the installed widget directory "
-                f"(e.g. cg/infra_file_stamp_python) or its basename. "
-                f"Run 'cartograph status --all' to see installed widget paths."
+                f"'{widget_dir}' not found. Pass an installed widget's path "
+                f"(e.g. cg/<dirname>), its dir basename, or its widget_id. "
+                f"Run 'cartograph status --all' to list installed widgets."
             )})
     manifest = os.path.join(candidate, "widget.json")
     try:
