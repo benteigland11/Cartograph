@@ -595,11 +595,11 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
     from .config import load_config
     if not auth.is_authenticated():
         print("  → Cannot push: not authenticated. Run: cartograph login", file=sys.stderr)
-        return
+        return {"status": "skipped", "reason": "not_authenticated"}
     widget_id = checkin_result.get("id", "")
     widget_path = checkin_result.get("path", "")
     if not widget_id or not widget_path:
-        return
+        return {"status": "skipped", "reason": "missing_widget_id_or_path"}
 
     # Check sidecar: if installed from another owner, route as a proposal
     source = _read_source_meta(install_path) if install_path else None
@@ -614,15 +614,22 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
                                            registry_url=origin_registry)
             if propose_result.get("error"):
                 print(f"  → Proposal failed: {propose_result['error']}", file=sys.stderr)
-            else:
-                status = propose_result.get("status", "proposed")
-                print(f"  → Proposal {status}: {propose_result.get('proposal_id', '')}", file=sys.stderr)
-                # Governance is inferred from the route the server took:
-                # "published" == origin was open (auto-merged)
-                # "proposed"  == origin was protected (queued for review)
-                inferred = "open (auto-merged)" if status == "published" else "protected (queued for review)"
-                print(f"  → governance: {inferred}  |  origin: @{origin_owner}", file=sys.stderr)
-            return
+                return {"status": "error", "kind": "proposal", "error": propose_result["error"]}
+            status = propose_result.get("status", "proposed")
+            print(f"  → Proposal {status}: {propose_result.get('proposal_id', '')}", file=sys.stderr)
+            # Governance is inferred from the route the server took:
+            # "published" == origin was open (auto-merged)
+            # "proposed"  == origin was protected (queued for review)
+            inferred = "open (auto-merged)" if status == "published" else "protected (queued for review)"
+            print(f"  → governance: {inferred}  |  origin: @{origin_owner}", file=sys.stderr)
+            return {
+                "status": "success",
+                "kind": "proposal",
+                "proposal_status": status,
+                "proposal_id": propose_result.get("proposal_id", ""),
+                "origin_owner": origin_owner,
+                "governance": inferred,
+            }
         # Own widget - sidecar has previously established home registry
         registry_url = source.get("registry_url")
     else:
@@ -636,6 +643,7 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
                              governance=governance, registry_url=registry_url)
     if push_result.get("error"):
         print(f"  → Push failed: {push_result['error']}", file=sys.stderr)
+        return {"status": "error", "kind": "publish", "error": push_result["error"]}
     else:
         from .config import get_registry_url_for_prefix, get_registries, _PUBLIC_REGISTRY_PREFIX
         namespaced = push_result.get("namespaced_id", "")
@@ -681,6 +689,15 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
             print(f"  → governance: {effective_gov}  |  owner: {owner_tag}", file=sys.stderr)
         except Exception:
             pass  # sidecar is best-effort; push already succeeded
+        return {
+            "status": "success",
+            "kind": "publish",
+            "version": version,
+            "namespaced_id": namespaced,
+            "install_id": install_id,
+            "governance": push_result.get("governance") or governance,
+            "registry_url": registry_url,
+        }
 
 
 def cmd_checkin(args):
@@ -695,7 +712,6 @@ def cmd_checkin(args):
     )
     if result.get("status") == "error" or "error" in result:
         err(result)
-    out(result)
 
     # Push to cloud only when the user opts in: --publish flag or auto_publish=True.
     # The old "else: auto-push if already published" branch was removed — it
@@ -706,7 +722,10 @@ def cmd_checkin(args):
         cfg = load_config()
         publish = getattr(args, "publish", False) or cfg["publish"]["auto_publish"]
         if publish:
-            _force_push(result, install_path=install_path, reason=args.reason)
+            push_summary = _force_push(result, install_path=install_path, reason=args.reason)
+            if push_summary:
+                result["publish"] = push_summary
+    out(result)
 
 
 _PAGINATE_FN = None
