@@ -365,37 +365,64 @@ def cmd_install(args):
 
 
 def _resolve_installed_widget(widget_dir: str, default_target: str):
-    """Resolve a widget directory path into (widget_id, target_dir).
+    """Resolve a widget directory into (widget_id, target_dir, dir_name).
 
-    Requires a path to an installed widget directory (e.g. cg/infra_file_stamp_python).
-    The widget_id is read from widget.json meta.id and the project root is derived
-    as the parent-of-parent (widgets live at <root>/cg/<widget_dir>/).
+    Accepts either:
+    - A path (relative or absolute) to an installed widget dir
+      (e.g. cg/infra_file_stamp_python), or
+    - A bare directory basename (e.g. cg_backend_xai_client_python),
+      which is auto-resolved under <default_target>/cg/.
 
-    Always use the dir path — never a bare widget_id. The dir is unambiguous even
-    when multiple registry prefixes are installed (cg-foo vs myorg-foo).
+    widget_id is the prefixed form when the dir name carries a registry
+    prefix (e.g. cg_foo -> cg-foo), so callers that refetch (upgrade) hit
+    the right registry. dir_name is the actual directory basename, so
+    rmtree-style operations target the correct path.
+
+    Project root is derived as the parent-of-parent of the resolved dir.
     """
+    from .engine import DEFAULT_INSTALL_DIR, python_dir_name
+
     candidate = os.path.abspath(widget_dir)
     if not os.path.isdir(candidate):
-        err({"error": (
-            f"'{widget_dir}' is not a directory. Pass the installed widget directory, "
-            f"e.g. cg/infra_file_stamp_python or /abs/path/to/cg/infra_file_stamp_python. "
-            f"Run 'cartograph status --all' to see installed widget paths."
-        )})
+        # Try as a bare basename under <default_target>/cg/
+        fallback = os.path.abspath(
+            os.path.join(default_target, DEFAULT_INSTALL_DIR, widget_dir)
+        )
+        if os.path.isdir(fallback):
+            candidate = fallback
+        else:
+            err({"error": (
+                f"'{widget_dir}' not found. Pass the installed widget directory "
+                f"(e.g. cg/infra_file_stamp_python) or its basename. "
+                f"Run 'cartograph status --all' to see installed widget paths."
+            )})
     manifest = os.path.join(candidate, "widget.json")
     try:
         with open(manifest) as f:
-            widget_id = json.load(f).get("meta", {}).get("id", "")
-        if not widget_id:
+            canonical_id = json.load(f).get("meta", {}).get("id", "")
+        if not canonical_id:
             err({"error": f"widget.json at {manifest} is missing meta.id"})
     except Exception as e:
         err({"error": f"Could not read widget.json at {manifest}: {e}"})
-    from .engine import DEFAULT_INSTALL_DIR
+
+    dir_name = os.path.basename(candidate)
     target_dir = os.path.dirname(os.path.dirname(candidate))
-    return widget_id, target_dir
+
+    # If the dir basename carries a registry prefix (cg-foo, myorg-foo),
+    # reconstruct the prefixed widget_id so refetch lands in the right
+    # registry. Otherwise the canonical meta.id is correct.
+    canonical_dir = python_dir_name(canonical_id)
+    widget_id = canonical_id
+    if dir_name != canonical_dir and dir_name.endswith(canonical_dir):
+        sep_len = len(dir_name) - len(canonical_dir)
+        prefix = dir_name[:sep_len].rstrip("_-")
+        if prefix:
+            widget_id = f"{prefix}-{canonical_id}"
+    return widget_id, target_dir, dir_name
 
 
 def cmd_uninstall(args):
-    widget_id, target_dir = _resolve_installed_widget(args.widget_dir, os.getcwd())
+    widget_id, target_dir, _ = _resolve_installed_widget(args.widget_dir, os.getcwd())
     result = _carto().uninstall(widget_id=widget_id, target_dir=target_dir)
     if result.get("status") == "error" or "error" in result:
         err(result)
@@ -403,7 +430,7 @@ def cmd_uninstall(args):
 
 
 def cmd_upgrade(args):
-    widget_id, target_dir = _resolve_installed_widget(args.widget_dir, os.getcwd())
+    widget_id, target_dir, _ = _resolve_installed_widget(args.widget_dir, os.getcwd())
     result = _carto().upgrade(
         widget_id=widget_id,
         target_dir=target_dir,
@@ -718,7 +745,7 @@ def cmd_status(args):
         if args.all_widgets or args.page != 1 or args.size != 20:
             err({"status": "error",
                  "message": "--page/--size/--all only apply when listing all widgets (omit widget_dir)."})
-        widget_id, target = _resolve_installed_widget(args.widget_dir, target)
+        widget_id, target, _ = _resolve_installed_widget(args.widget_dir, target)
         result = _carto().widget_status(widget_id=widget_id, target_dir=target)
         if result.get("error"):
             err(result)
@@ -1188,7 +1215,7 @@ def cmd_rate(args):
         return
 
     # Local widget — requires dir path
-    widget_id, target_dir = _resolve_installed_widget(widget_id, os.getcwd())
+    widget_id, target_dir, _ = _resolve_installed_widget(widget_id, os.getcwd())
     result = _carto().add_review(
         widget_id=widget_id,
         target_dir=target_dir,

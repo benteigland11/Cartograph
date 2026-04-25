@@ -424,7 +424,9 @@ class LanguageEngine:
             os.makedirs(cache_root, exist_ok=True)
             env.setdefault("XDG_CACHE_HOME", cache_root)
 
-        res = self._run(cmd, cwd=cwd, timeout=60, env=env)
+        # 120s headroom: cold node/nim startup on Windows runners can exceed
+        # 60s under antivirus + temp-path overhead, surfacing as flaky CI.
+        res = self._run(cmd, cwd=cwd, timeout=120, env=env)
 
         if res.returncode != 0:
             output = (res.stderr or res.stdout or "").strip()
