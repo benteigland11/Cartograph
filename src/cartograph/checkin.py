@@ -36,6 +36,22 @@ from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_
 log = logging.getLogger("cartograph")
 
 
+def _artifact_skip_set(language: str | None) -> set[str]:
+    """Return the build-artifact dirs to skip when copying widget files.
+
+    Sources from the universal-build-artifact-ignore widget so updates flow
+    everywhere at once. Falls back to a minimal hardcoded set if the widget
+    can't be imported (e.g. partial install).
+    """
+    try:
+        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+            excludes_for,
+        )
+        return set(excludes_for(language=language))
+    except ImportError:
+        return {"__pycache__", ".pytest_cache", "node_modules", ".git"}
+
+
 def _restore_library_notes(manifest_path: str) -> None:
     """Overwrite library_notes in widget.json with the canonical version.
 
@@ -332,14 +348,17 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         if os.path.exists(history_path):
             shutil.rmtree(history_path)
         os.makedirs(history_path, exist_ok=True)
+        artifact_skips = _artifact_skip_set(language)
         ignore = shutil.ignore_patterns(
-            "__pycache__", "*.pyc", ".pytest_cache",
-            "node_modules", "package-lock.json",
+            *artifact_skips, "*.pyc", "package-lock.json",
             "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
         )
+        per_item_skips = artifact_skips | {
+            "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
+            "package-lock.json",
+        }
         for item in os.listdir(dest_path):
-            if item in ("history", "changelog.json", _STAMP_FILE, ".cartograph_source",
-                        "node_modules", "package-lock.json"):
+            if item in per_item_skips:
                 continue
             src = os.path.join(dest_path, item)
             dst = os.path.join(history_path, item)
@@ -355,12 +374,17 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         return {"status": "error", "message": f"Could not restore canonical library_notes: {e}"}
 
     # --- Copy working copy → library (never move — leave source intact) ---
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "node_modules",
-                                    "package-lock.json", ".cartograph_source")
+    artifact_skips = _artifact_skip_set(language)
+    ignore = shutil.ignore_patterns(
+        *artifact_skips, "*.pyc", "package-lock.json", ".cartograph_source",
+    )
+    per_item_skips = artifact_skips | {
+        "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
+        "package-lock.json",
+    }
     os.makedirs(dest_path, exist_ok=True)
     for item in os.listdir(path):
-        if item in ("history", "changelog.json", "__pycache__", ".pytest_cache", _STAMP_FILE,
-                    ".cartograph_source", "node_modules", "package-lock.json"):
+        if item in per_item_skips:
             continue
         src = os.path.join(path, item)
         dst = os.path.join(dest_path, item)

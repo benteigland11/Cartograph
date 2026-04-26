@@ -451,13 +451,17 @@ class PythonEngine(LanguageEngine):
 
     def cleanup(self, path: str) -> None:
         import shutil
-        # Remove the isolated venv
-        venv_dir = os.path.join(path, ".venv")
-        if os.path.isdir(venv_dir):
-            shutil.rmtree(venv_dir, ignore_errors=True)
+        try:
+            from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+                excludes_for,
+            )
+            artifact_dirs = excludes_for(language="python")
+        except ImportError:
+            artifact_dirs = frozenset({"__pycache__", ".pytest_cache", ".venv"})
         self._venv_py = None
+        # Walk to catch nested __pycache__ / .pytest_cache anywhere in the tree.
         for root, dirs, _files in os.walk(path):
-            for d in dirs:
-                if d in ("__pycache__", ".pytest_cache"):
+            for d in list(dirs):
+                if d in artifact_dirs:
                     shutil.rmtree(os.path.join(root, d), ignore_errors=True)
-            dirs[:] = [d for d in dirs if d not in ("__pycache__", ".pytest_cache")]
+            dirs[:] = [d for d in dirs if d not in artifact_dirs]

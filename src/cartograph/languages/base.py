@@ -351,6 +351,25 @@ class LanguageEngine:
         """Remove any temp artifacts created during validation. Best-effort."""
         pass
 
+    def _cleanup_artifact_dirs(self, path: str) -> None:
+        """Remove top-level build-artifact dirs for this engine's language.
+
+        Sourced from the universal-build-artifact-ignore widget so adding a
+        new ecosystem cache (e.g. .turbo, .nx) flows to every engine that
+        adopts it. Subclasses call this from their cleanup() override.
+        """
+        import shutil
+        try:
+            from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+                excludes_for,
+            )
+        except ImportError:
+            return
+        for dirname in excludes_for(language=self.name):
+            full = os.path.join(path, dirname)
+            if os.path.isdir(full):
+                shutil.rmtree(full, ignore_errors=True)
+
     def run_example(self, path: str) -> dict:
         """Execute the example file. Called after install_deps."""
         ep = os.path.join(path, "examples", self.example_filename(path))

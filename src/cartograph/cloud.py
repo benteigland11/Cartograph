@@ -629,23 +629,65 @@ def update_widget(owner_handle: str, widget_id: str,
     )
 
 
+_ZIP_WARN_BYTES = 5 * 1024 * 1024     # 5 MB — likely an artifact slipped through
+_ZIP_ERROR_BYTES = 25 * 1024 * 1024   # 25 MB — fail before the server 413s
+
+
 def _zip_widget(widget_path: str) -> bytes:
-    """Bundle widget files into a zip in memory (shared by push and propose)."""
+    """Bundle widget files into a zip in memory (shared by push and propose).
+
+    Excludes build artifacts using the universal build-artifact-ignore
+    widget — universal entries (.git, .idea, ...) plus the widget's
+    language-specific entries (node_modules, .angular, vendor, target, ...).
+    Adds a size guard so payloads that explode locally don't get pushed.
+    """
+    from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+        excludes_for,
+    )
+
+    language = _read_widget_language(widget_path)
+    skip_dirs = excludes_for(language=language) | {"history"}
+    skip_files = {".validation_stamp.json", ".file_stamp.json",
+                  "reviews.json", "changelog.json"}
+
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _dirs, files in os.walk(widget_path):
-            rel_root = os.path.relpath(root, widget_path)
-            skip_dirs = {"__pycache__", ".pytest_cache", "history", ".git", "node_modules"}
-            if any(part in skip_dirs for part in rel_root.split(os.sep)):
-                continue
+        for root, dirs, files in os.walk(widget_path):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
             for fname in files:
-                if fname in (".validation_stamp.json", ".file_stamp.json",
-                             "reviews.json", "changelog.json"):
+                if fname in skip_files or fname.endswith(".pyc"):
                     continue
                 fpath = os.path.join(root, fname)
                 arcname = os.path.relpath(fpath, widget_path)
                 zf.write(fpath, arcname)
-    return buf.getvalue()
+
+    payload = buf.getvalue()
+    size = len(payload)
+    if size >= _ZIP_ERROR_BYTES:
+        raise ValueError(
+            f"Widget zip is {size / 1024 / 1024:.1f} MB, exceeding "
+            f"{_ZIP_ERROR_BYTES // 1024 // 1024} MB upload guard. A build "
+            "artifact directory likely slipped past the exclude list. "
+            "Inspect with `unzip -l` or run `cartograph validate` to "
+            "trigger cleanup, then retry."
+        )
+    if size >= _ZIP_WARN_BYTES:
+        log.warning(
+            "Widget zip is %.1f MB — unusually large; check for stray build "
+            "artifacts (node_modules, .angular, target, vendor, ...).",
+            size / 1024 / 1024,
+        )
+    return payload
+
+
+def _read_widget_language(widget_path: str) -> str | None:
+    """Return tech_stack.language from widget.json, or None if absent."""
+    manifest = os.path.join(widget_path, "widget.json")
+    try:
+        with open(manifest, "r", encoding="utf-8") as f:
+            return json.load(f).get("tech_stack", {}).get("language")
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 @endpoint("POST", "/v1/widgets/{owner_handle}/{widget_id}/contribute",

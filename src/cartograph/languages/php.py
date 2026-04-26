@@ -582,10 +582,7 @@ class PhpEngine(LanguageEngine):
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def cleanup(self, path: str) -> None:
-        for d in ("vendor", ".phpunit.cache"):
-            full = os.path.join(path, d)
-            if os.path.isdir(full):
-                shutil.rmtree(full, ignore_errors=True)
+        self._cleanup_artifact_dirs(path)
 
     # ── Validate override ─────────────────────────────────────────────────────
 

@@ -1,0 +1,148 @@
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+WIDGET_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(WIDGET_ROOT))
+
+from src.build_artifact_ignore import (
+    all_known_excludes,
+    default_excludes,
+    excludes_for,
+    filter_dirs,
+    should_skip,
+    supported_languages,
+)
+
+
+def test_default_excludes_is_frozenset():
+    result = default_excludes()
+    assert isinstance(result, frozenset)
+    assert ".git" in result
+    assert ".idea" in result
+
+
+def test_default_excludes_immutable():
+    a = default_excludes()
+    b = default_excludes()
+    assert a is b or a == b
+    with pytest.raises((AttributeError, TypeError)):
+        a.add("foo")  # type: ignore[attr-defined]
+
+
+def test_excludes_for_python_includes_pycache_and_venv():
+    result = excludes_for(language="python")
+    assert "__pycache__" in result
+    assert ".venv" in result
+    assert ".git" in result
+
+
+def test_excludes_for_angular_includes_angular_cache():
+    result = excludes_for(language="angular")
+    assert ".angular" in result
+    assert "node_modules" in result
+    assert "out-tsc" in result
+
+
+def test_excludes_for_unknown_language_returns_universal_only():
+    result = excludes_for(language="ada95")
+    assert result == default_excludes()
+
+
+def test_excludes_for_case_insensitive():
+    a = excludes_for(language="Python")
+    b = excludes_for(language="python")
+    assert a == b
+
+
+def test_excludes_for_polyglot():
+    result = excludes_for(languages=["python", "javascript"])
+    assert "__pycache__" in result
+    assert "node_modules" in result
+
+
+def test_excludes_for_no_args_returns_universal():
+    assert excludes_for() == default_excludes()
+
+
+def test_all_known_excludes_is_superset():
+    universe = all_known_excludes()
+    assert universe >= default_excludes()
+    assert universe >= excludes_for(language="angular")
+    assert universe >= excludes_for(language="rust")
+
+
+def test_should_skip_matches_component():
+    excludes = excludes_for(language="python")
+    assert should_skip("foo/__pycache__/bar.py", excludes)
+    assert should_skip("__pycache__", excludes)
+    assert not should_skip("foo/bar/baz.py", excludes)
+
+
+def test_should_skip_handles_windows_separators():
+    excludes = excludes_for(language="javascript")
+    assert should_skip("project\\node_modules\\foo", excludes)
+
+
+def test_should_skip_empty_path():
+    assert not should_skip("", default_excludes())
+
+
+def test_should_skip_partial_name_does_not_match():
+    excludes = {".git"}
+    assert not should_skip("foo/.gitignore/bar", excludes)
+    assert should_skip("foo/.git/bar", excludes)
+
+
+def test_filter_dirs_removes_excluded():
+    dirs = ["src", "node_modules", "tests", ".git", "examples"]
+    excludes = excludes_for(language="javascript")
+    result = filter_dirs(dirs, excludes)
+    assert "node_modules" not in result
+    assert ".git" not in result
+    assert "src" in result
+    assert "tests" in result
+
+
+def test_filter_dirs_preserves_order():
+    dirs = ["a", "node_modules", "b", "dist", "c"]
+    excludes = {"node_modules", "dist"}
+    assert filter_dirs(dirs, excludes) == ["a", "b", "c"]
+
+
+def test_filter_dirs_returns_new_list():
+    dirs = ["src", "build"]
+    excludes = {"build"}
+    result = filter_dirs(dirs, excludes)
+    assert result is not dirs
+    assert dirs == ["src", "build"]
+
+
+def test_supported_languages_returns_sorted_tuple():
+    langs = supported_languages()
+    assert isinstance(langs, tuple)
+    assert list(langs) == sorted(langs)
+    assert "python" in langs
+    assert "angular" in langs
+
+
+def test_walk_integration(tmp_path):
+    (tmp_path / "src" / "deep").mkdir(parents=True)
+    (tmp_path / "src" / "deep" / "code.py").write_text("x = 1")
+    (tmp_path / "node_modules" / "junk").mkdir(parents=True)
+    (tmp_path / "node_modules" / "junk" / "huge.bin").write_text("x" * 1000)
+    (tmp_path / ".git" / "objects").mkdir(parents=True)
+    (tmp_path / ".git" / "objects" / "abc").write_text("commit")
+
+    excludes = excludes_for(language="javascript")
+    visited: list[str] = []
+    for root, dirs, files in os.walk(tmp_path):
+        dirs[:] = filter_dirs(dirs, excludes)
+        for fname in files:
+            visited.append(os.path.relpath(os.path.join(root, fname), tmp_path))
+
+    assert any("code.py" in v for v in visited)
+    assert not any("huge.bin" in v for v in visited)
+    assert not any(".git" in v for v in visited)

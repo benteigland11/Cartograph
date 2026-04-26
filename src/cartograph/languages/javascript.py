@@ -394,10 +394,7 @@ class JavaScriptEngine(LanguageEngine):
     # ------------------------------------------------------------------ cleanup
 
     def cleanup(self, path: str) -> None:
-        for dirname in ("node_modules", "coverage"):
-            d = os.path.join(path, dirname)
-            if os.path.exists(d):
-                shutil.rmtree(d, ignore_errors=True)
+        self._cleanup_artifact_dirs(path)
         npm_cache = getattr(self, "_npm_cache_dir", None)
         if npm_cache and os.path.exists(npm_cache):
             shutil.rmtree(npm_cache, ignore_errors=True)
