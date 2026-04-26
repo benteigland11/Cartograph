@@ -352,11 +352,13 @@ class LanguageEngine:
         pass
 
     def _cleanup_artifact_dirs(self, path: str) -> None:
-        """Remove top-level build-artifact dirs for this engine's language.
+        """Remove top-level build artifacts for this engine's language.
 
         Sourced from the universal-build-artifact-ignore widget so adding a
         new ecosystem cache (e.g. .turbo, .nx) flows to every engine that
-        adopts it. Subclasses call this from their cleanup() override.
+        adopts it. Handles both directories (caches like nimcache/htmldocs)
+        and generated files (e.g. nimble.paths). Subclasses call this from
+        their cleanup() override.
         """
         import shutil
         try:
@@ -365,10 +367,15 @@ class LanguageEngine:
             )
         except ImportError:
             return
-        for dirname in excludes_for(language=self.name):
-            full = os.path.join(path, dirname)
+        for entry in excludes_for(language=self.name):
+            full = os.path.join(path, entry)
             if os.path.isdir(full):
                 shutil.rmtree(full, ignore_errors=True)
+            elif os.path.isfile(full):
+                try:
+                    os.remove(full)
+                except OSError:
+                    pass
 
     def run_example(self, path: str) -> dict:
         """Execute the example file. Called after install_deps."""

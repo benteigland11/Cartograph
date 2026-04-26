@@ -646,16 +646,19 @@ def _zip_widget(widget_path: str) -> bytes:
     )
 
     language = _read_widget_language(widget_path)
-    skip_dirs = excludes_for(language=language) | {"history"}
+    artifacts = excludes_for(language=language) | {"history"}
     skip_files = {".validation_stamp.json", ".file_stamp.json",
                   "reviews.json", "changelog.json"}
 
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, dirs, files in os.walk(widget_path):
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            dirs[:] = [d for d in dirs if d not in artifacts]
             for fname in files:
-                if fname in skip_files or fname.endswith(".pyc"):
+                # Apply both the explicit per-file skip set and the
+                # build-artifact set — the latter contains generated files
+                # (e.g. nimble.paths) as well as directory names.
+                if fname in skip_files or fname in artifacts or fname.endswith(".pyc"):
                     continue
                 fpath = os.path.join(root, fname)
                 arcname = os.path.relpath(fpath, widget_path)

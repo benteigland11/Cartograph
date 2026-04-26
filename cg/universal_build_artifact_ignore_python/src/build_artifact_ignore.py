@@ -53,7 +53,7 @@ _BY_LANGUAGE: dict[str, frozenset[str]] = {
     "java": frozenset({"target", "build", ".gradle"}),
     "kotlin": frozenset({"build", ".gradle"}),
     "go": frozenset({"vendor", "bin"}),
-    "nim": frozenset({"nimcache", "htmldocs"}),
+    "nim": frozenset({"nimcache", "htmldocs", "nimble.paths", "nimble.develop"}),
     "openscad": frozenset(),
     "systemverilog": frozenset({"work", "transcript"}),
     "ruby": frozenset({"vendor", ".bundle", "tmp"}),
