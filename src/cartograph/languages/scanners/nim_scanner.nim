@@ -278,6 +278,49 @@ proc isImportComplete(stmt: string): bool =
     return false
   return true
 
+proc parenDelta(rawLine: string): int =
+  ## Net change in paren/bracket depth across a single line, ignoring
+  ## content inside string literals and after `#` comments. Used to
+  ## carry signature-continuation state across lines so multi-line
+  ## proc/func/template headers are not mistaken for top-level code.
+  result = 0
+  var i = 0
+  let n = rawLine.len
+  while i < n:
+    let c = rawLine[i]
+    if c == '#':
+      break
+    elif c == '"':
+      # Triple-quote string: skip to closing triple-quote on same line if any
+      if i + 2 < n and rawLine[i+1] == '"' and rawLine[i+2] == '"':
+        i += 3
+        while i + 2 < n and not (rawLine[i] == '"' and rawLine[i+1] == '"' and rawLine[i+2] == '"'):
+          inc i
+        if i + 2 < n: i += 3
+        else: i = n
+        continue
+      # Regular string: skip to matching quote, honouring backslash escapes
+      inc i
+      while i < n and rawLine[i] != '"':
+        if rawLine[i] == '\\' and i + 1 < n:
+          i += 2
+          continue
+        inc i
+      if i < n: inc i
+      continue
+    elif c == '\'':
+      # Char literal 'x' or '\n' — skip to closing quote
+      inc i
+      if i < n and rawLine[i] == '\\' and i + 1 < n: i += 2
+      elif i < n: inc i
+      if i < n and rawLine[i] == '\'': inc i
+      continue
+    elif c == '(' or c == '[':
+      inc result
+    elif c == ')' or c == ']':
+      dec result
+    inc i
+
 proc scanFile(filename: string): seq[Finding] =
   result = @[]
   let content = readFile(filename)
@@ -286,6 +329,10 @@ proc scanFile(filename: string): seq[Finding] =
   var inMultilineString = false
   var inRawString = false
   var topLevelSection = true
+  # Paren/bracket depth carried across lines so multi-line proc/func/template
+  # signatures (and other parenthesised continuations) are not misread as
+  # separate top-level statements.
+  var parenDepth = 0
 
   # Pending multi-line import accumulator. When we see an import statement
   # that isn't complete (trailing comma, unclosed brace, or bare `import`),
@@ -310,6 +357,16 @@ proc scanFile(filename: string): seq[Finding] =
     # Skip empty lines and pure comments
     if stripped.len == 0 or stripped.startsWith("#"):
       continue
+
+    # Snapshot continuation state, then advance paren depth for this line.
+    # `inContinuation` is true when this line is inside an unclosed paren/
+    # bracket group from a previous line — typically a multi-line proc,
+    # func, template, or macro signature, or a multi-line tuple/object
+    # literal. Such lines are not standalone statements.
+    let inContinuation = parenDepth > 0
+    parenDepth += parenDelta(rawLine)
+    if parenDepth < 0:
+      parenDepth = 0
 
     # Check for multiline string start (but not end on same line)
     let tripleCount = stripped.count("\"\"\"")
@@ -344,7 +401,11 @@ proc scanFile(filename: string): seq[Finding] =
       continue
 
     let startsIndented = rawLine.len > 0 and rawLine[0].isSpaceAscii()
-    if not startsIndented and not code.startsWith("import ") and not code.startsWith("from "):
+    # Don't flip topLevelSection while we're still inside a multi-line
+    # signature: the closing `) =` or `): tuple[...]` of a proc header
+    # is non-indented but is not the start of a new top-level statement.
+    if not inContinuation and not startsIndented and
+       not code.startsWith("import ") and not code.startsWith("from "):
       topLevelSection = true
 
     # --- Checks ---

@@ -792,6 +792,29 @@ class TestNimSpecific:
         assert any("top-level mutable state" in w.lower() or "top-level" in w.lower()
                    for w in result["warnings"])
 
+    def test_var_inside_multiline_proc_signature_not_warned(self, tmp_path):
+        # Regression: the scanner used to flip topLevelSection back to true
+        # on the closing `) =` of a multi-line proc signature, causing the
+        # first `var` of the proc body to be misreported as module-level.
+        src = (
+            "proc append(\n"
+            "    a: var seq[int],\n"
+            "    b: var int,\n"
+            "    c: int\n"
+            ") =\n"
+            "  var current: seq[int] = @[]\n"
+            "  current.add c\n"
+            "\n"
+            "proc rewrap(\n"
+            "    items: seq[int]\n"
+            "): tuple[x: int, y: int] =\n"
+            "  var allRows: seq[int] = @[]\n"
+            "  result = (items.len, allRows.len)\n"
+        )
+        result = _scan(tmp_path, "nim", "nim", src)
+        tlv = [w for w in result["warnings"] if "top-level" in w.lower()]
+        assert not tlv, f"locals inside multi-line proc signatures must not warn: {tlv}"
+
     def test_hardcoded_value_in_test_file_not_warned(self, tmp_path):
         """Test files legitimately have expected values and fixtures -
         hardcoded value warnings should be src/ only."""
