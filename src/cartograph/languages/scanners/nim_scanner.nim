@@ -278,6 +278,23 @@ proc isImportComplete(stmt: string): bool =
     return false
   return true
 
+proc hasWordCall(code, name: string): bool =
+  ## Returns true if `name(` appears in `code` with a non-identifier char
+  ## immediately preceding it (or at the start of the string). Lets us
+  ## flag `alloc(` while ignoring `realloc(` or `myalloc(`.
+  var pos = 0
+  while pos < code.len:
+    let idx = code.find(name & "(", pos)
+    if idx < 0:
+      return false
+    if idx == 0:
+      return true
+    let prev = code[idx - 1]
+    if prev notin {'a'..'z', 'A'..'Z', '0'..'9', '_'}:
+      return true
+    pos = idx + 1
+  return false
+
 proc parenDelta(rawLine: string): int =
   ## Net change in paren/bracket depth across a single line, ignoring
   ## content inside string literals and after `#` comments. Used to
@@ -472,6 +489,63 @@ proc scanFile(filename: string): seq[Finding] =
             detail: "OS-specific when defined(" & target & ") - widgets must validate on all platforms",
             severity: "error"))
           break
+
+    # cast[seq[T]] - GC-managed seq cast is a memory-safety hazard. Nim seqs
+    # carry a GC header; casting between seq types (or between string and
+    # seq[byte]) breaks GC invariants and can corrupt the heap. Use a copy
+    # or `toOpenArrayByte` instead. Block in src/, warn in tests/examples.
+    if "cast[seq[" in code:
+      let isFatal = not inTests and not inExamples
+      result.add(Finding(
+        file: filename, kind: "cast_seq", line: lineNo,
+        detail: "cast[seq[...]] - GC-managed seq cast is a memory-safety hazard; copy explicitly or use toOpenArrayByte",
+        severity: if isFatal: "block" else: "warning"))
+
+    # Bare `except:` swallows everything including Defect and KeyboardInterrupt.
+    # Even with a non-empty handler, you almost always want a typed except
+    # clause. `except CatchableError:` or `except IOError:` are fine.
+    if code.startsWith("except:") or code == "except":
+      let isDiscard = code == "except: discard" or
+                      code.startsWith("except: discard ") or
+                      code.startsWith("except:discard")
+      result.add(Finding(
+        file: filename, kind: "bare_except", line: lineNo,
+        detail: if isDiscard:
+                  "bare `except: discard` - silently swallows all errors including Defect; use `except CatchableError:` and handle or re-raise"
+                else:
+                  "bare `except:` - catches Defect and KeyboardInterrupt; use a typed except clause like `except CatchableError:`",
+        severity: "warning"))
+
+    # Raw memory primitives. Pure-Nim policy bans FFI, so the typical reason
+    # for raw allocation is gone. Legitimate uses (zero-copy buffers, custom
+    # allocators) still exist but are rare; warn so the author can justify
+    # in checkin reason or wrap in a tested abstraction.
+    block rawMemory:
+      let memoryCalls = ["alloc", "alloc0", "allocShared", "allocShared0",
+                         "createU", "createShared",
+                         "dealloc", "deallocShared",
+                         "realloc", "reallocShared",
+                         "copyMem", "moveMem", "zeroMem"]
+      var matched = ""
+      for fn in memoryCalls:
+        if hasWordCall(code, fn):
+          matched = fn
+          break
+      if matched.len > 0:
+        result.add(Finding(
+          file: filename, kind: "raw_memory", line: lineNo,
+          detail: matched & "() - raw memory primitive; widgets should prefer GC-managed seq/string or document why this is necessary",
+          severity: "warning"))
+      elif "cast[ptr " in code or "cast[ptr]" in code:
+        result.add(Finding(
+          file: filename, kind: "raw_memory", line: lineNo,
+          detail: "cast[ptr ...] - raw pointer cast bypasses Nim's type system; document why this is necessary",
+          severity: "warning"))
+      elif "ptr UncheckedArray" in code:
+        result.add(Finding(
+          file: filename, kind: "raw_memory", line: lineNo,
+          detail: "ptr UncheckedArray - raw memory access bypasses bounds checking; prefer seq/openArray or document why this is necessary",
+          severity: "warning"))
 
     # Import checks via proper tokenizer (see parseImportStatement).
     # Multi-line imports are accumulated across iterations in pendingImport

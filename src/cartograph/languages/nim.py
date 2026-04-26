@@ -67,7 +67,7 @@ discard result  # replace with meaningful output or assertions
 
 class NimEngine(LanguageEngine):
     name = "nim"
-    validation_version = 2
+    validation_version = 3
     file_ext = "nim"
     toolchain = {
         "nim": "Install Nim 2.0+ - nim-lang.org",
@@ -81,6 +81,7 @@ class NimEngine(LanguageEngine):
         "global": "{.global.} found in src/ - widgets must not use global mutable state:",
         "main_module": "when isMainModule found in src/ - widgets are libraries, not executables:",
         "os_specific": "OS-specific when defined() found in src/ - widgets must validate on all platforms:",
+        "cast_seq": "cast[seq[...]] found in src/ - GC-managed seq cast is a memory-safety hazard:",
     }
     scanner_warning_messages = {
         "risky_import": "Stdlib I/O or network imports found in src/ - ensure no hardcoded paths, URLs, or commands:",
@@ -94,6 +95,9 @@ class NimEngine(LanguageEngine):
         "sleep": "Sleep/blocking calls found - widgets must not block the caller:",
         "std_import_style": "Old-style stdlib imports found - prefer std/... imports in modern Nim:",
         "top_level_var": "Top-level mutable state found - prefer local state or explicit parameters:",
+        "cast_seq": "cast[seq[...]] in tests/examples - GC-managed seq cast is a memory-safety hazard:",
+        "bare_except": "Bare `except:` clauses catch Defect/KeyboardInterrupt - use a typed except (e.g. except CatchableError):",
+        "raw_memory": "Raw memory primitives found - widgets should prefer GC-managed types unless there is a documented reason:",
     }
     import_pattern = r'^import\s+\w+'
     manifest_patterns = ["*.nimble"]

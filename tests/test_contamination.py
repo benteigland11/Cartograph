@@ -815,6 +815,93 @@ class TestNimSpecific:
         tlv = [w for w in result["warnings"] if "top-level" in w.lower()]
         assert not tlv, f"locals inside multi-line proc signatures must not warn: {tlv}"
 
+    def test_cast_seq_blocks_in_src(self, tmp_path):
+        # GC-managed seq cast is a memory-safety hazard — block in src/.
+        src = ("proc danger*(s: string): seq[byte] =\n"
+               "  result = cast[seq[byte]](s)\n")
+        result = _scan(tmp_path, "nim", "nim", src)
+        assert any("seq" in b.lower() and "memory-safety" in b.lower()
+                   for b in result["blocks"]), \
+            f"cast[seq[T]] in src must block: {result}"
+
+    def test_cast_seq_in_tests_warns(self, tmp_path):
+        # Tests/examples can use cast[seq[T]] (still discouraged) — warn only.
+        clean_src = "func hello*(): string = \"ok\"\n"
+        test_code = ("import std/unittest\n"
+                     "suite \"x\":\n"
+                     "  test \"y\":\n"
+                     "    let s = \"abc\"\n"
+                     "    let b = cast[seq[byte]](s)\n"
+                     "    check b.len == 3\n")
+        result = _scan(tmp_path, "nim", "nim", clean_src, test_code=test_code)
+        assert not any("memory-safety" in b.lower() for b in result["blocks"]), \
+            f"cast[seq[T]] in tests must not block: {result['blocks']}"
+        assert any("memory-safety" in w.lower() for w in result["warnings"]), \
+            f"cast[seq[T]] in tests must warn: {result['warnings']}"
+
+    def test_bare_except_warns(self, tmp_path):
+        # Bare except: catches Defect/KeyboardInterrupt — warn.
+        src = ("import std/strutils\n"
+               "proc swallow*() =\n"
+               "  try:\n"
+               "    discard parseInt(\"x\")\n"
+               "  except:\n"
+               "    discard\n")
+        result = _scan(tmp_path, "nim", "nim", src)
+        assert any("bare" in w.lower() and "except" in w.lower()
+                   for w in result["warnings"]), \
+            f"bare `except:` must warn: {result['warnings']}"
+
+    def test_typed_except_not_warned(self, tmp_path):
+        # except CatchableError: is the recommended form — must not warn.
+        src = ("import std/strutils\n"
+               "proc safe*() =\n"
+               "  try:\n"
+               "    discard parseInt(\"x\")\n"
+               "  except ValueError:\n"
+               "    discard\n")
+        result = _scan(tmp_path, "nim", "nim", src)
+        assert not any("bare" in w.lower() and "except" in w.lower()
+                       for w in result["warnings"]), \
+            f"typed `except ValueError:` must not warn: {result['warnings']}"
+
+    def test_raw_memory_alloc_warns(self, tmp_path):
+        src = ("proc allocBuf*(n: int): pointer =\n"
+               "  result = alloc(n)\n"
+               "proc freeBuf*(p: pointer) =\n"
+               "  dealloc(p)\n")
+        result = _scan(tmp_path, "nim", "nim", src)
+        warnings = [w for w in result["warnings"] if "raw memory" in w.lower()
+                    or "alloc" in w.lower() or "dealloc" in w.lower()]
+        assert warnings, f"alloc/dealloc must warn: {result['warnings']}"
+
+    def test_raw_memory_cast_ptr_warns(self, tmp_path):
+        src = ("proc badCast*(x: pointer): ptr int =\n"
+               "  result = cast[ptr int](x)\n")
+        result = _scan(tmp_path, "nim", "nim", src)
+        assert any("raw" in w.lower() or "pointer" in w.lower()
+                   for w in result["warnings"]), \
+            f"cast[ptr ...] must warn: {result['warnings']}"
+
+    def test_raw_memory_unchecked_array_warns(self, tmp_path):
+        src = ("proc view*(p: pointer, n: int): ptr UncheckedArray[byte] =\n"
+               "  result = cast[ptr UncheckedArray[byte]](p)\n")
+        result = _scan(tmp_path, "nim", "nim", src)
+        assert any("uncheckedarray" in w.lower() or "raw" in w.lower()
+                   for w in result["warnings"]), \
+            f"ptr UncheckedArray must warn: {result['warnings']}"
+
+    def test_allocator_identifier_not_flagged_as_alloc(self, tmp_path):
+        # Word-boundary check: `allocator` should not match `alloc`.
+        src = ("proc make*(): string =\n"
+               "  let allocator = \"name\"\n"
+               "  result = allocator\n")
+        result = _scan(tmp_path, "nim", "nim", src)
+        assert not any("raw memory" in w.lower() or
+                       (w.lower().startswith("alloc") and "primitive" in w.lower())
+                       for w in result["warnings"]), \
+            f"identifier `allocator` must not match alloc: {result['warnings']}"
+
     def test_hardcoded_value_in_test_file_not_warned(self, tmp_path):
         """Test files legitimately have expected values and fixtures -
         hardcoded value warnings should be src/ only."""

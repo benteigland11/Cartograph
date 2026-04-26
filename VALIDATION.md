@@ -235,6 +235,7 @@ in the stdlib allowlist and needs no special handling.
 | Global mutable state ({.global.}) | N/A | N/A | Yes | N/A | N/A | Nim-specific |
 | when isMainModule | N/A | N/A | Yes | N/A | N/A | Nim-specific |
 | OS-specific when defined() | N/A | N/A | Yes | N/A | N/A | Nim-specific |
+| `cast[seq[T]]` (GC-managed seq cast) | N/A | N/A | Yes (src/ block, tests/examples warn) | N/A | N/A | Nim-specific. Breaks GC invariants. Use copy or `toOpenArrayByte`. |
 | Risky stdlib imports | N/A | Yes (fs, child_process, etc.) | Yes (os, osproc, etc.) | N/A | N/A | Python does not block these |
 | Unlisted imports | Yes (AST + `packages_distributions`) | Yes | Yes | Yes (include<>/use<>) | N/A | src/ blocks, tests/examples warn. PHP uses composer autoload tables - see PHP section. |
 | Top-level geometry/control flow | N/A | N/A | N/A | Yes (src/ only) | N/A | Bleeds into consumer's scene |
@@ -261,6 +262,8 @@ above applies.
 | Old-style stdlib imports | No | No | Yes | N/A | src + tests | `import json` vs `import std/json` |
 | Top-level mutable state | No | No | Yes | N/A | src/ only | `var` at module level |
 | Credentials in tests | Yes | Yes | Yes | Yes | tests/ | Lowered from block → warn in tests |
+| Bare `except:` clauses | No | No | Yes | N/A | src + tests + examples | Catches Defect/KeyboardInterrupt — use a typed except (e.g. `except CatchableError:`) |
+| Raw memory primitives | No | No | Yes | N/A | src/ only | `alloc`/`dealloc`/`copyMem` family, `cast[ptr ...]`, `ptr UncheckedArray` — prefer GC-managed types |
 
 ### OpenSCAD
 
