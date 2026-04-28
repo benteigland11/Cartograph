@@ -5,6 +5,11 @@
 
 A local first reusable code registry for AI agents. Search, install, create, validate, and check in code modules across projects. Only requires Python. Other languages in the repo are native validation scanners for their respective widget types. The tool is designed to use the languages you have installed.
 
+For setups who don't want to tune instructions for their agents, we recommend using the **Plugin** if you use one of the supported agents. If you run the **MCP** we would recommend using the `cartograph setup --agent [agent]` command to support the other features.
+
+[MCP](https://github.com/benteigland11/cartograph-mcp)
+
+[Plugins](https://github.com/benteigland11/cartograph-plugin)
 ### Demonstration of creating, installing, and composing widgets
 
 <a href="https://youtu.be/wN0v84O3wxg">
