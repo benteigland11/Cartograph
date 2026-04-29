@@ -1,4 +1,4 @@
-"""OpenSCAD language engine — parametric 3D modeling widgets."""
+"""OpenSCAD language engine - parametric 3D modeling widgets."""
 
 import glob as _glob
 import logging
@@ -10,7 +10,7 @@ import tempfile
 
 from .base import LanguageEngine
 
-# Import block_walker widget — installed at cg/universal_block_walker_python/.
+# Import block_walker widget - installed at cg/universal_block_walker_python/.
 # Dogfooded for OpenSCAD's parameter splitting, comment stripping, and module
 # block extraction so we don't maintain a parallel implementation here.
 _WIDGET_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "cg",
@@ -103,7 +103,7 @@ def _stl_has_geometry(path: str) -> bool:
 
 # Top-level statements that aren't allowed in src/ files.
 # Any line at depth 0 that begins with `<identifier>(` is a call or
-# control-flow statement — both belong inside a module, not at file root.
+# control-flow statement - both belong inside a module, not at file root.
 # The match deliberately catches user-defined modules too (e.g. `stud(...)`),
 # not just OpenSCAD builtins, so a published widget can't ship a "preview"
 # instantiation that auto-renders on every consumer's import.
@@ -121,7 +121,7 @@ _TOP_LEVEL_DECLARATIONS = frozenset({
 # frame so consumers know how the part is oriented before they instantiate it.
 # Three systems are supported and scaffolded; the author keeps whichever
 # match the part's geometry (a gear may want cylindrical, a sphere spherical,
-# a chassis cartesian — some parts benefit from declaring two).
+# a chassis cartesian - some parts benefit from declaring two).
 _COORD_HEADER_RE = re.compile(
     r'//\s*COORDINATES\s*\(\s*(cartesian|cylindrical|spherical)\s*\)\s*:',
     re.IGNORECASE,
@@ -155,7 +155,7 @@ def _check_coordinate_frame(content: str, rel: str) -> list[str]:
 
     if not headers:
         return [
-            f"{rel}: missing coordinate frame — declare at least one of "
+            f"{rel}: missing coordinate frame - declare at least one of "
             f"`// COORDINATES (cartesian):`, `// COORDINATES (cylindrical):`, "
             f"or `// COORDINATES (spherical):` near the top of the file. "
             f"Right-hand rule assumed."
@@ -186,7 +186,7 @@ def _check_coordinate_frame(content: str, rel: str) -> list[str]:
 
     detail = "; ".join(f"{s} ({why})" for s, why in incomplete_systems)
     return [
-        f"{rel}: no complete COORDINATES block — {detail}. "
+        f"{rel}: no complete COORDINATES block - {detail}. "
         f"Cartesian requires Origin/+X/+Y/+Z; cylindrical requires "
         f"Axis/Origin/theta; spherical requires Origin/theta/phi. "
         f"Delete blocks you don't need; at least one must be fully filled in."
@@ -200,12 +200,12 @@ _INCLUDE_RE = re.compile(r'^\s*include\s*<', re.MULTILINE)
 def _check_top_level_geometry(content: str, rel: str) -> list[str]:
     """Block any non-declaration statement at the top level of a src/ file.
 
-    src/ widgets must define modules and constants only — calling a module
+    src/ widgets must define modules and constants only - calling a module
     (builtin or user-defined) at file root means it auto-renders on import.
     Catches both ``cube([...])`` (builtin) and ``stud(...)`` (user module).
     """
     blocks = []
-    depth = 0  # brace depth — 0 means top level
+    depth = 0  # brace depth - 0 means top level
     lines = content.splitlines()
     for line_no, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -223,7 +223,7 @@ def _check_top_level_geometry(content: str, rel: str) -> list[str]:
         if ident in _TOP_LEVEL_DECLARATIONS:
             continue
         blocks.append(
-            f"Top-level statement in src/ at line {line_no}: {stripped!r} — "
+            f"Top-level statement in src/ at line {line_no}: {stripped!r} - "
             f"src/ must only define modules and constants; "
             f"move calls/instantiations into a module body"
         )
@@ -258,7 +258,7 @@ def _extract_module_signatures(content: str) -> list[tuple[str, str, int, int, i
 
 def _check_params_have_defaults(content: str, rel: str) -> list[str]:
     """Block public module parameters that have no default value.
-    Private modules (name starting with _) are exempt — they are internal
+    Private modules (name starting with _) are exempt - they are internal
     helpers always called with positional arguments."""
     blocks = []
     for module_name, params_str, line_no, _, _ in _extract_module_signatures(content):
@@ -270,7 +270,7 @@ def _check_params_have_defaults(content: str, rel: str) -> list[str]:
             if "=" not in param:
                 blocks.append(
                     f"{rel}:{line_no}: parameter '{param}' in module '{module_name}' "
-                    f"has no default — all parameters must have defaults"
+                    f"has no default - all parameters must have defaults"
                 )
     return blocks
 
@@ -297,7 +297,7 @@ def _check_param_unit_comments(content: str, rel: str) -> list[str]:
                         line_no = sig_start_line + i + 1
                         warnings.append(
                             f"{rel}:{line_no}: parameter '{param_name}' in module '{module_name}' "
-                            f"has no unit comment — add // mm, // degrees, etc."
+                            f"has no unit comment - add // mm, // degrees, etc."
                         )
                     break
     return warnings
@@ -330,7 +330,7 @@ def _bosl2_installed() -> bool:
             os.path.join(home, "Documents", "OpenSCAD", "libraries", "BOSL2"),
             os.path.join(os.environ.get("APPDATA", ""), "OpenSCAD", "libraries", "BOSL2"),
         ]
-    # Also check OPENSCADPATH — users with non-standard installs set this
+    # Also check OPENSCADPATH - users with non-standard installs set this
     for entry in os.environ.get("OPENSCADPATH", "").split(os.pathsep):
         if entry:
             candidates.append(os.path.join(entry, "BOSL2"))
@@ -349,7 +349,7 @@ def _bosl2_detail() -> str:
         path = os.path.join(home, "Documents", "OpenSCAD", "libraries", "BOSL2")
     if _bosl2_installed():
         return "found"
-    return f"not found — clone github.com/revarbat/BOSL2 into {path}"
+    return f"not found - clone github.com/revarbat/BOSL2 into {path}"
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ def _bosl2_detail() -> str:
 
 _SCAD_SRC = """\
 // {name}
-// Parametric module — all dimensions in millimeters.
+// Parametric module - all dimensions in millimeters.
 //
 // Parameters:
 //   width  (mm) : overall width, default 20
@@ -389,9 +389,9 @@ _SCAD_SRC = """\
 // filled in. Multiple systems are allowed when the part is genuinely dual.
 
 module {module}(
-    width  = 20,   // mm — overall width
-    height = 10,   // mm — overall height
-    depth  = 5     // mm — overall depth
+    width  = 20,   // mm - overall width
+    height = 10,   // mm - overall height
+    depth  = 5     // mm - overall depth
 ) {{
     // [TODO] Replace with your geometry
     cube([width, height, depth], center = true);
@@ -401,7 +401,7 @@ module {module}(
 _SCAD_TEST = """\
 // Tests for {module}
 // Cartograph validates by rendering this file to a non-empty STL.
-// Use assert() to enforce geometry contracts — a failing assert causes a
+// Use assert() to enforce geometry contracts - a failing assert causes a
 // non-zero exit and fails validation with a descriptive message.
 //
 // NOTE: if your src module uses include<> for a library (e.g. BOSL2), change
@@ -435,7 +435,7 @@ _PY_SIDECAR_SRC = '''\
 """Calc helpers for {name}.
 
 Optional Python sidecar for parameter math (printability, gear ratios,
-threading, etc.). Stdlib only — sidecars cannot declare their own dependencies.
+threading, etc.). Stdlib only - sidecars cannot declare their own dependencies.
 Delete this directory if you do not need it. Validated at 60% coverage.
 """
 
@@ -443,7 +443,7 @@ Delete this directory if you do not need it. Validated at 60% coverage.
 def {module}_defaults():
     """Return suggested default parameters for {module}.
 
-    Replace this with real calc logic — printability checks, ratio derivations,
+    Replace this with real calc logic - printability checks, ratio derivations,
     whatever the .scad source can't compute on its own.
     """
     return {{"width": 20.0, "height": 10.0, "depth": 5.0}}
@@ -480,7 +480,7 @@ height = 10;  // [1:1:100]
 depth  = 5;   // [1:1:50]
 
 /* [Hidden] */
-$fn = 32;  // preview resolution — increase for final render
+$fn = 32;  // preview resolution - increase for final render
 
 {module}(width = width, height = height, depth = depth);
 """
@@ -492,11 +492,11 @@ class OpenSCADEngine(LanguageEngine):
     file_ext = "scad"
     aliases = ["scad"]
 
-    # No native scanner — contamination is simple enough for pure Python
+    # No native scanner - contamination is simple enough for pure Python
     scanner_runner = None
 
     # OpenSCAD: no package manager. Dependencies declared in widget.json
-    # are treated like heavy ML deps — must be pre-installed by the user.
+    # are treated like heavy ML deps - must be pre-installed by the user.
 
     def _binary(self) -> str | None:
         """Cached resolver for the openscad executable path."""
@@ -522,7 +522,7 @@ class OpenSCADEngine(LanguageEngine):
 
     def check_optional(self) -> list[tuple[str, bool, str]]:
         """Verify BOSL2 is installed AND that OpenSCAD can actually resolve it.
-        Directory existence is necessary but not sufficient — the library path
+        Directory existence is necessary but not sufficient - the library path
         must be in OpenSCAD's search path for use<BOSL2/...> to resolve."""
         if not _bosl2_installed():
             return [("BOSL2", False, _bosl2_detail())]
@@ -545,8 +545,8 @@ class OpenSCADEngine(LanguageEngine):
                 return [("BOSL2", True, "found and usable")]
             return [(
                 "BOSL2", False,
-                f"directory found but OpenSCAD cannot resolve BOSL2/std.scad — "
-                f"check your library path. To install: {_bosl2_detail().replace('not found — ', '')}",
+                f"directory found but OpenSCAD cannot resolve BOSL2/std.scad - "
+                f"check your library path. To install: {_bosl2_detail().replace('not found - ', '')}",
             )]
         except Exception:
             return [("BOSL2", False, "directory found but render test failed")]
@@ -562,7 +562,7 @@ class OpenSCADEngine(LanguageEngine):
             f.write(_SCAD_TEST.format(module=module_name, name=display_name))
         with open(os.path.join(target_dir, "examples", "example_usage.scad"), "w") as f:
             f.write(_SCAD_EXAMPLE.format(module=module_name, name=display_name))
-        # Optional Python sidecar — calc helpers that mirror the .scad module.
+        # Optional Python sidecar - calc helpers that mirror the .scad module.
         # Always scaffolded so users can opt in by editing; delete the dir to opt out.
         py_dir = os.path.join(target_dir, "python")
         os.makedirs(py_dir, exist_ok=True)
@@ -577,7 +577,7 @@ class OpenSCADEngine(LanguageEngine):
     def sidecar(self) -> tuple[str, str, int]:
         """OpenSCAD widgets may carry a stdlib-Python sidecar at python/.
 
-        Useful for printability calcs, threading math, gear ratios — anything
+        Useful for printability calcs, threading math, gear ratios - anything
         the OpenSCAD source can't compute on its own. Validated at a relaxed
         60% coverage; the goal is verified math, not exhaustive testing.
         """
@@ -600,7 +600,7 @@ class OpenSCADEngine(LanguageEngine):
         """OpenSCAD has no package manager. Warn if deps declared."""
         if dependencies:
             log.warning(
-                "OpenSCAD widget declares dependencies %s — these must be manually "
+                "OpenSCAD widget declares dependencies %s - these must be manually "
                 "installed into your OpenSCAD library path (openscad.org/libraries). "
                 "Cartograph cannot install them automatically.",
                 dependencies,
@@ -610,7 +610,7 @@ class OpenSCADEngine(LanguageEngine):
         """Render each test_*.scad to a temp STL. Passes if exit 0 and mesh is non-empty."""
         test_files = _glob.glob(os.path.join(path, "tests", "test_*.scad"))
         if not test_files:
-            return self._fail("No test files found in tests/ — add at least one test_*.scad")
+            return self._fail("No test files found in tests/ - add at least one test_*.scad")
 
         binary = self._binary()
         if not binary:
@@ -635,7 +635,7 @@ class OpenSCADEngine(LanguageEngine):
                         f"{os.path.basename(test_file)}: rendered successfully but produced an empty mesh"
                     )
             except FileNotFoundError:
-                return self._fail("openscad not found — install OpenSCAD (openscad.org)")
+                return self._fail("openscad not found - install OpenSCAD (openscad.org)")
             finally:
                 if os.path.exists(tmp.name):
                     os.unlink(tmp.name)
@@ -718,7 +718,7 @@ class OpenSCADEngine(LanguageEngine):
                 blocks.extend(_check_params_have_defaults(content, rel))
                 blocks.extend(_check_coordinate_frame(content, rel))
                 warnings.extend(_check_param_unit_comments(content, rel))
-                # include <> of LOCAL files executes the whole file — use <> only.
+                # include <> of LOCAL files executes the whole file - use <> only.
                 # External library includes (e.g. BOSL2/std.scad) are allowed when
                 # the library is declared in dependencies; their constants are
                 # intentionally global and consumers of BOSL2 widgets expect them.
@@ -735,7 +735,7 @@ class OpenSCADEngine(LanguageEngine):
                     is_declared_dep = lib_name in declared_deps
                     if is_local or not is_declared_dep:
                         blocks.append(
-                            f"{rel}:{line_no}: found include<{inc_path}> in src/ — "
+                            f"{rel}:{line_no}: found include<{inc_path}> in src/ - "
                             + (
                                 "use use<> instead (include executes the full file on import)"
                                 if is_local or not inc_path
@@ -751,12 +751,12 @@ class OpenSCADEngine(LanguageEngine):
                     code_part = line.split("//")[0]
                     if _RESOLUTION_RE.search(code_part):
                         blocks.append(
-                            f"{rel}:{line_no}: global resolution variable ($fn/$fa/$fs) in src/ — "
+                            f"{rel}:{line_no}: global resolution variable ($fn/$fa/$fs) in src/ - "
                             f"expose as a module parameter instead"
                         )
                     if _ECHO_RE.search(code_part):
                         blocks.append(
-                            f"{rel}:{line_no}: echo() in src/ — remove debug output before checkin"
+                            f"{rel}:{line_no}: echo() in src/ - remove debug output before checkin"
                         )
 
             for m in _ABS_INCLUDE_RE.finditer(content):
@@ -789,7 +789,7 @@ class OpenSCADEngine(LanguageEngine):
             # Customizer annotations make modeling examples interactive in the OpenSCAD GUI
             if is_example and "/* [" not in content:
                 warnings.append(
-                    f"{rel}: no Customizer annotations found — add /* [Section] */ blocks "
+                    f"{rel}: no Customizer annotations found - add /* [Section] */ blocks "
                     f"with parameter ranges so users can tweak values in View > Customizer"
                 )
 
