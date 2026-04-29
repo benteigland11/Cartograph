@@ -61,6 +61,40 @@ def test_validate_invalid_domain(carto, tmp_path):
     assert "domain" in result.get("message", "").lower()
 
 
+def test_validate_hydrates_drifted_library_notes(carto, fixture_library, tmp_path):
+    """library_notes drift is restored at validate time with a warning."""
+    src_widget = os.path.join(fixture_library, "http-client")
+    widget_dir = tmp_path / "http-client-tampered"
+    shutil.copytree(src_widget, widget_dir)
+
+    manifest_path = widget_dir / "widget.json"
+    with open(manifest_path) as f:
+        data = json.load(f)
+    data["meta"]["id"] = "http-client-tampered"
+    data["meta"]["name"] = "Tampered"
+    data["library_notes"] = {"general": "AGENT-EDIT", "domain": "AGENT-EDIT"}
+    with open(manifest_path, "w") as f:
+        json.dump(data, f)
+
+    # Perturb src so the duplicate-implementation check passes
+    for fname in os.listdir(widget_dir / "src"):
+        if fname.endswith(".py"):
+            p = widget_dir / "src" / fname
+            p.write_text(p.read_text() + "\n# perturb\n")
+            break
+
+    result = carto.validate_item(str(widget_dir))
+    assert result.get("status") == "success", result
+    warnings = result.get("warnings", [])
+    assert any("library_notes drifted" in w for w in warnings), warnings
+
+    # Canonical notes restored on disk
+    with open(manifest_path) as f:
+        post = json.load(f)
+    assert post["library_notes"].get("general", "").startswith("Single responsibility")
+    assert post["library_notes"]["domain"] != "AGENT-EDIT"
+
+
 def test_validate_duplicate_implementation_fails(carto, fixture_library, tmp_path):
     """A widget with identical src/ implementation to another widget should fail."""
     src_widget = os.path.join(fixture_library, "http-client")

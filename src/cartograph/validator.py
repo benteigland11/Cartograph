@@ -143,6 +143,27 @@ def validate_item(carto, path):
         return {"status": "error", "message": msg}
 
     contam_warnings = []
+
+    # 6c. Hydrate canonical library_notes (warn on drift, restore in place).
+    # library_notes is managed by Cartograph - agents should not edit it. We
+    # restore here at validate time so drift is surfaced during the dev loop,
+    # not silently fixed at checkin.
+    try:
+        from .scaffolding import _library_notes as _canonical_library_notes
+        canonical_notes = _canonical_library_notes(language, domain)
+        current_notes = data.get("library_notes")
+        if current_notes != canonical_notes:
+            data["library_notes"] = canonical_notes
+            with open(manifest_path, "w") as f:
+                json.dump(data, f, indent=2)
+            contam_warnings.append(
+                "library_notes drifted from canonical and was restored. "
+                "Agents should not edit it."
+            )
+            check("library_notes hydrated from canonical", True)
+    except Exception as e:
+        log.debug("library_notes hydration skipped: %s", e)
+
     try:
         # 7b. src/__init__.py imports cleanly (Python only)
         init_path = os.path.join(path, "src", "__init__.py")
@@ -203,7 +224,7 @@ def validate_item(carto, path):
         # 9. Language checks, install deps, run example, run tests
         from .contamination import scan_contamination
         contam = scan_contamination(path)
-        contam_warnings = contam.get("warnings", [])
+        contam_warnings.extend(contam.get("warnings", []))
         if contam["blocks"]:
             check("Contamination scan clean", False,
                   "Contamination blocked:\n" + "\n".join(contam["blocks"]))
