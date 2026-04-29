@@ -12,8 +12,6 @@ import glob as _glob
 import json
 import os
 import re
-import shutil
-import tempfile
 
 from .base import LanguageEngine, _dep_bare_name, log
 
@@ -216,7 +214,7 @@ def _write(path: str, content: str) -> None:
 class AngularEngine(LanguageEngine):
     name = "angular"
     aliases = ["ang", "ng"]
-    validation_version = 1
+    validation_version = 2
     file_ext = "ts"
     supported = True
     toolchain = {
@@ -494,13 +492,25 @@ class AngularEngine(LanguageEngine):
                     json.dump(pkg, f, indent=2)
                     f.write("\n")
 
-        npm_cache = tempfile.mkdtemp(prefix="cartograph_npm_")
-        self._npm_cache_dir = npm_cache
-        res = self._run(
-            ["npm", "install", "--silent", "--cache", npm_cache],
-            cwd=path,
-            timeout=300,  # Angular install is slow
-        )
+        # Shared npm cache (see javascript.py:_shared_npm_cache for rationale).
+        from .javascript import _shared_npm_cache
+        npm_cache = _shared_npm_cache()
+
+        lockfile = os.path.join(path, "package-lock.json")
+        use_ci = os.path.exists(lockfile)
+
+        if use_ci:
+            res = self._run(
+                ["npm", "ci", "--cache", npm_cache], cwd=path, timeout=600,
+            )
+            if res.returncode != 0:
+                log.debug("npm ci failed, regenerating lockfile via npm install")
+                use_ci = False
+        if not use_ci:
+            res = self._run(
+                ["npm", "install", "--cache", npm_cache], cwd=path, timeout=600,
+            )
+
         if res.returncode != 0:
             output = (res.stderr or res.stdout or "").strip()
             raise RuntimeError(
@@ -588,10 +598,6 @@ class AngularEngine(LanguageEngine):
 
     def cleanup(self, path: str) -> None:
         self._cleanup_artifact_dirs(path)
-        npm_cache = getattr(self, "_npm_cache_dir", None)
-        if npm_cache and os.path.exists(npm_cache):
-            shutil.rmtree(npm_cache, ignore_errors=True)
-        self._npm_cache_dir = None
 
     # -- Helpers -----------------------------------------------------------
 

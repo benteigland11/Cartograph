@@ -11,11 +11,21 @@ string/comment/template-literal-aware detection.
 import glob as _glob
 import json
 import os
-import shutil
-import tempfile
-import uuid
 
 from .base import LanguageEngine, _dep_bare_name, log
+
+
+def _shared_npm_cache() -> str:
+    """Persistent npm cache shared across validate runs.
+
+    Lives under cartograph's data dir so HOME stays untouched (sandbox-safe)
+    and the cache survives between runs. First install populates it, every
+    subsequent install reads from it.
+    """
+    from ..engine import _user_data_dir
+    path = os.path.join(_user_data_dir(), "npm-cache")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 # -- Scaffold templates --------------------------------------------------------
 
@@ -120,7 +130,7 @@ export default {
 class JavaScriptEngine(LanguageEngine):
     name = "javascript"
     aliases = ["js"]
-    validation_version = 1
+    validation_version = 2
     file_ext = "js"
     toolchain = {
         "node": "Install Node.js 18+ - nodejs.org",
@@ -189,10 +199,11 @@ class JavaScriptEngine(LanguageEngine):
         with open(os.path.join(target_dir, "examples", "example_usage.js"), "w") as f:
             f.write(_JS_PLAIN_EXAMPLE.format(name=display_name, module=module_name))
 
-        # Frontend gets a vitest config with happy-dom environment
-        if is_frontend:
-            with open(os.path.join(target_dir, "vitest.config.js"), "w") as f:
-                f.write(_VITEST_FRONTEND)
+        # Always ship a vitest config so the widget runs standalone under
+        # `vitest run` with no Cartograph injection. Frontend gets happy-dom.
+        config = _VITEST_FRONTEND if is_frontend else _VITEST_FALLBACK
+        with open(os.path.join(target_dir, "vitest.config.js"), "w") as f:
+            f.write(config)
 
     # ------------------------------------------------------------------ helpers
 
@@ -316,16 +327,30 @@ class JavaScriptEngine(LanguageEngine):
                 with open(package_json_path, "w") as f:
                     json.dump(pkg, f, indent=2)
 
-        # Per-validation npm cache so install never writes to ~/.npm. Required
-        # for sandboxed environments (Codex, restricted devcontainers) where
-        # $HOME is read-only. Cleaned up in cleanup().
-        npm_cache = tempfile.mkdtemp(prefix="cartograph_npm_")
-        self._npm_cache_dir = npm_cache
-        res = self._run(
-            ["npm", "install", "--silent", "--cache", npm_cache],
-            cwd=path,
-            timeout=120,
-        )
+        # Shared npm cache under cartograph's data dir. Stays warm across
+        # runs (so cold installs only happen once), and never touches HOME
+        # so sandboxed envs (Codex, restricted devcontainers) keep working.
+        npm_cache = _shared_npm_cache()
+
+        # Lockfile-first: `npm ci` reads package-lock.json and installs the
+        # exact pinned tree (fast, deterministic, offline once cached).
+        # Falls back to `npm install` to bootstrap the lockfile on first run
+        # or when package.json drifted past the lockfile.
+        lockfile = os.path.join(path, "package-lock.json")
+        use_ci = os.path.exists(lockfile)
+
+        def _do(cmd: list[str], timeout: int):
+            return self._run(cmd, cwd=path, timeout=timeout)
+
+        if use_ci:
+            res = _do(["npm", "ci", "--cache", npm_cache], 300)
+            if res.returncode != 0:
+                # Lockfile probably out of sync with package.json. Regenerate.
+                log.debug("npm ci failed, regenerating lockfile via npm install")
+                use_ci = False
+        if not use_ci:
+            res = _do(["npm", "install", "--cache", npm_cache], 300)
+
         if res.returncode != 0:
             output = (res.stderr or res.stdout or "").strip()
             raise RuntimeError(
@@ -345,6 +370,15 @@ class JavaScriptEngine(LanguageEngine):
         return False
 
     def run_tests(self, path: str) -> dict:
+        # Widgets must ship their own vitest.config.* so they run identically
+        # under `vitest run` outside Cartograph. No silent injection.
+        if not self._has_vitest_config(path):
+            return self._fail(
+                "Missing vitest.config.js (or .ts/.mjs/.mts). Widgets must ship "
+                "their own vitest config so tests run identically outside "
+                "Cartograph. See scaffold default for a minimal example."
+            )
+
         t = _COVERAGE_THRESHOLD
         cmd = [
             "npx", "vitest", "run", "--coverage",
@@ -353,21 +387,7 @@ class JavaScriptEngine(LanguageEngine):
             f"--coverage.thresholds.functions={t}",
             f"--coverage.thresholds.lines={t}",
         ]
-
-        # If no vitest config exists, provide a minimal fallback
-        fallback_config = None
-        if not self._has_vitest_config(path):
-            fallback_config = os.path.join(path, f"vitest.config.{uuid.uuid4().hex}.js")
-            with open(fallback_config, "w") as f:
-                f.write(_VITEST_FALLBACK)
-            cmd.extend(["--config", os.path.basename(fallback_config)])
-
-        try:
-            res = self._run(cmd, cwd=path, timeout=120)
-        finally:
-            if fallback_config and os.path.exists(fallback_config):
-                os.remove(fallback_config)
-
+        res = self._run(cmd, cwd=path, timeout=300)
         if res.returncode != 0:
             return self._fail(res.stderr or res.stdout)
         return self._ok()
@@ -395,11 +415,6 @@ class JavaScriptEngine(LanguageEngine):
 
     def cleanup(self, path: str) -> None:
         self._cleanup_artifact_dirs(path)
-        npm_cache = getattr(self, "_npm_cache_dir", None)
-        if npm_cache and os.path.exists(npm_cache):
-            shutil.rmtree(npm_cache, ignore_errors=True)
-            log.debug("Removed isolated npm cache: %s", npm_cache)
-        self._npm_cache_dir = None
 
 
 class TypeScriptEngine(JavaScriptEngine):

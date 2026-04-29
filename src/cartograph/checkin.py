@@ -350,12 +350,11 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         os.makedirs(history_path, exist_ok=True)
         artifact_skips = _artifact_skip_set(language)
         ignore = shutil.ignore_patterns(
-            *artifact_skips, "*.pyc", "package-lock.json",
+            *artifact_skips, "*.pyc",
             "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
         )
         per_item_skips = artifact_skips | {
             "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
-            "package-lock.json",
         }
         for item in os.listdir(dest_path):
             if item in per_item_skips:
@@ -376,11 +375,10 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     # --- Copy working copy → library (never move — leave source intact) ---
     artifact_skips = _artifact_skip_set(language)
     ignore = shutil.ignore_patterns(
-        *artifact_skips, "*.pyc", "package-lock.json", ".cartograph_source",
+        *artifact_skips, "*.pyc", ".cartograph_source",
     )
     per_item_skips = artifact_skips | {
         "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
-        "package-lock.json",
     }
     os.makedirs(dest_path, exist_ok=True)
     for item in os.listdir(path):
