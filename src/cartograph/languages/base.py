@@ -347,6 +347,20 @@ class LanguageEngine:
         ext = self.file_ext or "py"
         return f"example_usage.{ext}"
 
+    def sidecar(self) -> tuple[str, str, int] | None:
+        """Optional companion validation tree. Override per engine.
+
+        Returns ``(language, subdir, coverage_threshold)`` if this engine
+        permits a non-primary-language helper tree alongside its own files
+        (e.g. a stdlib-Python calc helper inside an OpenSCAD widget).
+
+        Returning ``None`` (the default) means no sidecar — the validator
+        skips the dispatch entirely. Returning a tuple does NOT require the
+        sidecar dir to exist; the dispatcher is the one that checks for an
+        empty/missing dir and silently skips.
+        """
+        return None
+
     def cleanup(self, path: str) -> None:
         """Remove any temp artifacts created during validation. Best-effort."""
         pass
@@ -414,6 +428,10 @@ class LanguageEngine:
             os.path.join(path, "examples", "**", "*"),
             os.path.join(path, "widget.json"),
         ]
+        sc = self.sidecar()
+        if sc:
+            _, sc_dir, _ = sc
+            patterns.append(os.path.join(path, sc_dir, "**", "*"))
         for pat in self.manifest_patterns:
             patterns.extend(_glob.glob(os.path.join(path, pat)))
         return patterns

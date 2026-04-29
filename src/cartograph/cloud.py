@@ -647,6 +647,17 @@ def _zip_widget(widget_path: str) -> bytes:
 
     language = _read_widget_language(widget_path)
     artifacts = excludes_for(language=language) | {"history"}
+    # If the engine declares an optional sidecar (e.g. openscad's python/
+    # calc helpers), union in that language's artifacts too — pytest leaves
+    # .pytest_cache at widget root, which would otherwise slip through.
+    try:
+        from cartograph.languages import get_engine
+        engine = get_engine(language)
+        sidecar = engine.sidecar() if engine else None
+        if sidecar is not None:
+            artifacts = artifacts | excludes_for(language=sidecar[0])
+    except Exception:
+        pass
     skip_files = {".validation_stamp.json", ".file_stamp.json",
                   "reviews.json", "changelog.json"}
 

@@ -200,3 +200,147 @@ def test_openscad_check_available_windows_hint(monkeypatch):
     ok, msg = engine.check_available()
     assert not ok
     assert "PATH" in msg or "OPENSCAD_BINARY" in msg
+
+
+# ---------------------------------------------------------------------------
+# Python sidecar (e.g. python/ inside an openscad widget)
+# ---------------------------------------------------------------------------
+
+def test_base_engine_sidecar_default_is_none():
+    from cartograph.languages.base import LanguageEngine
+    assert LanguageEngine().sidecar() is None
+
+
+def test_python_engine_has_no_sidecar():
+    assert get_engine("python").sidecar() is None
+
+
+def test_openscad_engine_declares_python_sidecar():
+    sc = get_engine("openscad").sidecar()
+    assert sc == ("python", "python", 60)
+
+
+def test_validate_subtree_passes_with_covered_calc(tmp_path):
+    py_engine = get_engine("python")
+    sub = tmp_path / "python"
+    sub.mkdir()
+    (sub / "threads.py").write_text(
+        "def pitch(d):\n"
+        "    if d <= 0:\n"
+        "        return 0\n"
+        "    return d * 0.1\n"
+    )
+    (sub / "test_threads.py").write_text(
+        "from threads import pitch\n"
+        "def test_positive():\n"
+        "    assert pitch(10) == 1.0\n"
+        "def test_nonpositive():\n"
+        "    assert pitch(0) == 0\n"
+    )
+    result = py_engine.validate_subtree(str(tmp_path), "python", coverage=60)
+    assert result["passed"], result.get("error")
+
+
+def test_validate_subtree_fails_below_coverage(tmp_path):
+    py_engine = get_engine("python")
+    sub = tmp_path / "python"
+    sub.mkdir()
+    # Calc with two branches but tests cover only one — coverage will be low.
+    (sub / "calc.py").write_text(
+        "def half_or_zero(x):\n"
+        "    if x > 100:\n"
+        "        return x // 2\n"
+        "    if x > 50:\n"
+        "        return x // 3\n"
+        "    if x > 25:\n"
+        "        return x // 4\n"
+        "    return 0\n"
+    )
+    (sub / "test_calc.py").write_text(
+        "from calc import half_or_zero\n"
+        "def test_zero():\n"
+        "    assert half_or_zero(1) == 0\n"
+    )
+    result = py_engine.validate_subtree(str(tmp_path), "python", coverage=80)
+    assert not result["passed"]
+    assert "sidecar" in result["error"].lower()
+
+
+def test_validate_subtree_blocks_print(tmp_path):
+    py_engine = get_engine("python")
+    sub = tmp_path / "python"
+    sub.mkdir()
+    (sub / "calc.py").write_text(
+        "def calc(x):\n"
+        "    print('debug')\n"
+        "    return x\n"
+    )
+    (sub / "test_calc.py").write_text(
+        "from calc import calc\n"
+        "def test_calc():\n"
+        "    assert calc(1) == 1\n"
+    )
+    result = py_engine.validate_subtree(str(tmp_path), "python", coverage=60)
+    assert not result["passed"]
+    assert "print()" in result["error"]
+
+
+def test_validate_subtree_blocks_non_stdlib_import(tmp_path):
+    py_engine = get_engine("python")
+    sub = tmp_path / "python"
+    sub.mkdir()
+    (sub / "calc.py").write_text(
+        "import requests\n"
+        "def calc():\n"
+        "    return requests\n"
+    )
+    (sub / "test_calc.py").write_text(
+        "from calc import calc\n"
+        "def test_calc():\n"
+        "    assert calc() is not None\n"
+    )
+    result = py_engine.validate_subtree(str(tmp_path), "python", coverage=60)
+    assert not result["passed"]
+    assert "stdlib" in result["error"].lower()
+
+
+def test_validate_subtree_requires_tests(tmp_path):
+    py_engine = get_engine("python")
+    sub = tmp_path / "python"
+    sub.mkdir()
+    (sub / "calc.py").write_text("def calc(): return 1\n")
+    result = py_engine.validate_subtree(str(tmp_path), "python", coverage=60)
+    assert not result["passed"]
+    assert "test_*.py" in result["error"]
+
+
+def test_validate_subtree_empty_dir_passes(tmp_path):
+    """Empty / missing sidecar is silently OK — dispatcher decides whether to call."""
+    py_engine = get_engine("python")
+    # No python/ at all
+    assert py_engine.validate_subtree(str(tmp_path), "python", coverage=60)["passed"]
+    # Empty python/
+    (tmp_path / "python").mkdir()
+    assert py_engine.validate_subtree(str(tmp_path), "python", coverage=60)["passed"]
+
+
+def test_openscad_scaffold_writes_python_sidecar(tmp_path):
+    """OpenSCAD scaffold always creates python/<module>.py + python/test_<module>.py."""
+    engine = get_engine("openscad")
+    for d in ("src", "tests", "examples"):
+        (tmp_path / d).mkdir()
+    engine.scaffold(str(tmp_path), "threads", "Test Threads")
+    py_dir = tmp_path / "python"
+    assert py_dir.is_dir()
+    assert (py_dir / "threads.py").exists()
+    assert (py_dir / "test_threads.py").exists()
+    # The scaffold stubs should self-validate at 60% coverage
+    py_engine = get_engine("python")
+    result = py_engine.validate_subtree(str(tmp_path), "python", coverage=60)
+    assert result["passed"], result.get("error")
+
+
+def test_openscad_watched_patterns_include_python_dir():
+    engine = get_engine("openscad")
+    patterns = engine.watched_patterns("/some/path")
+    assert any("python" in p and "**" in p for p in patterns)

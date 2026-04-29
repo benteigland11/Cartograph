@@ -1444,7 +1444,22 @@ class TestPythonAbsPathCommentExclusion:
 class TestOpenSCADContamination:
     """OpenSCAD-specific contamination checks."""
 
+    # Valid coordinate frame prepended to test fixtures so the unrelated
+    # COORDINATES check doesn't pollute every other rule's assertions.
+    # Tests targeting the coordinate-frame rule itself use _scan_raw.
+    _COORD_HEADER = (
+        "// COORDINATES (cartesian):\n"
+        "// Origin: center of part\n"
+        "// +X: forward\n"
+        "// +Y: right\n"
+        "// +Z: up\n"
+        "// Right-hand rule.\n"
+    )
+
     def _scan(self, tmp_path, src_content):
+        return self._scan_raw(tmp_path, self._COORD_HEADER + src_content)
+
+    def _scan_raw(self, tmp_path, src_content):
         from cartograph.languages.openscad import OpenSCADEngine
         wdir = tmp_path / "widget"
         (wdir / "src").mkdir(parents=True)
@@ -1458,15 +1473,15 @@ class TestOpenSCADContamination:
 
     def test_top_level_cube_blocks(self, tmp_path):
         result = self._scan(tmp_path, 'module m(w=10) { cube([w,w,w]); }\ncube([5,5,5]);\n')
-        assert any("top-level geometry" in b.lower() for b in result["blocks"])
+        assert any("top-level statement" in b.lower() for b in result["blocks"])
 
     def test_top_level_sphere_blocks(self, tmp_path):
         result = self._scan(tmp_path, 'module m(r=5) { sphere(r); }\nsphere(r=3);\n')
-        assert any("top-level geometry" in b.lower() for b in result["blocks"])
+        assert any("top-level statement" in b.lower() for b in result["blocks"])
 
     def test_geometry_inside_module_is_clean(self, tmp_path):
         result = self._scan(tmp_path, 'module m(w=10) { cube([w,w,w]); }\n')
-        assert not any("top-level geometry" in b.lower() for b in result["blocks"])
+        assert not any("top-level statement" in b.lower() for b in result["blocks"])
 
     # --- parameters without defaults ---
 
@@ -1503,6 +1518,113 @@ class TestOpenSCADContamination:
     def test_credential_blocks(self, tmp_path):
         result = self._scan(tmp_path, 'module m(w=10) { cube([w,w,w]); }\napi_key = "sk-secret123abc";\n')
         assert any("credential" in b.lower() for b in result["blocks"])
+
+    # --- coordinate frame ---
+
+    def test_no_coord_block_blocks(self, tmp_path):
+        result = self._scan_raw(tmp_path, 'module m(w=10) { cube([w,w,w]); }\n')
+        assert any("coordinate frame" in b.lower() for b in result["blocks"])
+
+    def test_coord_block_with_todo_blocks(self, tmp_path):
+        content = (
+            "// COORDINATES (cartesian):\n"
+            "// Origin: [TODO: e.g. center of part]\n"
+            "// +X: [TODO]\n"
+            "// +Y: right\n"
+            "// +Z: up\n"
+            "module m(w=10) { cube([w,w,w]); }\n"
+        )
+        result = self._scan_raw(tmp_path, content)
+        assert any("[TODO]" in b for b in result["blocks"])
+
+    def test_filled_cartesian_passes(self, tmp_path):
+        content = self._COORD_HEADER + "module m(w=10) { cube([w,w,w]); }\n"
+        result = self._scan_raw(tmp_path, content)
+        assert not any("coordinate" in b.lower() for b in result["blocks"])
+
+    def test_filled_cylindrical_passes(self, tmp_path):
+        content = (
+            "// COORDINATES (cylindrical):\n"
+            "// Axis: +Z\n"
+            "// Origin: base on axis\n"
+            "// theta=0: +X\n"
+            "// +theta: counterclockwise looking down +Z\n"
+            "// Right-hand rule.\n"
+            "module gear(teeth=20) { cylinder(h=5, r=teeth); }\n"
+        )
+        result = self._scan_raw(tmp_path, content)
+        assert not any("coordinate" in b.lower() for b in result["blocks"])
+
+    def test_filled_spherical_passes(self, tmp_path):
+        content = (
+            "// COORDINATES (spherical):\n"
+            "// Origin: geometric center\n"
+            "// theta (azimuth) zero: +X\n"
+            "// phi (polar) zero: +Z\n"
+            "// Right-hand rule.\n"
+            "module ball(r=5) { sphere(r); }\n"
+        )
+        result = self._scan_raw(tmp_path, content)
+        assert not any("coordinate" in b.lower() for b in result["blocks"])
+
+    def test_dual_systems_one_filled_passes(self, tmp_path):
+        """A filled cartesian + a [TODO]-laden cylindrical should still pass —
+        author left both blocks but only one is real, that's fine."""
+        content = (
+            self._COORD_HEADER
+            + "// COORDINATES (cylindrical):\n"
+            + "// Axis: [TODO]\n"
+            + "module m(w=10) { cube([w,w,w]); }\n"
+        )
+        result = self._scan_raw(tmp_path, content)
+        # First valid block satisfies the rule
+        assert not any("coordinate" in b.lower() for b in result["blocks"])
+
+    def test_cartesian_missing_z_axis_blocks(self, tmp_path):
+        content = (
+            "// COORDINATES (cartesian):\n"
+            "// Origin: center of part\n"
+            "// +X: forward\n"
+            "// +Y: right\n"
+            "// (no +Z declared)\n"
+            "module m(w=10) { cube([w,w,w]); }\n"
+        )
+        result = self._scan_raw(tmp_path, content)
+        assert any("+z:" in b.lower() and "missing" in b.lower()
+                   for b in result["blocks"])
+
+    def test_cylindrical_missing_axis_blocks(self, tmp_path):
+        content = (
+            "// COORDINATES (cylindrical):\n"
+            "// Origin: base of part\n"
+            "// theta=0: +X\n"
+            "module m(w=10) { cube([w,w,w]); }\n"
+        )
+        result = self._scan_raw(tmp_path, content)
+        assert any("axis:" in b.lower() and "missing" in b.lower()
+                   for b in result["blocks"])
+
+    def test_spherical_missing_phi_blocks(self, tmp_path):
+        content = (
+            "// COORDINATES (spherical):\n"
+            "// Origin: center\n"
+            "// theta (azimuth) zero: +X\n"
+            "module m(w=10) { cube([w,w,w]); }\n"
+        )
+        result = self._scan_raw(tmp_path, content)
+        assert any("phi" in b.lower() and "missing" in b.lower()
+                   for b in result["blocks"])
+
+    def test_unknown_system_label_does_not_count(self, tmp_path):
+        content = (
+            "// COORDINATES (toroidal):\n"
+            "// Axis: whatever\n"
+            "module m(w=10) { cube([w,w,w]); }\n"
+        )
+        result = self._scan_raw(tmp_path, content)
+        # Only cartesian/cylindrical/spherical are recognized, so this file
+        # has no valid block and should be flagged as missing.
+        assert any("coordinate frame" in b.lower() for b in result["blocks"])
 
 
 @pytest.mark.systemverilog

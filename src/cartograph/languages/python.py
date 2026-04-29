@@ -449,6 +449,140 @@ class PythonEngine(LanguageEngine):
             return self._fail(res.stderr or res.stdout)
         return self._ok()
 
+    def validate_subtree(self, widget_path: str, subdir: str,
+                          coverage: int = 60) -> dict:
+        """Validate a flat Python sidecar dir at <widget_path>/<subdir>/.
+
+        Sidecars are stdlib-only calc helpers attached to non-Python widgets
+        (e.g. ``python/`` inside an openscad widget). They have no
+        ``__init__.py``, no examples, and no per-sidecar dependencies — every
+        non-test file is a calc module, every ``test_*.py`` is a pytest test.
+
+        Runs:
+          1. print() AST check on calc files
+          2. Contamination subset (abs paths, credentials, sleep, non-stdlib imports)
+          3. pytest with coverage gated at ``coverage`` percent
+
+        Empty / missing sidecar returns success silently — the dispatcher in
+        validator.py decides whether to call this at all.
+        """
+        sub = os.path.join(widget_path, subdir)
+        if not os.path.isdir(sub):
+            return self._ok()
+        py_files = sorted(glob.glob(os.path.join(sub, "*.py")))
+        if not py_files:
+            return self._ok()
+
+        src_files = [f for f in py_files if not os.path.basename(f).startswith("test_")]
+        test_files = [f for f in py_files if os.path.basename(f).startswith("test_")]
+
+        if not src_files:
+            return self._fail(
+                f"{subdir}/ contains only test files — add the calc module being tested"
+            )
+        if not test_files:
+            return self._fail(
+                f"{subdir}/ has calc modules but no test_*.py — sidecar requires tests"
+            )
+
+        errors = []
+        for fpath in src_files:
+            rel = os.path.relpath(fpath, widget_path)
+            for lineno in self._find_print_calls(fpath):
+                errors.append(f"print() in {rel}:{lineno} — remove debug output from {subdir}/")
+
+        own_modules = {os.path.basename(f)[:-3] for f in py_files}
+        contam = self._scan_subtree_contamination(
+            widget_path, src_files, test_files, own_modules
+        )
+        errors.extend(contam["blocks"])
+        if errors:
+            return self._fail("\n".join(errors))
+
+        import subprocess
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        res = subprocess.run(
+            [
+                sys.executable, "-m", "pytest", f"{subdir}/",
+                f"--cov={subdir}",
+                f"--cov-fail-under={coverage}",
+                "--cov-report=term-missing",
+                "--tb=short",
+            ],
+            cwd=widget_path,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+        if res.returncode != 0:
+            return self._fail(
+                f"{subdir}/ sidecar failed:\n" + (res.stdout + res.stderr)[:2000]
+            )
+        return self._ok()
+
+    def _scan_subtree_contamination(self, widget_path: str, src_files: list,
+                                     test_files: list, own_modules: set) -> dict:
+        """Contamination subset for a flat sidecar tree.
+
+        Stricter than widget-level scan in one way: imports must be stdlib,
+        test framework, or sidecar-local. No declared-deps escape hatch.
+        """
+        blocks = []
+        for fpath in src_files + test_files:
+            rel = os.path.relpath(fpath, widget_path)
+            is_src = fpath in src_files
+            try:
+                code = open(fpath).read()
+            except Exception as e:
+                blocks.append(f"Could not read {rel}: {e}")
+                continue
+
+            for line_no, line in enumerate(code.splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                loc = f"{rel}:{line_no}"
+                if self._ABS_PATH_RE.search(line):
+                    blocks.append(f"Absolute path in {loc}: {stripped}")
+                if is_src and self._CREDENTIAL_RE.search(line):
+                    blocks.append(f"Possible credential in {loc}: {stripped}")
+
+            try:
+                tree = ast.parse(code)
+            except Exception:
+                continue
+
+            if is_src:
+                for node in ast.walk(tree):
+                    if (isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute)
+                            and node.func.attr == "sleep"
+                            and isinstance(node.func.value, ast.Name)
+                            and node.func.value.id in self._SLEEP_MODULES):
+                        blocks.append(
+                            f"sleep() in {rel}:{node.lineno} — sidecar must not block"
+                        )
+
+            for node in ast.walk(tree):
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [(a.name.split(".")[0].lower(), node.lineno)
+                              for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    names = [(node.module.split(".")[0].lower(), node.lineno)]
+                for top, lineno in names:
+                    if not top:
+                        continue
+                    if (top in self._STDLIB or top in self._TEST_FRAMEWORKS
+                            or top in own_modules):
+                        continue
+                    blocks.append(
+                        f"Non-stdlib import '{top}' in {rel}:{lineno} — "
+                        f"sidecars must use stdlib only"
+                    )
+        return {"blocks": blocks}
+
     def cleanup(self, path: str) -> None:
         import shutil
         try:

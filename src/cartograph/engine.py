@@ -11,12 +11,16 @@ log = logging.getLogger("cartograph")
 
 
 def calculate_implementation_hash(path: str) -> str | None:
-    """Stable MD5 over src/, tests/, and examples/ bytes.
+    """Stable MD5 over src/, tests/, examples/, and python/ bytes.
 
     Walked deterministically (sorted filenames per directory, __pycache__ and
     .pyc skipped) so the same widget contents always produce the same digest
     regardless of filesystem enumeration order. Returns None if none of the
-    three directories exist.
+    content directories exist.
+
+    `python/` covers the optional openscad sidecar — without it, a
+    sidecar-only edit would hash identically to the previous version and
+    checkin's no-op guard would reject it.
 
     This is the wire-format hash — callers that want to include an
     `implementation_hash` alongside a widget payload (publish, proposals,
@@ -25,7 +29,7 @@ def calculate_implementation_hash(path: str) -> str | None:
     """
     hasher = hashlib.md5()
     found_any = False
-    for subdir in ("src", "tests", "examples"):
+    for subdir in ("src", "tests", "examples", "python"):
         sub_path = os.path.join(path, subdir)
         if not os.path.exists(sub_path):
             continue
@@ -249,32 +253,33 @@ class Cartograph:
         return calculate_implementation_hash(path)
 
     def _diff_against_library(self, path, item_id):
-        """Generate a unified diff of src/ files between a local widget and its library version."""
+        """Generate a unified diff of src/ and python/ files between a local widget and its library version."""
         existing = next((w for w in self.widgets if w['id'] == item_id), None)
         if not existing:
             return None
 
-        lib_src = os.path.join(existing['path'], "src")
-        local_src = os.path.join(path, "src")
-
-        if not os.path.exists(lib_src) or not os.path.exists(local_src):
-            return None
-
-        # Collect relative file paths from both sides
+        # Collect relative file paths from both sides, prefixed with the
+        # subdir so src/ and python/ entries don't collide on equal basenames.
         def collect_files(base):
             result = {}
-            for root, dirs, files in os.walk(base):
-                dirs[:] = [d for d in dirs if d != '__pycache__']
-                for fname in files:
-                    if fname.endswith('.pyc'):
-                        continue
-                    full = os.path.join(root, fname)
-                    rel = os.path.relpath(full, base)
-                    result[rel] = full
+            for subdir in ("src", "python"):
+                root_path = os.path.join(base, subdir)
+                if not os.path.exists(root_path):
+                    continue
+                for root, dirs, files in os.walk(root_path):
+                    dirs[:] = [d for d in dirs if d != '__pycache__']
+                    for fname in files:
+                        if fname.endswith('.pyc'):
+                            continue
+                        full = os.path.join(root, fname)
+                        rel = os.path.relpath(full, base)
+                        result[rel] = full
             return result
 
-        lib_files = collect_files(lib_src)
-        local_files = collect_files(local_src)
+        lib_files = collect_files(existing['path'])
+        local_files = collect_files(path)
+        if not lib_files and not local_files:
+            return None
         all_keys = sorted(set(lib_files) | set(local_files))
 
         files_changed = []
@@ -289,15 +294,15 @@ class Cartograph:
             if in_lib and not in_local:
                 files_removed.append(rel)
                 lib_lines = open(lib_files[rel]).readlines()
-                diff_parts.extend(difflib.unified_diff(lib_lines, [], fromfile=f"a/src/{rel}", tofile=f"b/src/{rel}"))
+                diff_parts.extend(difflib.unified_diff(lib_lines, [], fromfile=f"a/{rel}", tofile=f"b/{rel}"))
             elif in_local and not in_lib:
                 files_added.append(rel)
                 local_lines = open(local_files[rel]).readlines()
-                diff_parts.extend(difflib.unified_diff([], local_lines, fromfile=f"a/src/{rel}", tofile=f"b/src/{rel}"))
+                diff_parts.extend(difflib.unified_diff([], local_lines, fromfile=f"a/{rel}", tofile=f"b/{rel}"))
             else:
                 lib_lines = open(lib_files[rel]).readlines()
                 local_lines = open(local_files[rel]).readlines()
-                file_diff = list(difflib.unified_diff(lib_lines, local_lines, fromfile=f"a/src/{rel}", tofile=f"b/src/{rel}"))
+                file_diff = list(difflib.unified_diff(lib_lines, local_lines, fromfile=f"a/{rel}", tofile=f"b/{rel}"))
                 if file_diff:
                     files_changed.append(rel)
                     diff_parts.extend(file_diff)

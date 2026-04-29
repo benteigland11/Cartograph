@@ -564,15 +564,16 @@ def add_review(carto, widget_id, target_dir, score, comment=None):
 
 def _modified_files(installed_path: str, library_path: str) -> dict:
     """Return a per-file breakdown of how an installed widget differs from
-    its library version. Hashes each file under src/, tests/, examples/
-    and reports added/removed/changed lists. __pycache__ and .pyc are
-    skipped — same exclusions as the implementation hash, so flags only
-    fire on real content drift."""
+    its library version. Hashes each file under src/, tests/, examples/,
+    and python/ and reports added/removed/changed lists. __pycache__ and
+    .pyc are skipped — same exclusions as the implementation hash, so
+    flags only fire on real content drift. python/ covers openscad's
+    optional sidecar."""
     import hashlib
 
     def collect(base: str) -> dict:
         out = {}
-        for subdir in ("src", "tests", "examples"):
+        for subdir in ("src", "tests", "examples", "python"):
             root_path = os.path.join(base, subdir)
             if not os.path.isdir(root_path):
                 continue

@@ -253,6 +253,31 @@ def validate_item(carto, path):
             return {"status": "error", "message": fail_msg,
                     "test_output": test_error[:3000]}
 
+        # 9b. Sidecar (e.g. python/ inside an openscad widget)
+        sidecar_spec = engine.sidecar()
+        if sidecar_spec is not None:
+            sc_lang, sc_dir, sc_cov = sidecar_spec
+            sc_path = os.path.join(path, sc_dir)
+            if os.path.isdir(sc_path) and any(
+                f.endswith(f".{get_engine(sc_lang).file_ext}")
+                for f in os.listdir(sc_path)
+            ):
+                sc_engine = get_engine(sc_lang)
+                if sc_engine is None:
+                    check(f"{sc_dir}/ sidecar engine available", False,
+                          f"sidecar language '{sc_lang}' is not registered")
+                    _print_checklist(checklist, errors, failed=True)
+                    return {"status": "error",
+                            "message": f"Sidecar engine '{sc_lang}' not available"}
+                sc_result = sc_engine.validate_subtree(path, sc_dir, coverage=sc_cov)
+                sc_err = sc_result.get("error", "")
+                if not check(f"{sc_dir}/ sidecar passes ({sc_cov}% coverage)",
+                             sc_result["passed"], sc_err):
+                    _print_checklist(checklist, errors, failed=True, test_output=sc_err)
+                    return {"status": "error",
+                            "message": f"{sc_dir}/ sidecar failed",
+                            "test_output": sc_err[:3000]}
+
         # 10. Custom validation rules
         from .rules import run_all_rules
         custom = run_all_rules(path, language)

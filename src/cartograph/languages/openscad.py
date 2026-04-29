@@ -101,17 +101,96 @@ def _stl_has_geometry(path: str) -> bool:
         return False
 
 
-# Statements that are invalid at top level in src/ files.
-# Everything here belongs inside a module — not at the file root.
-_GEOMETRY_CALLS_RE = re.compile(
-    r'^(?![ \t]*//)[ \t]*'
-    r'(?:cube|sphere|cylinder|polyhedron|square|circle|polygon|text|'
-    r'linear_extrude|rotate_extrude|import|surface|'
-    r'union|difference|intersection|hull|minkowski|mirror|scale|rotate|translate|color|'
-    r'render|projection|offset|'
-    r'if|for|let)\s*[\(\;]',
+# Top-level statements that aren't allowed in src/ files.
+# Any line at depth 0 that begins with `<identifier>(` is a call or
+# control-flow statement — both belong inside a module, not at file root.
+# The match deliberately catches user-defined modules too (e.g. `stud(...)`),
+# not just OpenSCAD builtins, so a published widget can't ship a "preview"
+# instantiation that auto-renders on every consumer's import.
+_TOP_LEVEL_STATEMENT_RE = re.compile(
+    r'^[ \t]*([A-Za-z_]\w*)\s*\(',
     re.MULTILINE,
 )
+# Identifiers that legitimately start a top-level construct (declarations,
+# imports). Everything else followed by `(` at depth 0 is an instantiation.
+_TOP_LEVEL_DECLARATIONS = frozenset({
+    "module", "function", "include", "use",
+})
+
+# Coordinate frame declaration. Every src/*.scad must declare at least one
+# frame so consumers know how the part is oriented before they instantiate it.
+# Three systems are supported and scaffolded; the author keeps whichever
+# match the part's geometry (a gear may want cylindrical, a sphere spherical,
+# a chassis cartesian — some parts benefit from declaring two).
+_COORD_HEADER_RE = re.compile(
+    r'//\s*COORDINATES\s*\(\s*(cartesian|cylindrical|spherical)\s*\)\s*:',
+    re.IGNORECASE,
+)
+# Per-system required fields. A block passes only when every token below
+# appears (case-insensitive substring) in its body and no [TODO] remains.
+# Tokens match the scaffold labels exactly so authors who follow the
+# template are guided into a complete frame.
+_COORD_REQUIRED = {
+    "cartesian": ("origin:", "+x:", "+y:", "+z:"),
+    "cylindrical": ("axis:", "origin:", "theta"),
+    "spherical": ("origin:", "theta", "phi"),
+}
+
+
+def _check_coordinate_frame(content: str, rel: str) -> list[str]:
+    """Block src/*.scad files that lack a complete coordinate frame block.
+
+    A block passes when: (a) it has a recognized system label, (b) its body
+    has no [TODO] markers, AND (c) every required field for that system is
+    present (cartesian: Origin/+X/+Y/+Z; cylindrical: Axis/Origin/theta;
+    spherical: Origin/theta/phi). At least one such block must exist.
+    Right-hand rule is assumed across all three systems.
+    """
+    lines = content.splitlines()
+    headers = []
+    for i, line in enumerate(lines):
+        m = _COORD_HEADER_RE.search(line)
+        if m:
+            headers.append((i, m.group(1).lower()))
+
+    if not headers:
+        return [
+            f"{rel}: missing coordinate frame — declare at least one of "
+            f"`// COORDINATES (cartesian):`, `// COORDINATES (cylindrical):`, "
+            f"or `// COORDINATES (spherical):` near the top of the file. "
+            f"Right-hand rule assumed."
+        ]
+
+    incomplete_systems = []
+    for start, system in headers:
+        body = []
+        for j in range(start + 1, len(lines)):
+            stripped = lines[j].strip()
+            if not stripped.startswith("//"):
+                break
+            if _COORD_HEADER_RE.search(stripped):
+                break
+            body.append(stripped)
+        if any("[TODO" in line for line in body):
+            incomplete_systems.append((system, "still contains [TODO]"))
+            continue
+        body_lower = "\n".join(body).lower()
+        required = _COORD_REQUIRED[system]
+        missing = [tok for tok in required if tok not in body_lower]
+        if missing:
+            incomplete_systems.append(
+                (system, f"missing fields: {', '.join(missing)}")
+            )
+            continue
+        return []  # complete, filled block found
+
+    detail = "; ".join(f"{s} ({why})" for s, why in incomplete_systems)
+    return [
+        f"{rel}: no complete COORDINATES block — {detail}. "
+        f"Cartesian requires Origin/+X/+Y/+Z; cylindrical requires "
+        f"Axis/Origin/theta; spherical requires Origin/theta/phi. "
+        f"Delete blocks you don't need; at least one must be fully filled in."
+    ]
 
 _ECHO_RE = re.compile(r'\becho\s*\(')
 _RESOLUTION_RE = re.compile(r'(?:^|;)\s*\$f[nas]\s*=')
@@ -119,7 +198,12 @@ _INCLUDE_RE = re.compile(r'^\s*include\s*<', re.MULTILINE)
 
 
 def _check_top_level_geometry(content: str, rel: str) -> list[str]:
-    """Block geometry calls written outside any module in a src/ file."""
+    """Block any non-declaration statement at the top level of a src/ file.
+
+    src/ widgets must define modules and constants only — calling a module
+    (builtin or user-defined) at file root means it auto-renders on import.
+    Catches both ``cube([...])`` (builtin) and ``stud(...)`` (user module).
+    """
     blocks = []
     depth = 0  # brace depth — 0 means top level
     lines = content.splitlines()
@@ -130,11 +214,19 @@ def _check_top_level_geometry(content: str, rel: str) -> list[str]:
         depth_before = depth
         depth += stripped.count("{") - stripped.count("}")
         depth = max(depth, 0)
-        if depth_before == 0 and _GEOMETRY_CALLS_RE.match(line):
-            blocks.append(
-                f"Top-level geometry in src/ at line {line_no}: {stripped!r} — "
-                f"wrap all geometry in a module"
-            )
+        if depth_before != 0:
+            continue
+        m = _TOP_LEVEL_STATEMENT_RE.match(line)
+        if not m:
+            continue
+        ident = m.group(1)
+        if ident in _TOP_LEVEL_DECLARATIONS:
+            continue
+        blocks.append(
+            f"Top-level statement in src/ at line {line_no}: {stripped!r} — "
+            f"src/ must only define modules and constants; "
+            f"move calls/instantiations into a module body"
+        )
     return blocks
 
 
@@ -273,6 +365,29 @@ _SCAD_SRC = """\
 //   height (mm) : overall height, default 10
 //   depth  (mm) : overall depth, default 5
 
+// COORDINATES (cartesian):
+// Origin: [TODO: e.g. center of part]
+// +X: [TODO: e.g. forward]
+// +Y: [TODO: e.g. right]
+// +Z: [TODO: e.g. up]
+// Right-hand rule.
+
+// COORDINATES (cylindrical):
+// Axis: [TODO: e.g. +Z]
+// Origin: [TODO: e.g. base of part on axis]
+// theta=0: [TODO: e.g. +X direction]
+// +theta: [TODO: e.g. counterclockwise looking down the axis]
+// Right-hand rule.
+
+// COORDINATES (spherical):
+// Origin: [TODO: e.g. geometric center]
+// theta (azimuth) zero: [TODO: e.g. +X]
+// phi (polar) zero: [TODO: e.g. +Z]
+// Right-hand rule.
+//
+// Delete the coordinate blocks above that don't apply. Keep at least one
+// filled in. Multiple systems are allowed when the part is genuinely dual.
+
 module {module}(
     width  = 20,   // mm — overall width
     height = 10,   // mm — overall height
@@ -315,6 +430,38 @@ module test_contracts() {{
 }}
 test_contracts();
 """
+
+_PY_SIDECAR_SRC = '''\
+"""Calc helpers for {name}.
+
+Optional Python sidecar for parameter math (printability, gear ratios,
+threading, etc.). Stdlib only — sidecars cannot declare their own dependencies.
+Delete this directory if you do not need it. Validated at 60% coverage.
+"""
+
+
+def {module}_defaults():
+    """Return suggested default parameters for {module}.
+
+    Replace this with real calc logic — printability checks, ratio derivations,
+    whatever the .scad source can't compute on its own.
+    """
+    return {{"width": 20.0, "height": 10.0, "depth": 5.0}}
+'''
+
+_PY_SIDECAR_TEST = '''\
+from {module} import {module}_defaults
+
+
+def test_defaults_have_positive_dimensions():
+    params = {module}_defaults()
+    for key in ("width", "height", "depth"):
+        assert params[key] > 0, f"{{key}} must be positive"
+
+
+def test_defaults_returns_dict():
+    assert isinstance({module}_defaults(), dict)
+'''
 
 _SCAD_EXAMPLE = """\
 // Example usage of {name}
@@ -415,9 +562,26 @@ class OpenSCADEngine(LanguageEngine):
             f.write(_SCAD_TEST.format(module=module_name, name=display_name))
         with open(os.path.join(target_dir, "examples", "example_usage.scad"), "w") as f:
             f.write(_SCAD_EXAMPLE.format(module=module_name, name=display_name))
+        # Optional Python sidecar — calc helpers that mirror the .scad module.
+        # Always scaffolded so users can opt in by editing; delete the dir to opt out.
+        py_dir = os.path.join(target_dir, "python")
+        os.makedirs(py_dir, exist_ok=True)
+        with open(os.path.join(py_dir, f"{module_name}.py"), "w") as f:
+            f.write(_PY_SIDECAR_SRC.format(module=module_name, name=display_name))
+        with open(os.path.join(py_dir, f"test_{module_name}.py"), "w") as f:
+            f.write(_PY_SIDECAR_TEST.format(module=module_name, name=display_name))
 
     def example_filename(self, path: str = "") -> str:
         return "example_usage.scad"
+
+    def sidecar(self) -> tuple[str, str, int]:
+        """OpenSCAD widgets may carry a stdlib-Python sidecar at python/.
+
+        Useful for printability calcs, threading math, gear ratios — anything
+        the OpenSCAD source can't compute on its own. Validated at a relaxed
+        60% coverage; the goal is verified math, not exhaustive testing.
+        """
+        return ("python", "python", 60)
 
     def runtime_version(self) -> str | None:
         binary = self._binary()
@@ -552,6 +716,7 @@ class OpenSCADEngine(LanguageEngine):
             if is_src:
                 blocks.extend(_check_top_level_geometry(content, rel))
                 blocks.extend(_check_params_have_defaults(content, rel))
+                blocks.extend(_check_coordinate_frame(content, rel))
                 warnings.extend(_check_param_unit_comments(content, rel))
                 # include <> of LOCAL files executes the whole file — use <> only.
                 # External library includes (e.g. BOSL2/std.scad) are allowed when
