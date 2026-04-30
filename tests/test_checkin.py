@@ -462,6 +462,107 @@ def test_checkin_cloud_no_hash_skips_noop_guard(carto_tmp, installed_widget):
     assert result["status"] == "success", result
 
 
+# ---------------------------------------------------------------------------
+# Fresh-checkin (new widget registration) — top-3 priority gap #3
+# ---------------------------------------------------------------------------
+
+def _retarget_install_as_new_widget(install_path, new_id):
+    """Take an installed (valid) widget dir and rebrand its widget.json with a
+    new, library-unknown id. Adds a comment to src so the implementation hash
+    differs from the source widget (validator blocks duplicate-content adds)."""
+    manifest_path = os.path.join(install_path, "widget.json")
+    with open(manifest_path) as f:
+        data = json.load(f)
+    data["meta"]["id"] = new_id
+    data["meta"]["version"] = "1.0.0"
+    with open(manifest_path, "w") as f:
+        json.dump(data, f, indent=2)
+    # Drop the stamp; id changed, so the prior stamp is no longer valid.
+    stamp = os.path.join(install_path, ".validation_stamp.json")
+    if os.path.isfile(stamp):
+        os.remove(stamp)
+    # Differentiate from the source widget so the duplicate-content guard
+    # in the validator doesn't block this fresh registration.
+    src = os.path.join(install_path, "src")
+    py = [f for f in os.listdir(src) if f.endswith(".py") and not f.startswith("__")][0]
+    with open(os.path.join(src, py), "a") as f:
+        f.write(f"\n# distinct content for {new_id}\n")
+
+
+def test_checkin_registers_new_widget(carto_tmp, installed_widget):
+    """First-time checkin of a widget id that's not in the library must
+    succeed, return action='registered', and create a library entry."""
+    new_id = "backend-brand-new-thing-python"
+    _retarget_install_as_new_widget(installed_widget, new_id)
+
+    result = carto_tmp.checkin(installed_widget, reason="initial")
+    assert result["status"] == "success", result
+    assert result["action"] == "registered"
+    assert result["id"] == new_id
+    # Initial release: no bump from baseline (no baseline).
+    assert result["version"] == "1.0.0"
+    # Library now has the widget.
+    assert os.path.isdir(os.path.join(carto_tmp.library_path, new_id))
+    assert any(w["id"] == new_id for w in carto_tmp.widgets)
+
+
+def test_checkin_new_widget_initial_changelog(carto_tmp, installed_widget):
+    """Fresh checkin without an explicit reason must record 'Initial release'
+    in the changelog (vs 'No reason provided' on updates)."""
+    new_id = "backend-changelog-debut-python"
+    _retarget_install_as_new_widget(installed_widget, new_id)
+
+    result = carto_tmp.checkin(installed_widget, reason="")
+    assert result["status"] == "success", result
+    changelog_path = os.path.join(carto_tmp.library_path, new_id, "changelog.json")
+    with open(changelog_path) as f:
+        log_entries = json.load(f)
+    assert log_entries[0]["reason"] == "Initial release"
+    assert log_entries[0]["version"] == "1.0.0"
+
+
+def test_checkin_new_widget_no_history_archive(carto_tmp, installed_widget):
+    """First-time checkin must NOT create a history/ dir (nothing to archive)."""
+    new_id = "backend-no-history-yet-python"
+    _retarget_install_as_new_widget(installed_widget, new_id)
+
+    result = carto_tmp.checkin(installed_widget, reason="initial")
+    assert result["status"] == "success", result
+    history_dir = os.path.join(carto_tmp.library_path, new_id, "history")
+    assert not os.path.isdir(history_dir), "Fresh checkin should not archive history"
+
+
+def test_checkin_new_widget_directory_collision_errors(carto_tmp, installed_widget, tmp_path):
+    """If a directory with the new widget's id already exists in the library
+    but isn't tracked in the index, checkin must refuse rather than silently
+    overwrite. Guards against a partial-writeback footgun."""
+    new_id = "backend-collision-test-python"
+    # Plant an unrelated dir at the would-be library path.
+    stale_dir = os.path.join(carto_tmp.library_path, new_id)
+    os.makedirs(stale_dir)
+    with open(os.path.join(stale_dir, "stale.txt"), "w") as f:
+        f.write("not a widget")
+
+    _retarget_install_as_new_widget(installed_widget, new_id)
+    result = carto_tmp.checkin(installed_widget, reason="initial")
+    assert result["status"] == "error"
+    assert "directory already exists" in result["message"].lower()
+    # Stale file untouched.
+    assert os.path.isfile(os.path.join(stale_dir, "stale.txt"))
+
+
+def test_checkin_new_widget_writes_stamp(carto_tmp, installed_widget):
+    """Fresh registration must leave a validation stamp at the library copy
+    so subsequent re-validation can short-circuit."""
+    new_id = "backend-stamp-check-python"
+    _retarget_install_as_new_widget(installed_widget, new_id)
+
+    result = carto_tmp.checkin(installed_widget, reason="initial")
+    assert result["status"] == "success", result
+    stamp = os.path.join(carto_tmp.library_path, new_id, ".validation_stamp.json")
+    assert os.path.isfile(stamp), "Library copy missing validation stamp after fresh checkin"
+
+
 def test_checkin_malformed_version_errors(carto_tmp, modified_widget):
     """meta.version that can't be parsed by packaging.Version must error
     clearly rather than crash during bump. Routed via cloud baseline so the
