@@ -1800,6 +1800,9 @@ def cmd_rules(args):
         print()
         print("  Project rules (per-repo, checked in with your project):")
         print("    cartograph rules init --language <lang>")
+        print()
+        print("  Org rules (pushed by your environment via $CARTOGRAPH_ORG_RULES):")
+        print("    export CARTOGRAPH_ORG_RULES=/path/to/team-rules")
     else:
         print("  No custom rules found.")
         print()

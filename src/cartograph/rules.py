@@ -9,9 +9,12 @@ as its first argument and prints JSON to stdout:
 Empty arrays or no output means all checks passed. Non-zero exit or
 invalid JSON is treated as a block with the error details.
 
-File locations (both run if both exist, project first):
+File locations (all run if present, project first):
     .cartograph/rules/rules.py       per-project rules
-    <data_dir>/rules/rules.py        global rules
+    <data_dir>/rules/rules.py        global rules (per-user)
+    $CARTOGRAPH_ORG_RULES            org-pushed rules (colon-separated paths;
+                                     each path may be a single rules file or
+                                     a directory containing rules.<lang>.* files)
 
 Fixed filenames per language:
     python        rules.py
@@ -48,11 +51,39 @@ _LANGUAGE_RULES = {
 }
 
 
+def _org_rules_paths(filename: str) -> list[str]:
+    """Resolve CARTOGRAPH_ORG_RULES into a list of existing rules files.
+
+    The env var holds os.pathsep-separated entries. Each entry may be:
+      - a path to a rules file -> used directly
+      - a path to a directory  -> joined with the language-specific filename
+    Missing entries are silently skipped.
+    """
+    raw = os.environ.get("CARTOGRAPH_ORG_RULES", "").strip()
+    if not raw:
+        return []
+
+    found = []
+    for entry in raw.split(os.pathsep):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if os.path.isdir(entry):
+            candidate = os.path.join(entry, filename)
+            if os.path.isfile(candidate):
+                found.append(candidate)
+        elif os.path.isfile(entry):
+            # Only count file entries that match this language's filename.
+            if os.path.basename(entry) == filename:
+                found.append(entry)
+    return found
+
+
 def _rules_file_paths(language: str) -> list[dict]:
     """Return rules files that exist for this language.
 
-    Returns list of {"path": str, "scope": "project"|"global"}.
-    Project first, then global.
+    Returns list of {"path": str, "scope": "project"|"global"|"org"}.
+    Order: project, global, org (so project rules report first).
     """
     info = _LANGUAGE_RULES.get(language)
     if not info:
@@ -66,11 +97,15 @@ def _rules_file_paths(language: str) -> list[dict]:
     if os.path.isfile(project_path):
         results.append({"path": project_path, "scope": "project"})
 
-    # Global
+    # Global (per-user)
     from .engine import _user_data_dir
     global_path = os.path.join(_user_data_dir(), "rules", filename)
     if os.path.isfile(global_path):
         results.append({"path": global_path, "scope": "global"})
+
+    # Org (pushed by environment)
+    for org_path in _org_rules_paths(filename):
+        results.append({"path": org_path, "scope": "org"})
 
     return results
 
@@ -87,7 +122,7 @@ def find_rules() -> list[dict]:
     return results
 
 
-def _run_rules_file(path: str, widget_path: str, language: str) -> dict:
+def _run_rules_file(path: str, widget_path: str, language: str, scope: str = "global") -> dict:
     """Execute a rules file and return {"blocks": [...], "warnings": [...]}.
 
     On error (bad exit code, invalid JSON, timeout), returns a clear
@@ -99,7 +134,6 @@ def _run_rules_file(path: str, widget_path: str, language: str) -> dict:
 
     _, runner = info
     cmd = runner + [path, os.path.abspath(widget_path)]
-    scope = "project" if ".cartograph" in path else "global"
     label = f"{scope} rules ({os.path.basename(path)})"
 
     try:
@@ -178,7 +212,7 @@ def run_all_rules(widget_path: str, language: str) -> dict:
 
     for entry in files:
         log.debug("Running %s rules: %s", entry["scope"], entry["path"])
-        result = _run_rules_file(entry["path"], widget_path, language)
+        result = _run_rules_file(entry["path"], widget_path, language, entry["scope"])
         all_blocks.extend(result["blocks"])
         all_warnings.extend(result["warnings"])
 

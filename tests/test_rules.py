@@ -70,6 +70,87 @@ def test_no_project_rules(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Org rules (CARTOGRAPH_ORG_RULES env var)
+# ---------------------------------------------------------------------------
+
+def test_org_rules_directory_entry(tmp_path, monkeypatch):
+    """Directory entry in CARTOGRAPH_ORG_RULES should resolve to <dir>/rules.py."""
+    org_dir = tmp_path / "org-rules"
+    org_dir.mkdir()
+    (org_dir / "rules.py").write_text("# org")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CARTOGRAPH_ORG_RULES", str(org_dir))
+    from cartograph.rules import _rules_file_paths
+    files = _rules_file_paths("python")
+    org_files = [f for f in files if f["scope"] == "org"]
+    assert len(org_files) == 1
+    assert org_files[0]["path"] == str(org_dir / "rules.py")
+
+
+def test_org_rules_file_entry(tmp_path, monkeypatch):
+    """File entry in CARTOGRAPH_ORG_RULES should be used directly when filename matches."""
+    org_file = tmp_path / "rules.py"
+    org_file.write_text("# org")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CARTOGRAPH_ORG_RULES", str(org_file))
+    from cartograph.rules import _rules_file_paths
+    files = _rules_file_paths("python")
+    org_files = [f for f in files if f["scope"] == "org"]
+    assert len(org_files) == 1
+
+
+def test_org_rules_file_wrong_language_ignored(tmp_path, monkeypatch):
+    """A file entry whose basename doesn't match the language filename is skipped."""
+    org_file = tmp_path / "rules.js"
+    org_file.write_text("// org")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CARTOGRAPH_ORG_RULES", str(org_file))
+    from cartograph.rules import _rules_file_paths
+    files = _rules_file_paths("python")
+    assert [f for f in files if f["scope"] == "org"] == []
+
+
+def test_org_rules_multiple_paths(tmp_path, monkeypatch):
+    """Colon-separated paths should each contribute org rules."""
+    a = tmp_path / "a"; a.mkdir(); (a / "rules.py").write_text("# a")
+    b = tmp_path / "b"; b.mkdir(); (b / "rules.py").write_text("# b")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CARTOGRAPH_ORG_RULES", f"{a}{os.pathsep}{b}")
+    from cartograph.rules import _rules_file_paths
+    files = _rules_file_paths("python")
+    org_files = [f for f in files if f["scope"] == "org"]
+    assert len(org_files) == 2
+
+
+def test_org_rules_failure_tagged(tmp_path, monkeypatch):
+    """Org-rule blocks should be tagged [org] in their messages."""
+    org_dir = tmp_path / "org-rules"
+    org_dir.mkdir()
+    (org_dir / "rules.py").write_text(
+        'import json\n'
+        'print(json.dumps({"blocks": ["banned thing"], "warnings": []}))\n'
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CARTOGRAPH_ORG_RULES", str(org_dir))
+    from cartograph.rules import run_all_rules
+    result = run_all_rules(str(tmp_path), "python")
+    assert any("[org]" in msg and "banned thing" in msg for msg in result["blocks"])
+
+
+def test_org_rules_empty_env_no_op(tmp_path, monkeypatch):
+    """Empty/unset CARTOGRAPH_ORG_RULES yields no org entries."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CARTOGRAPH_ORG_RULES", raising=False)
+    from cartograph.rules import _rules_file_paths
+    assert [f for f in _rules_file_paths("python") if f["scope"] == "org"] == []
+
+
+# ---------------------------------------------------------------------------
 # _run_rules_file
 # ---------------------------------------------------------------------------
 
@@ -97,7 +178,7 @@ def test_run_rules_with_warnings(tmp_path, monkeypatch):
         'print(json.dumps({"blocks": [], "warnings": ["too many lines"]}))\n'
     )
     from cartograph.rules import _run_rules_file
-    result = _run_rules_file(str(rules_file), str(tmp_path), "python")
+    result = _run_rules_file(str(rules_file), str(tmp_path), "python", "project")
     assert len(result["warnings"]) == 1
     assert "[project]" in result["warnings"][0]
     assert "too many lines" in result["warnings"][0]
