@@ -130,6 +130,168 @@ def test_uninstall_prefixed_id(fresh_carto, fixture_library):
     assert not os.path.isdir(wdir)
 
 
+# ---------------------------------------------------------------------------
+# Multi-registry prefixed install routing (Top-3 priority #1)
+# ---------------------------------------------------------------------------
+
+def _zip_widget_bytes(widget_id: str, version: str = "1.0.0"):
+    """Build an in-memory widget zip the way the cloud download endpoint would."""
+    import io
+    import json as _json
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("widget.json", _json.dumps({
+            "meta": {"id": widget_id, "version": version,
+                     "domain": "backend", "tags": ["a", "b", "c"]},
+            "tech_stack": {"language": "python", "dependencies": []},
+        }))
+        zf.writestr("src/__init__.py", "")
+    return buf.getvalue()
+
+
+def test_install_cg_prefixed_routes_to_cloud(fresh_carto):
+    """`cg-foo` skips local even when an unrelated `foo` widget would match."""
+    from unittest.mock import patch
+    carto, target = fresh_carto
+    with patch("cartograph.config.cloud_enabled", return_value=True), \
+         patch("cartograph.cloud.search", return_value={
+             "widgets": [{"id": "not-in-library", "owner": "alice"}]
+         }), \
+         patch("cartograph.cloud.download_widget") as mock_dl:
+        mock_dl.return_value = {
+            "zip_bytes": _zip_widget_bytes("not-in-library"),
+            "version": "1.0.0",
+            "governance": "open",
+        }
+        result = carto.install("cg-not-in-library", target)
+
+    assert result.get("status") == "success", result
+    assert result["widget_id"] == "cg-not-in-library"
+    assert result["source"] == "cloud"
+    # Sidecar was written with public registry url
+    sidecar = os.path.join(_widget_path(target, "cg-not-in-library"),
+                           ".cartograph_source")
+    assert os.path.isfile(sidecar)
+    import json
+    with open(sidecar) as f:
+        meta = json.load(f)
+    assert meta["registry_url"] == "https://api.cartograph.tools"
+
+
+def test_install_myorg_prefixed_routes_to_configured_registry(fresh_carto):
+    """A user-configured registry prefix routes to that registry's URL."""
+    from unittest.mock import patch
+    carto, target = fresh_carto
+    fake_registries = [{"prefix": "myorg", "url": "https://reg.myorg.test"}]
+    with patch("cartograph.config.cloud_enabled", return_value=True), \
+         patch("cartograph.config.get_registries", return_value=fake_registries), \
+         patch("cartograph.cloud.search", return_value={
+             "widgets": [{"id": "internal-tool", "owner": "alice"}]
+         }), \
+         patch("cartograph.cloud.download_widget") as mock_dl:
+        mock_dl.return_value = {
+            "zip_bytes": _zip_widget_bytes("internal-tool"),
+            "version": "2.1.0",
+        }
+        result = carto.install("myorg-internal-tool", target)
+
+    assert result.get("status") == "success", result
+    # download_widget must be called with the myorg registry url, not public
+    kwargs = mock_dl.call_args.kwargs
+    assert kwargs.get("registry_url") == "https://reg.myorg.test"
+    # And with the BARE id, not the prefixed one
+    args = mock_dl.call_args.args
+    assert "internal-tool" in args or kwargs.get("widget_id") == "internal-tool"
+
+
+def test_install_prefixed_with_cloud_disabled_errors(fresh_carto):
+    """Prefixed install must error clearly when cloud is disabled."""
+    from unittest.mock import patch
+    carto, target = fresh_carto
+    with patch("cartograph.config.cloud_enabled", return_value=False):
+        result = carto.install("cg-anything", target)
+    assert "error" in result
+    assert "cloud is disabled" in result["error"].lower()
+
+
+def test_install_prefixed_uses_local_when_sidecar_matches(fresh_carto):
+    """If local library has the bare widget AND its sidecar registry matches,
+    install copies from local — no cloud call."""
+    import json
+    from unittest.mock import patch
+    carto, target = fresh_carto
+
+    # Plant a sidecar on the existing http-client library entry pointing to public.
+    library_widget = next(w for w in carto.widgets if w["id"] == "http-client")
+    sidecar_path = os.path.join(library_widget["path"], ".cartograph_source")
+    with open(sidecar_path, "w") as f:
+        json.dump({"owner": "alice",
+                   "registry_url": "https://api.cartograph.tools"}, f)
+
+    try:
+        with patch("cartograph.config.cloud_enabled", return_value=True), \
+             patch("cartograph.cloud.download_widget") as mock_dl:
+            result = carto.install("cg-http-client", target)
+        assert result.get("status") == "success", result
+        assert result["source"] == "local"
+        mock_dl.assert_not_called()
+    finally:
+        os.remove(sidecar_path)
+
+
+def test_install_prefixed_falls_through_when_sidecar_mismatches(fresh_carto):
+    """Local widget exists but sidecar points to a different registry — must
+    NOT use the local copy; falls through to cloud."""
+    import json
+    from unittest.mock import patch
+    carto, target = fresh_carto
+
+    library_widget = next(w for w in carto.widgets if w["id"] == "http-client")
+    sidecar_path = os.path.join(library_widget["path"], ".cartograph_source")
+    with open(sidecar_path, "w") as f:
+        # Sidecar says it came from a different registry than the cg- prefix targets.
+        json.dump({"owner": "alice",
+                   "registry_url": "https://reg.other.test"}, f)
+
+    try:
+        with patch("cartograph.config.cloud_enabled", return_value=True), \
+             patch("cartograph.cloud.search", return_value={
+                 "widgets": [{"id": "http-client", "owner": "alice"}]
+             }), \
+             patch("cartograph.cloud.download_widget") as mock_dl:
+            mock_dl.return_value = {
+                "zip_bytes": _zip_widget_bytes("http-client", "1.2.0"),
+                "version": "1.2.0",
+            }
+            result = carto.install("cg-http-client", target)
+        assert result.get("status") == "success", result
+        assert result["source"] == "cloud"
+        mock_dl.assert_called_once()
+    finally:
+        os.remove(sidecar_path)
+
+
+def test_install_owner_prefixed_widget_requires_registry_prefix(fresh_carto):
+    """`@alice/bare-name` is ambiguous (no registry traceability) and errors."""
+    carto, target = fresh_carto
+    result = carto.install("@alice/some-widget", target)
+    assert "error" in result
+    assert "registry prefix required" in result["error"].lower()
+
+
+def test_install_unknown_prefix_falls_through_to_local(fresh_carto):
+    """An id that just happens to start with a hyphenated word but matches no
+    configured prefix is treated as a normal local-first lookup."""
+    from unittest.mock import patch
+    carto, target = fresh_carto
+    # http-client starts with 'http-' but 'http' is not a registered prefix.
+    with patch("cartograph.config.get_registries", return_value=[]):
+        result = carto.install("http-client", target)
+    assert result.get("status") == "success"
+    assert result.get("source") != "cloud"
+
+
 def test_status_prefixed_id(fresh_carto, fixture_library):
     """Status check with a prefixed id resolves the library entry via bare id."""
     import json
