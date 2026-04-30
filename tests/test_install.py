@@ -131,6 +131,84 @@ def test_uninstall_prefixed_id(fresh_carto, fixture_library):
 
 
 # ---------------------------------------------------------------------------
+# Per-language project-file preservation in _copy_widget
+# ---------------------------------------------------------------------------
+# These language project files (manifests, build configs) are required for
+# the runtime/build to find the widget. _copy_widget has an explicit allowlist
+# — a regression dropping any of them silently breaks installs in that
+# language. Tested directly against _copy_widget with a synthetic source so we
+# don't need fixture widgets in every supported language.
+
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("filename", [
+    "Cargo.toml", "Cargo.lock",
+    "go.mod", "go.sum",
+    "package.json", "package-lock.json", "tsconfig.json",
+    "CMakeLists.txt", "Makefile",
+    "pom.xml", "build.gradle",
+])
+def test_copy_widget_preserves_language_project_file(tmp_path, filename):
+    from cartograph.installer import _copy_widget
+    src = tmp_path / "src_widget"
+    dst = tmp_path / "dst_widget"
+    (src / "src").mkdir(parents=True)
+    (src / "src" / "code.txt").write_text("hi")
+    (src / filename).write_text(f"# {filename} content")
+
+    _copy_widget(str(src), str(dst))
+
+    copied = dst / filename
+    assert copied.is_file(), f"{filename} missing from install"
+    assert copied.read_text() == f"# {filename} content"
+
+
+def test_copy_widget_preserves_csproj_glob(tmp_path):
+    """*.csproj is matched by glob, not exact name."""
+    from cartograph.installer import _copy_widget
+    src = tmp_path / "src_widget"
+    dst = tmp_path / "dst_widget"
+    (src / "src").mkdir(parents=True)
+    (src / "MyProject.csproj").write_text("<Project/>")
+    (src / "OtherProject.csproj").write_text("<Project/>")
+
+    _copy_widget(str(src), str(dst))
+
+    assert (dst / "MyProject.csproj").is_file()
+    assert (dst / "OtherProject.csproj").is_file()
+
+
+def test_copy_widget_preserves_nimble_glob(tmp_path):
+    """*.nimble is matched by glob (Nim package name varies per widget)."""
+    from cartograph.installer import _copy_widget
+    src = tmp_path / "src_widget"
+    dst = tmp_path / "dst_widget"
+    (src / "src").mkdir(parents=True)
+    (src / "mywidget.nimble").write_text('version = "0.1.0"')
+
+    _copy_widget(str(src), str(dst))
+
+    assert (dst / "mywidget.nimble").is_file()
+
+
+def test_copy_widget_skips_pycache(tmp_path):
+    """__pycache__ and .pyc must be filtered, otherwise installs ship build
+    artifacts from the library copy."""
+    from cartograph.installer import _copy_widget
+    src = tmp_path / "src_widget"
+    dst = tmp_path / "dst_widget"
+    (src / "src" / "__pycache__").mkdir(parents=True)
+    (src / "src" / "__pycache__" / "stale.pyc").write_text("compiled")
+    (src / "src" / "real.py").write_text("x = 1")
+
+    _copy_widget(str(src), str(dst))
+
+    assert (dst / "src" / "real.py").is_file()
+    assert not (dst / "src" / "__pycache__").exists()
+
+
+# ---------------------------------------------------------------------------
 # Safety guards
 # ---------------------------------------------------------------------------
 
