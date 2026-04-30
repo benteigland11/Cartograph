@@ -136,6 +136,21 @@ def test_upgrade_unknown_version_errors(installed):
 # Backup-restore safety net
 # ---------------------------------------------------------------------------
 
+def test_upgrade_cleans_up_backup_on_success(installed):
+    """A successful upgrade must remove the single-slot backup dir so it
+    doesn't leak disk space across upgrades. Regression here would silently
+    accumulate stale copies under <data_dir>/upgrade-backup/."""
+    from cartograph.installer import _upgrade_backup_path
+    carto, target, _ = installed
+    _bump_library_version(carto, "http-client", "1.3.0")
+
+    backup = _upgrade_backup_path("http-client")
+    result = carto.upgrade("http-client", target_dir=target)
+    assert result.get("status") == "success", result
+    assert not os.path.exists(backup), \
+        f"upgrade-backup dir leaked after success: {backup}"
+
+
 def test_upgrade_restores_on_reinstall_failure(installed):
     """If the new install fails after the old copy is removed, upgrade must restore the backup."""
     carto, target, install_path = installed

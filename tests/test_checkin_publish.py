@@ -162,6 +162,109 @@ def test_force_push_own_widget_with_sidecar_still_pushes(checkin_result, widget_
 
 
 # ---------------------------------------------------------------------------
+# Prefix reconstruction in the install hint
+# ---------------------------------------------------------------------------
+
+def test_force_push_reconstructs_public_prefix(checkin_result, widget_dir, capsys):
+    """A push routed at the public registry must produce `@owner/cg-<bare>`
+    in the printed install hint."""
+    from cartograph import cli
+    with patch("cartograph.auth.is_authenticated", return_value=True), \
+         patch("cartograph.cloud.push") as mock_push, \
+         patch("cartograph.cloud.whoami", return_value={"owner": "alice"}), \
+         patch("cartograph.cli._config_publish_registry_url", return_value=None), \
+         patch("cartograph.config.get_registries", return_value=[]), \
+         patch("cartograph.config.load_config", return_value={
+             "publish": {"visibility": "public", "governance": "open", "auto_publish": True}
+         }):
+        mock_push.return_value = {
+            "status": "success",
+            "namespaced_id": "@alice/http-client",
+            "version": "1.2.1",
+            "governance": "open",
+        }
+        cli._force_push(checkin_result, install_path=widget_dir, reason="")
+
+    err = capsys.readouterr().err
+    assert "cartograph install @alice/cg-http-client" in err
+
+
+def test_force_push_reconstructs_configured_registry_prefix(checkin_result, widget_dir, capsys):
+    """When push routes to a user-configured registry, the printed install
+    hint must use that registry's prefix rather than `cg-`."""
+    # Sidecar pinning to the configured registry
+    with open(os.path.join(widget_dir, ".cartograph_source"), "w") as f:
+        json.dump({"owner": "alice",
+                   "registry_url": "https://reg.myorg.test"}, f)
+    from cartograph import cli
+    fake_registries = [{"prefix": "myorg", "url": "https://reg.myorg.test"}]
+    with patch("cartograph.auth.is_authenticated", return_value=True), \
+         patch("cartograph.cloud.push") as mock_push, \
+         patch("cartograph.cloud.whoami", return_value={"owner": "alice"}), \
+         patch("cartograph.config.get_registries", return_value=fake_registries), \
+         patch("cartograph.config.load_config", return_value={
+             "publish": {"visibility": "public", "governance": "open", "auto_publish": True}
+         }):
+        mock_push.return_value = {
+            "status": "success",
+            "namespaced_id": "@alice/http-client",
+            "version": "1.2.1",
+            "governance": "open",
+        }
+        cli._force_push(checkin_result, install_path=widget_dir, reason="")
+
+    err = capsys.readouterr().err
+    assert "cartograph install @alice/myorg-http-client" in err
+
+
+def test_force_push_bare_namespaced_id_passthrough(checkin_result, widget_dir, capsys):
+    """If push returns a namespaced_id without `/`, it should be printed
+    as-is (no synthetic prefix grafting)."""
+    from cartograph import cli
+    with patch("cartograph.auth.is_authenticated", return_value=True), \
+         patch("cartograph.cloud.push") as mock_push, \
+         patch("cartograph.cloud.whoami", return_value={"owner": "alice"}), \
+         patch("cartograph.cli._config_publish_registry_url", return_value=None), \
+         patch("cartograph.config.load_config", return_value={
+             "publish": {"visibility": "public", "governance": "open", "auto_publish": True}
+         }):
+        mock_push.return_value = {
+            "status": "success",
+            "namespaced_id": "http-client",  # no slash
+            "version": "1.2.1",
+            "governance": "open",
+        }
+        cli._force_push(checkin_result, install_path=widget_dir, reason="")
+
+    err = capsys.readouterr().err
+    assert "cartograph install http-client" in err
+
+
+# ---------------------------------------------------------------------------
+# Proposal failure path
+# ---------------------------------------------------------------------------
+
+def test_force_push_proposal_failure_returns_error(checkin_result, widget_dir):
+    """When cloud.propose returns an error, _force_push must return the
+    structured error result (not silently succeed)."""
+    with open(os.path.join(widget_dir, ".cartograph_source"), "w") as f:
+        json.dump({"owner": "bob", "registry_url": "https://registry.example.com"}, f)
+
+    from cartograph import cli
+    with patch("cartograph.auth.is_authenticated", return_value=True), \
+         patch("cartograph.cloud.push") as mock_push, \
+         patch("cartograph.cloud.propose") as mock_propose, \
+         patch("cartograph.cloud.whoami", return_value={"owner": "alice"}):
+        mock_propose.return_value = {"error": "rejected by governance hook"}
+        result = cli._force_push(checkin_result, install_path=widget_dir,
+                                 reason="improve")
+    mock_push.assert_not_called()
+    assert result["status"] == "error"
+    assert result["kind"] == "proposal"
+    assert "rejected by governance hook" in result["error"]
+
+
+# ---------------------------------------------------------------------------
 # Push failure → no crash, no sidecar write
 # ---------------------------------------------------------------------------
 
