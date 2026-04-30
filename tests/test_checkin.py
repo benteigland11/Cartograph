@@ -362,3 +362,121 @@ def test_rollback_unknown_version_errors(carto_tmp, installed_widget):
     result = restore(carto_tmp, "http-client", "99.99.99", "test")
     assert result["status"] == "error"
     assert "not found" in result["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Cloud baseline (sidecar present) — top-3 priority gap #2
+# ---------------------------------------------------------------------------
+
+def _plant_sidecar(install_path, owner="alice",
+                   registry_url="https://api.cartograph.tools"):
+    with open(os.path.join(install_path, ".cartograph_source"), "w") as f:
+        json.dump({"owner": owner, "registry_url": registry_url}, f)
+
+
+def test_checkin_cloud_version_conflict(carto_tmp, modified_widget):
+    """Sidecar present + cloud says v1.5.0 + local manifest at v1.2.0 must
+    error with 'cloud is v1.5.0' — proves the cloud baseline was consulted."""
+    _plant_sidecar(modified_widget)
+    with patch("cartograph.cloud.is_available", return_value=True), \
+         patch("cartograph.cloud.inspect", return_value={
+             "version": "1.5.0",
+         }):
+        result = carto_tmp.checkin(modified_widget, reason="x")
+    assert result["status"] == "error"
+    assert "version conflict" in result["message"].lower()
+    assert "cloud is v1.5.0" in result["message"]
+
+
+def test_checkin_cloud_baseline_overrides_library(carto_tmp, installed_widget):
+    """Library says v1.2.0, cloud says v2.0.0 — bumping must use the cloud
+    baseline. Without sidecar precedence, this would error with a library
+    version conflict."""
+    # Bump local manifest to match cloud version so version-conflict passes.
+    manifest_path = os.path.join(installed_widget, "widget.json")
+    with open(manifest_path) as f:
+        data = json.load(f)
+    data["meta"]["version"] = "2.0.0"
+    with open(manifest_path, "w") as f:
+        json.dump(data, f, indent=2)
+    # Make a real change so the no-op guard doesn't fire.
+    src = os.path.join(installed_widget, "src")
+    py = [f for f in os.listdir(src) if f.endswith(".py") and not f.startswith("__")][0]
+    with open(os.path.join(src, py), "a") as f:
+        f.write("\n# cloud-baseline test\n")
+
+    _plant_sidecar(installed_widget)
+    with patch("cartograph.cloud.is_available", return_value=True), \
+         patch("cartograph.cloud.inspect", return_value={
+             "version": "2.0.0",
+         }):
+        result = carto_tmp.checkin(installed_widget, reason="x", version_bump="patch")
+    assert result["status"] == "success", result
+    assert result["version"] == "2.0.1"
+
+
+def test_checkin_cloud_noop_guard_via_manifest(carto_tmp, installed_widget):
+    """Cloud returns matching implementation_hash + manifest; checkin must
+    block as a no-op. Proves the cloud-manifest path of the no-op guard works."""
+    impl_hash = carto_tmp._calculate_implementation_hash(installed_widget)
+    with open(os.path.join(installed_widget, "widget.json")) as f:
+        local_manifest = json.load(f)
+
+    _plant_sidecar(installed_widget)
+    with patch("cartograph.cloud.is_available", return_value=True), \
+         patch("cartograph.cloud.inspect", return_value={
+             "version": local_manifest["meta"]["version"],
+             "implementation_hash": impl_hash,
+             "manifest": local_manifest,
+         }):
+        result = carto_tmp.checkin(installed_widget, reason="no changes")
+    assert result["status"] == "error"
+    assert "identical content" in result["message"]
+    assert "cloud" in result["message"]
+
+
+def test_checkin_cloud_unavailable_falls_back_to_library(carto_tmp, modified_widget):
+    """Sidecar exists but cloud is offline — must fall back to library
+    baseline rather than error or skip the check."""
+    _plant_sidecar(modified_widget)
+    with patch("cartograph.cloud.is_available", return_value=False):
+        result = carto_tmp.checkin(modified_widget, reason="real change")
+    # Library v1.2.0 + minor bump → 1.3.0
+    assert result["status"] == "success", result
+    assert result["version"] == "1.3.0"
+
+
+def test_checkin_cloud_no_hash_skips_noop_guard(carto_tmp, installed_widget):
+    """Cloud baseline without implementation_hash must NOT false-positive on
+    no-op (older registry that doesn't echo the hash). Identical content is
+    allowed through and bumps normally."""
+    _plant_sidecar(installed_widget)
+    with open(os.path.join(installed_widget, "widget.json")) as f:
+        local_version = json.load(f)["meta"]["version"]
+    with patch("cartograph.cloud.is_available", return_value=True), \
+         patch("cartograph.cloud.inspect", return_value={
+             "version": local_version,
+             # no implementation_hash, no manifest
+         }):
+        result = carto_tmp.checkin(installed_widget, reason="metadata only")
+    assert result["status"] == "success", result
+
+
+def test_checkin_malformed_version_errors(carto_tmp, modified_widget):
+    """meta.version that can't be parsed by packaging.Version must error
+    clearly rather than crash during bump. Routed via cloud baseline so the
+    version-conflict check passes (matched) and we reach the bump logic."""
+    manifest_path = os.path.join(modified_widget, "widget.json")
+    with open(manifest_path) as f:
+        data = json.load(f)
+    data["meta"]["version"] = "not-a-real-version"
+    with open(manifest_path, "w") as f:
+        json.dump(data, f, indent=2)
+    _plant_sidecar(modified_widget)
+    with patch("cartograph.cloud.is_available", return_value=True), \
+         patch("cartograph.cloud.inspect", return_value={
+             "version": "not-a-real-version",
+         }):
+        result = carto_tmp.checkin(modified_widget, reason="x")
+    assert result["status"] == "error"
+    assert "malformed version" in result["message"].lower()
