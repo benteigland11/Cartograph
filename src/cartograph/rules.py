@@ -48,6 +48,7 @@ _LANGUAGE_RULES = {
     "openscad":      ("rules.openscad.py",   [sys.executable]),
     "systemverilog": ("rules.sv.py",         [sys.executable]),
     "css":           ("rules.css.js",        ["node"]),
+    "terraform":     ("rules.terraform.py",  [sys.executable]),
 }
 
 
@@ -1078,6 +1079,96 @@ function validate(widgetPath) {
 console.log(JSON.stringify(validate(process.argv[2])));
 """
 
+_TEMPLATE_TERRAFORM = """\
+\"\"\"
+Custom validation rules for Terraform widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+              Use for things that must never ship.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+TERRAFORM-SPECIFIC CHECKS TO CONSIDER
+-------------------------------------
+Terraform widgets often need stricter conventions than the engine's defaults:
+
+  - Required tags: enforce a tagging schema (cost_center, owner, environment)
+    on every taggable resource so cost allocation works downstream.
+  - Naming convention: enforce a prefix or pattern on resource names so
+    consumers can spot module-managed resources at a glance.
+  - Forbidden providers: block certain providers (e.g. external data sources
+    that hit shell scripts) for security policy.
+  - Required outputs: ensure modules expose specific outputs (e.g. a `tags`
+    output, a `name` output) so they compose with downstream modules.
+  - Resource address conventions: enforce that resources within a module
+    use a consistent address pattern.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      widget.json       metadata (id, name, domain, version, dependencies)
+      src/              .tf source files (the module)
+      tests/            root configurations that call the module
+      examples/         example_usage.tf
+
+You can read any of these with normal file operations.
+This is a Python script - use any stdlib module you want.
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def validate(widget_path):
+    blocks = []
+    warnings = []
+
+    src_dir = os.path.join(widget_path, "src")
+
+    # --- Your checks go here ---
+    #
+    # Examples (uncomment to use):
+
+    # Warning: every resource block should have a tags argument
+    # if os.path.isdir(src_dir):
+    #     for fname in os.listdir(src_dir):
+    #         if not fname.endswith(".tf"): continue
+    #         content = open(os.path.join(src_dir, fname)).read()
+    #         for m in re.finditer(r'resource\\s+"([^"]+)"\\s+"([^"]+)"\\s*\\{', content):
+    #             # Crude check: is "tags" mentioned anywhere in the file?
+    #             if "tags" not in content:
+    #                 warnings.append(f"{fname}: resource {m.group(1)}.{m.group(2)} may be missing tags")
+
+    # Block: forbid `external` provider in src/ (shell-out attack surface)
+    # if os.path.isdir(src_dir):
+    #     for fname in os.listdir(src_dir):
+    #         if not fname.endswith(".tf"): continue
+    #         content = open(os.path.join(src_dir, fname)).read()
+    #         if re.search(r'data\\s+"external"\\s', content):
+    #             blocks.append(f"{fname}: `data \\"external\\"` blocks shell scripts - forbidden by policy")
+
+    return {"blocks": blocks, "warnings": warnings}
+
+
+if __name__ == "__main__":
+    print(json.dumps(validate(sys.argv[1])))
+"""
+
 _TEMPLATES = {
     "python":        _TEMPLATE_PYTHON,
     "javascript":    _TEMPLATE_JAVASCRIPT,
@@ -1088,6 +1179,7 @@ _TEMPLATES = {
     "openscad":      _TEMPLATE_OPENSCAD,
     "systemverilog": _TEMPLATE_SYSTEMVERILOG,
     "css":           _TEMPLATE_CSS,
+    "terraform":     _TEMPLATE_TERRAFORM,
 }
 
 

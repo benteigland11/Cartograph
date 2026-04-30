@@ -92,5 +92,26 @@ jobs:
           test -d "$WIDGET_DIR/src"
           test -d "$WIDGET_DIR/tests"
 
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.0'
+          terraform_wrapper: false
+
+      - name: cartograph create (terraform)
+        run: cartograph create devops-ci-test-terraform --language terraform --domain devops --name "CI Terraform Test"
+
+      - name: Verify terraform widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "versions.tf" -printf "%h" -quit)
+          # versions.tf lives in src/, so step up to the widget root
+          WIDGET_DIR=$(dirname "$WIDGET_DIR")
+          echo "Terraform widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/src/versions.tf"
+          test -f "$WIDGET_DIR/src/variables.tf"
+          test -f "$WIDGET_DIR/src/outputs.tf"
+          test -d "$WIDGET_DIR/tests"
+          test -d "$WIDGET_DIR/examples"
+
       - name: cartograph stats
         run: cartograph stats

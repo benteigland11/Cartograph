@@ -54,6 +54,8 @@ jobs:
               - 'src/cartograph/languages/angular.py'
             php:
               - 'src/cartograph/languages/php.py'
+            terraform:
+              - 'src/cartograph/languages/terraform.py'
 
       - uses: actions/setup-python@v5
         with:
@@ -82,6 +84,13 @@ jobs:
           php-version: '8.2'
           extensions: pcov
           tools: composer
+
+      - name: Install Terraform
+        if: inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.terraform == 'true'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.0'
+          terraform_wrapper: false
 
       - name: Install dependencies
         run: pip install -e . && pip install pytest pytest-cov

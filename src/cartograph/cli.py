@@ -1905,7 +1905,7 @@ def cmd_doctor(args):
 
     # --- Language engines (auto-discovered) ---
     from .languages.registry import _ENGINES
-    _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3, "openscad": 4, "angular": 5, "php": 6}
+    _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3, "openscad": 4, "angular": 5, "php": 6, "terraform": 7}
     lang_checks = []
     for lang_name, engine in sorted(_ENGINES.items(), key=lambda x: _lang_order.get(x[0], 99)):
         available, message = engine.check_available()

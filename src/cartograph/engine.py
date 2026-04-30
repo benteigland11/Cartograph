@@ -157,6 +157,7 @@ LANGUAGE_ALIASES = {
     "hipc++": "hip", "hip c++": "hip",
     "sv": "systemverilog", "verilog": "systemverilog",
     "ang": "angular", "ng": "angular",
+    "tf": "terraform", "hcl": "terraform",
 }
 
 def normalize_language(lang):
