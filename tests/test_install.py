@@ -131,6 +131,80 @@ def test_uninstall_prefixed_id(fresh_carto, fixture_library):
 
 
 # ---------------------------------------------------------------------------
+# Safety guards
+# ---------------------------------------------------------------------------
+
+def test_install_into_library_path_blocked(fresh_carto, fixture_library):
+    """Installing into the library root would overwrite source widgets."""
+    carto, _ = fresh_carto
+    result = carto.install("http-client", os.path.abspath(fixture_library))
+    assert "error" in result
+    assert "library" in result["error"].lower()
+
+
+def test_install_into_engine_dir_blocked(fresh_carto):
+    """Installing into the engine source dir would clobber the CLI itself."""
+    import os as _os
+    from cartograph.engine import PACKAGE_DIR
+    carto, _ = fresh_carto
+    # PACKAGE_DIR is .../src/cartograph; the parent ('src') is what the guard checks.
+    engine_parent = _os.path.dirname(PACKAGE_DIR)
+    result = carto.install("http-client", engine_parent)
+    assert "error" in result
+    assert "engine" in result["error"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Install count tracking
+# ---------------------------------------------------------------------------
+
+def test_install_increments_install_count(fresh_carto):
+    """Each successful install bumps install_stats[id] by 1."""
+    carto, target = fresh_carto
+    starting = carto._get_install_count("http-client")
+    carto.install("http-client", target)
+    assert carto._get_install_count("http-client") == starting + 1
+
+
+# ---------------------------------------------------------------------------
+# Versioned install from history
+# ---------------------------------------------------------------------------
+
+def test_install_specific_version_from_history(fresh_carto, fixture_library):
+    """`install --version X` resolves against history/<X>/ when present."""
+    import json as _json
+    carto, target = fresh_carto
+
+    # Plant a synthetic history entry under http-client.
+    hist = os.path.join(fixture_library, "http-client", "history", "0.9.0")
+    os.makedirs(os.path.join(hist, "src"), exist_ok=True)
+    with open(os.path.join(hist, "widget.json"), "w") as f:
+        _json.dump({"meta": {"id": "http-client", "version": "0.9.0",
+                             "domain": "backend", "tags": ["a"]},
+                    "tech_stack": {"language": "python", "dependencies": []}}, f)
+    with open(os.path.join(hist, "src", "marker.txt"), "w") as f:
+        f.write("from history")
+
+    try:
+        result = carto.install("http-client", target, version="0.9.0")
+        assert result.get("status") == "success", result
+        assert result["version"] == "0.9.0"
+        assert os.path.isfile(
+            os.path.join(_widget_path(target, "http-client"), "src", "marker.txt"))
+    finally:
+        import shutil as _sh
+        _sh.rmtree(os.path.join(fixture_library, "http-client", "history"),
+                   ignore_errors=True)
+
+
+def test_install_unknown_version_errors(fresh_carto):
+    carto, target = fresh_carto
+    result = carto.install("http-client", target, version="99.99.99")
+    assert "error" in result
+    assert "version" in result["error"].lower() and "99.99.99" in result["error"]
+
+
+# ---------------------------------------------------------------------------
 # Multi-registry prefixed install routing (Top-3 priority #1)
 # ---------------------------------------------------------------------------
 

@@ -463,6 +463,55 @@ def test_checkin_cloud_no_hash_skips_noop_guard(carto_tmp, installed_widget):
 
 
 # ---------------------------------------------------------------------------
+# Per-item skip set: sidecar / history / changelog must not bleed into library
+# ---------------------------------------------------------------------------
+
+def test_checkin_does_not_copy_sidecar_to_library(carto_tmp, modified_widget):
+    """`.cartograph_source` is install-local provenance and must never end up
+    in the library copy — leaking it would attribute the library entry to a
+    cloud owner that doesn't own it."""
+    _plant_sidecar(modified_widget)
+    result = carto_tmp.checkin(modified_widget, reason="x")
+    assert result["status"] == "success", result
+    assert not os.path.isfile(
+        os.path.join(carto_tmp.library_path, "http-client", ".cartograph_source"))
+
+
+def test_checkin_does_not_recursively_archive_history(carto_tmp, modified_widget):
+    """Updating an existing widget archives the previous version under
+    history/<old>. That archive must NOT itself contain a history/ dir
+    (would compound on every checkin) or the changelog/stamp/sidecar files."""
+    # First checkin → creates history/1.2.0/
+    r1 = carto_tmp.checkin(modified_widget, reason="bump 1")
+    assert r1["status"] == "success"
+    # Second real change → creates history/1.3.0/, archiving the now-
+    # current state which includes history/1.2.0/.
+    src = os.path.join(modified_widget, "src")
+    py = [f for f in os.listdir(src) if f.endswith(".py") and not f.startswith("__")][0]
+    with open(os.path.join(src, py), "a") as f:
+        f.write("\n# second pass\n")
+    # Sync local manifest version to the just-bumped library version so the
+    # version-conflict check passes.
+    mp = os.path.join(modified_widget, "widget.json")
+    with open(mp) as f:
+        d = json.load(f)
+    d["meta"]["version"] = r1["version"]
+    with open(mp, "w") as f:
+        json.dump(d, f, indent=2)
+
+    r2 = carto_tmp.checkin(modified_widget, reason="bump 2")
+    assert r2["status"] == "success", r2
+
+    archive = os.path.join(carto_tmp.library_path, "http-client",
+                           "history", r1["version"])
+    assert os.path.isdir(archive)
+    assert not os.path.isdir(os.path.join(archive, "history"))
+    assert not os.path.isfile(os.path.join(archive, "changelog.json"))
+    assert not os.path.isfile(os.path.join(archive, ".cartograph_source"))
+    assert not os.path.isfile(os.path.join(archive, ".validation_stamp.json"))
+
+
+# ---------------------------------------------------------------------------
 # Fresh-checkin (new widget registration) — top-3 priority gap #3
 # ---------------------------------------------------------------------------
 
