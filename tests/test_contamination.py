@@ -28,6 +28,7 @@ from cartograph.languages.nim import NimEngine
 from cartograph.languages.systemverilog import SystemVerilogEngine
 from cartograph.languages.angular import AngularEngine
 from cartograph.languages.php import PhpEngine
+from cartograph.languages.terraform import TerraformEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
 
@@ -82,6 +83,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "systemverilog": SystemVerilogEngine,
         "angular": AngularEngine,
         "php": PhpEngine,
+        "terraform": TerraformEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -111,6 +113,7 @@ CLEAN = {
                       "    end\nendmodule\n", "", None),
     "angular":    ("export class ItemComponent { getValue() { return 'world'; } }\n", "", None),
     "php":        ("<?php\nclass Item { public function getValue(): mixed { return 'world'; } }\n", "", None),
+    "terraform":  ('resource "null_resource" "x" {\n  triggers = { name = var.name }\n}\n', "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -121,6 +124,7 @@ ABS_PATH_SRC = {
     "systemverilog": 'module m; localparam string P = "/home/user/data"; endmodule\n',
     "angular":    "const LOG = '/home/user/logs/app.log'\n",
     "php":        "<?php\n$log = '/home/user/logs/app.log';\n",
+    "terraform":  'locals {\n  log = "/home/user/logs/app.log"\n}\n',
 }
 
 # Check 2: Credentials in src/ -> block
@@ -131,6 +135,7 @@ CREDENTIAL_SRC = {
     "systemverilog": 'module m;\nlocalparam string api_key = "sk-abc123verylongkey";\nendmodule\n',
     "angular":    "const api_key = 'sk-abc123verylongkey'\n",
     "php":        "<?php\n$api_key = 'sk-abc123verylongkey';\n",
+    "terraform":  'locals {\n  api_key = "sk-abc123verylongkey"\n}\n',
 }
 
 # Check 2b: Credentials in tests/ -> warning (not block)
@@ -141,6 +146,7 @@ CREDENTIAL_TEST = {
     "systemverilog": 'module m;\npassword = "fake_test_password_123";\nendmodule\n',
     "angular":    "const password = 'fake_test_password_123'\n",
     "php":        "<?php\n$password = 'fake_test_password_123';\n",
+    "terraform":  'locals {\n  password = "fake_test_password_123"\n}\n',
 }
 
 # Check 3: Hardcoded URLs -> block
@@ -151,6 +157,7 @@ URL_SRC = {
     "systemverilog": 'module m; localparam string U = "https://api.mycompany.com/v1"; endmodule\n',
     "angular":    "const API = 'https://api.mycompany.com/v1'\n",
     "php":        "<?php\n$api = 'https://api.mycompany.com/v1';\n",
+    "terraform":  'locals {\n  api = "https://api.mycompany.com/v1"\n}\n',
 }
 
 # Check 3b: localhost/example.com URLs -> allowed
@@ -161,6 +168,7 @@ URL_ALLOWED = {
     "systemverilog": 'module m; localparam string U = "http://localhost:8080/api"; endmodule\n',
     "angular":    "const API = 'http://localhost:8080/api'\n",
     "php":        "<?php\n$api = 'http://localhost:8080/api';\n",
+    "terraform":  'locals {\n  api = "http://localhost:8080/api"\n}\n',
 }
 
 # Check 4: Hardcoded IPs -> block
@@ -171,6 +179,7 @@ IP_SRC = {
     "systemverilog": 'module m; localparam string H = "192.168.1.100"; endmodule\n',
     "angular":    "const HOST = '192.168.1.100'\n",
     "php":        "<?php\n$host = '192.168.1.100';\n",
+    "terraform":  'locals {\n  host = "192.168.1.100"\n}\n',
 }
 
 # Check 5: Sleep in src/ -> block
@@ -247,7 +256,7 @@ STDLIB_IMPORT = {
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf"}
 
 # Which languages need external tools to run their scanners
 NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node"}
@@ -258,7 +267,7 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
 LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php"]
@@ -1991,3 +2000,87 @@ class TestPhpSpecific:
             f"unknown namespace in test must warn: {result}"
         assert not any("faker" in b.lower() for b in result["blocks"]), \
             f"unknown namespace in test must not block: {result}"
+
+
+@pytest.mark.terraform
+class TestTerraformSpecific:
+    """Terraform-only contamination checks - module/consumer split rules."""
+
+    def _make_tf_widget(self, tmp_path, src_code, test_code="", example_code=""):
+        return _make_widget(tmp_path, "terraform", "module.tf", src_code,
+                            test_code=test_code, example_code=example_code)
+
+    def test_provider_block_in_src_blocks(self, tmp_path):
+        """Modules must not declare providers - that's the consumer's choice."""
+        result = _scan(tmp_path, "terraform", "tf",
+                       'provider "aws" {\n  region = "us-east-1"\n}\n')
+        assert any("provider" in b.lower() and "block" in b.lower()
+                   for b in result["blocks"]), \
+            f"provider block in src/ must block: {result}"
+
+    def test_provider_block_in_tests_allowed(self, tmp_path):
+        """tests/ is a root config - it MUST declare a provider so validate runs."""
+        result = _scan(tmp_path, "terraform", "tf",
+                       'resource "null_resource" "x" {}\n',
+                       test_code='provider "aws" { region = "us-east-1" }\n')
+        assert not any("provider" in b.lower() and "block" in b.lower()
+                       for b in result["blocks"]), \
+            f"provider block in tests/ must not block: {result['blocks']}"
+
+    def test_backend_block_in_src_blocks(self, tmp_path):
+        """Backend choice belongs to the consumer's root config, never the module."""
+        result = _scan(tmp_path, "terraform", "tf",
+                       'terraform {\n  backend "s3" {\n    bucket = "x"\n  }\n}\n')
+        assert any("backend" in b.lower() for b in result["blocks"]), \
+            f"backend block in src/ must block: {result}"
+
+    def test_real_aws_account_id_blocks(self, tmp_path):
+        """Real 12-digit AWS account IDs in ARN strings are blocked."""
+        result = _scan(tmp_path, "terraform", "tf",
+                       'locals {\n  arn = "arn:aws:iam::987654321098:role/admin"\n}\n')
+        assert any("account" in b.lower() and "987654321098" in b
+                   for b in result["blocks"]), \
+            f"real AWS account ID must block: {result}"
+
+    def test_placeholder_aws_account_id_allowed(self, tmp_path):
+        """000000000000 and 123456789012 are documented placeholders."""
+        result = _scan(tmp_path, "terraform", "tf",
+                       'locals {\n  arn = "arn:aws:iam::000000000000:role/x"\n}\n')
+        assert not any("account" in b.lower() for b in result["blocks"]), \
+            f"placeholder account ID must not block: {result['blocks']}"
+
+    def test_credential_in_comment_not_blocked(self, tmp_path):
+        """Comment-stripping pre-pass must keep credential-in-comment off the
+        block list - false positives in docs would make the scanner unusable."""
+        result = _scan(tmp_path, "terraform", "tf",
+                       '# example: password = "hunter2-do-not-use"\n'
+                       'resource "null_resource" "x" {}\n')
+        assert not any("credential" in b.lower() for b in result["blocks"]), \
+            f"credential in comment must not block: {result['blocks']}"
+
+    def test_provider_block_in_comment_not_blocked(self, tmp_path):
+        """Block check must respect comment stripping."""
+        result = _scan(tmp_path, "terraform", "tf",
+                       '# Modules cannot have a provider "aws" {} block.\n'
+                       'resource "null_resource" "x" {}\n')
+        assert not any("provider" in b.lower() and "block" in b.lower()
+                       for b in result["blocks"]), \
+            f"provider block in comment must not block: {result['blocks']}"
+
+    def test_url_in_tests_warns(self, tmp_path):
+        """URL warnings apply everywhere, including tests."""
+        result = _scan(tmp_path, "terraform", "tf",
+                       'resource "null_resource" "x" {}\n',
+                       test_code='locals { api = "https://api.realsite.com/v1" }\n')
+        assert any("url" in w.lower() for w in result["warnings"]), \
+            f"hardcoded URL in tests must warn: {result['warnings']}"
+
+    def test_ip_in_tests_warns_not_blocks(self, tmp_path):
+        """IPs block in src/, warn in tests/examples (matches other languages)."""
+        result = _scan(tmp_path, "terraform", "tf",
+                       'resource "null_resource" "x" {}\n',
+                       test_code='locals { host = "203.0.113.5" }\n')
+        assert not any("ip" in b.lower() for b in result["blocks"]), \
+            f"IP in tests/ must not block: {result['blocks']}"
+        assert any("ip" in w.lower() for w in result["warnings"]), \
+            f"IP in tests/ must warn: {result['warnings']}"

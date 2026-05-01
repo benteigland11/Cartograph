@@ -108,6 +108,27 @@ def test_create_php_widget(carto, tmp_path):
     ])
 
 
+def test_create_terraform_widget(carto, tmp_path):
+    result = carto.create(
+        "my-tf-widget",
+        language="terraform",
+        name="My TF Widget",
+        domain="devops",
+        tags=["aws", "terraform"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "src/my_tf_widget.tf",
+        "src/variables.tf",
+        "src/outputs.tf",
+        "src/versions.tf",
+        "tests/test_my_tf_widget.tf",
+        "examples/example_usage.tf",
+    ])
+
+
 def test_create_duplicate_widget_errors(carto, tmp_path):
     carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=str(tmp_path))
     result = carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=str(tmp_path))

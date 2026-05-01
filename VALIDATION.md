@@ -319,8 +319,38 @@ above applies.
 | Pattern | Notes |
 |---------|-------|
 | Hardcoded URLs in src/ | Excludes localhost, example.com |
-| Hardcoded sized literals | e.g. 32'd115200, 8'hFF — should be parameters. typedef enum bodies excluded. |
-| Hardcoded credentials in tests | "verify it's fake" — same rule as other languages |
+| Hardcoded sized literals | e.g. 32'd115200, 8'hFF - should be parameters. typedef enum bodies excluded. |
+| Hardcoded credentials in tests | "verify it's fake" - same rule as other languages |
+
+### Terraform
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| `terraform validate` passes for src/ | syntax/semantic errors in module | terraform validate (after init) |
+| `terraform validate` passes for tests/ | root config calling the module fails | terraform validate (after init) |
+| `terraform validate` passes for examples/ | example root config fails | terraform validate (after init) |
+| No `provider` block in src/ | a `provider "X" {}` block is declared in src/ | regex (comment-stripped) |
+| No `backend` block in src/ | a `backend "X" {}` block is declared in src/ | regex (comment-stripped) |
+| No real AWS account IDs | `arn:aws:*::123456789012:*` with non-placeholder account | regex |
+| No hardcoded credentials in src/ | `access_key`, `secret_key`, `password`, `api_key`, etc. with non-empty literal | regex |
+| No absolute paths | `/home/...`, `/Users/...`, `/root/...`, `C:\...` in string literals | regex |
+| No hardcoded public IPs in src/ | quoted dotted-quad IP that isn't 0.0.0.0/127.0.0.1/255.255.255.255 | regex |
+
+**Coverage:** None enforced. Terraform is declarative and only `terraform validate` is honest without applying real infrastructure - the tests/ and examples/ root configs prove the module is externally callable, not that any cloud action succeeds.
+
+**Native scanner:** Python regex with HCL comment-stripping pre-pass. HCL is small enough that a comment-aware regex pass catches contamination accurately without a separate scanner binary.
+
+**Contamination scanner scope:** All files (src/, tests/, examples/) checked for credentials, real AWS account IDs, absolute paths, and IP literals. `provider`/`backend` block checks are src/ only - tests and examples must declare a provider so they can run validate.
+
+**Tests directory rule:** Terraform treats every `.tf` file in a directory as one root module. `tests/` is therefore a single root config - not one file per scenario. Multiple test scenarios live in the same file as separate `module` blocks with unique labels (`module "default" {...}`, `module "with_mfa" {...}`).
+
+### Warnings (Terraform)
+
+| Pattern | Notes |
+|---------|-------|
+| Hardcoded URLs anywhere | Excludes localhost, example.com/.org/.net, *.test |
+| Hardcoded credentials in tests/examples | "verify it's fake test data" - same rule as other languages |
+| Hardcoded IPs in tests/examples | "verify it's not project-specific" |
 
 ## Decisions and Known Limitations
 
@@ -378,4 +408,13 @@ Mixing `=` (blocking) inside an `always_ff` (sequential) block introduces simula
 Vendor primitives like Xilinx `LUT6` or Intel `ALTPLL` lock a widget to one FPGA family and require the vendor's simulation library to even compile. If a widget genuinely needs them, declaring `xilinx-unisim` (or similar) in `widget.json` makes the dependency explicit so consumers know what toolchain they're committing to. Generic, portable RTL is the default expectation.
 
 **Why dogfood the `universal-block-walker-python` widget instead of inlining the parser?**
-Both OpenSCAD and SystemVerilog need depth-aware text walking (matching `{`/`}`, `(`/`)`, `begin`/`end`) that respects strings and comments. Maintaining two copies of that logic would drift. The block_walker widget is the shared primitive — it gets exercised by every SV and OpenSCAD validation, which is the strongest possible regression test for it.
+Both OpenSCAD and SystemVerilog need depth-aware text walking (matching `{`/`}`, `(`/`)`, `begin`/`end`) that respects strings and comments. Maintaining two copies of that logic would drift. The block_walker widget is the shared primitive - it gets exercised by every SV and OpenSCAD validation, which is the strongest possible regression test for it.
+
+**Why no test runner or coverage for Terraform?**
+Terraform is declarative infrastructure code. The only honest validation without touching real cloud APIs is `terraform validate` - which checks syntax, references, type compatibility, and module call shape. Anything beyond that requires `terraform plan` or `apply` against real credentials, which a widget library cannot do hermetically. Widgets harden through use across consumer projects, the same way OpenSCAD and SystemVerilog widgets do.
+
+**Why block `provider` and `backend` blocks in src/ but require them in tests/ and examples/?**
+A Terraform module that declares its own provider locks consumers into a specific provider configuration - region, credentials, alias - and breaks composability the moment a consumer wants to call the same module against two regions. Consumers own provider configuration. tests/ and examples/ are root configurations (they pretend to be a consumer), so they MUST declare the provider to make `terraform validate` pass. The split mirrors the production deployment story: src/ is the reusable module; tests/examples/ are calling code.
+
+**Why is tests/ one root config instead of one file per scenario?**
+Terraform treats every `.tf` file in a directory as part of the same root module. Multiple files with their own `terraform { required_providers { ... } }` block produce a "Duplicate required providers configuration" error during init. Each test scenario therefore lives as a separate `module` block (unique label) inside the single tests/ file. This isn't a Cartograph limitation - it's how Terraform itself groups configuration.

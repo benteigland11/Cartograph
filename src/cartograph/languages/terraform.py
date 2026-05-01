@@ -426,8 +426,12 @@ class TerraformEngine(LanguageEngine):
 
             for m in _CREDENTIAL_RE.finditer(content):
                 line_no = content[:m.start()].count("\n") + 1
-                blocks.append(f"Possible credential in {rel}:{line_no}: "
-                              f"{m.group()[:120]}")
+                msg = (f"Possible credential in {rel}:{line_no}: "
+                       f"{m.group()[:120]}")
+                if kind == "src":
+                    blocks.append(msg)
+                else:
+                    warnings.append(msg + " - verify it's fake test data")
 
             for m in _AWS_ACCOUNT_ID_RE.finditer(content):
                 line_no = content[:m.start()].count("\n") + 1
