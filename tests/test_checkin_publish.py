@@ -284,3 +284,87 @@ def test_force_push_handles_push_error_gracefully(checkin_result, widget_dir):
 
     # No sidecar written on failure
     assert not os.path.isfile(os.path.join(widget_dir, ".cartograph_source"))
+
+
+# ---------------------------------------------------------------------------
+# cmd_checkin: tri-state publish decision
+# ---------------------------------------------------------------------------
+
+def _checkin_args(path, **overrides):
+    """Build a SimpleNamespace mimicking argparse output for cmd_checkin."""
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        path=path, reason="r", bump="minor",
+        publish=overrides.get("publish", False),
+        no_publish=overrides.get("no_publish", False),
+        override_warnings=False, override_reason=None,
+    )
+
+
+def test_cmd_checkin_no_publish_overrides_auto_publish_true(checkin_result, widget_dir):
+    """Regression: agent passes publish=False (→ --no-publish), and even with
+    auto_publish=True the CLI must NOT push to cloud."""
+    from cartograph import cli
+    fake_carto = MagicMock()
+    fake_carto.checkin.return_value = checkin_result
+    with patch.object(cli, "_resolve_widget", return_value=widget_dir), \
+         patch.object(cli, "_preflight_from_path"), \
+         patch.object(cli, "_carto", return_value=fake_carto), \
+         patch.object(cli, "_force_push") as mock_push, \
+         patch.object(cli, "out"), \
+         patch("cartograph.config.load_config", return_value={
+             "publish": {"visibility": "public", "governance": "open", "auto_publish": True}
+         }):
+        cli.cmd_checkin(_checkin_args(widget_dir, no_publish=True))
+    mock_push.assert_not_called()
+
+
+def test_cmd_checkin_publish_flag_overrides_auto_publish_false(checkin_result, widget_dir):
+    """Explicit --publish must push even when auto_publish=False."""
+    from cartograph import cli
+    fake_carto = MagicMock()
+    fake_carto.checkin.return_value = checkin_result
+    with patch.object(cli, "_resolve_widget", return_value=widget_dir), \
+         patch.object(cli, "_preflight_from_path"), \
+         patch.object(cli, "_carto", return_value=fake_carto), \
+         patch.object(cli, "_force_push", return_value={"status": "success"}) as mock_push, \
+         patch.object(cli, "out"), \
+         patch("cartograph.config.load_config", return_value={
+             "publish": {"visibility": "public", "governance": "open", "auto_publish": False}
+         }):
+        cli.cmd_checkin(_checkin_args(widget_dir, publish=True))
+    mock_push.assert_called_once()
+
+
+def test_cmd_checkin_unspecified_falls_back_to_auto_publish_true(checkin_result, widget_dir):
+    """Neither flag set → fall back to auto_publish=True → push."""
+    from cartograph import cli
+    fake_carto = MagicMock()
+    fake_carto.checkin.return_value = checkin_result
+    with patch.object(cli, "_resolve_widget", return_value=widget_dir), \
+         patch.object(cli, "_preflight_from_path"), \
+         patch.object(cli, "_carto", return_value=fake_carto), \
+         patch.object(cli, "_force_push", return_value={"status": "success"}) as mock_push, \
+         patch.object(cli, "out"), \
+         patch("cartograph.config.load_config", return_value={
+             "publish": {"visibility": "public", "governance": "open", "auto_publish": True}
+         }):
+        cli.cmd_checkin(_checkin_args(widget_dir))
+    mock_push.assert_called_once()
+
+
+def test_cmd_checkin_unspecified_falls_back_to_auto_publish_false(checkin_result, widget_dir):
+    """Neither flag set → fall back to auto_publish=False → no push."""
+    from cartograph import cli
+    fake_carto = MagicMock()
+    fake_carto.checkin.return_value = checkin_result
+    with patch.object(cli, "_resolve_widget", return_value=widget_dir), \
+         patch.object(cli, "_preflight_from_path"), \
+         patch.object(cli, "_carto", return_value=fake_carto), \
+         patch.object(cli, "_force_push") as mock_push, \
+         patch.object(cli, "out"), \
+         patch("cartograph.config.load_config", return_value={
+             "publish": {"visibility": "public", "governance": "open", "auto_publish": False}
+         }):
+        cli.cmd_checkin(_checkin_args(widget_dir))
+    mock_push.assert_not_called()

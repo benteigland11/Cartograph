@@ -713,14 +713,22 @@ def cmd_checkin(args):
     if result.get("status") == "error" or "error" in result:
         err(result)
 
-    # Push to cloud only when the user opts in: --publish flag or auto_publish=True.
-    # The old "else: auto-push if already published" branch was removed — it
-    # silently pushed on every checkin of a cloud-originated widget regardless
-    # of the user's auto_publish setting, which contradicts auto_publish=False.
+    # Push to cloud when the caller opts in. Tri-state precedence:
+    #   --no-publish wins (explicit opt-out, even if auto_publish=True)
+    #   --publish wins next (explicit opt-in, even if auto_publish=False)
+    #   otherwise fall back to the auto_publish setting.
+    # The old `args.publish or auto_publish` collapsed False and unspecified,
+    # so an agent passing publish=False through MCP would still publish under
+    # auto_publish=True. The CLI now honors explicit opt-out.
     if result.get("action") in ("updated", "registered"):
         from .config import load_config
         cfg = load_config()
-        publish = getattr(args, "publish", False) or cfg["publish"]["auto_publish"]
+        if getattr(args, "no_publish", False):
+            publish = False
+        elif getattr(args, "publish", False):
+            publish = True
+        else:
+            publish = cfg["publish"]["auto_publish"]
         if publish:
             push_summary = _force_push(result, install_path=install_path, reason=args.reason)
             if push_summary:
@@ -2857,6 +2865,9 @@ def _build_cli() -> AgentCLI:
                  "help": "Version bump type (default: minor)"},
                 {"name": "--publish", "action": "store_true", "default": False,
                  "help": "Publish to cloud after checkin"},
+                {"name": "--no-publish", "action": "store_true", "default": False,
+                 "dest": "no_publish",
+                 "help": "Skip cloud publish even if auto-publish is enabled"},
                 {"name": "--override-warnings", "action": "store_true", "default": False, "dest": "override_warnings"},
                 {"name": "--override-reason", "default": None, "dest": "override_reason"},
             ],
