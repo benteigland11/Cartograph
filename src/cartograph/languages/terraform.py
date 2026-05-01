@@ -254,7 +254,7 @@ class TerraformEngine(LanguageEngine):
     aliases = ["tf"]
     toolchain = {"terraform": "Install Terraform - terraform.io/downloads"}
     validation_version = 1
-    supported = False  # flip to True after stress test passes
+    supported = True
 
     # No native scanner - HCL contamination is small enough for Python regex
     # with a comment-stripping pre-pass.
