@@ -127,7 +127,7 @@ _ABS_PATH_RE = re.compile(
 # accept them implicitly or via configuration_aliases. Locking a provider in
 # the module breaks consumer composability.
 _PROVIDER_BLOCK_RE = re.compile(
-    r'^\s*provider\s+"[^"]+"\s*\{',
+    r'^[ \t]*provider\s+"[^"]+"\s*\{',
     re.MULTILINE,
 )
 
