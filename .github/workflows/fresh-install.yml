@@ -103,7 +103,7 @@ jobs:
 
       - name: Verify terraform widget structure
         run: |
-          WIDGET_DIR=$(find cg -maxdepth 2 -name "versions.tf" -printf "%h" -quit)
+          WIDGET_DIR=$(find cg -maxdepth 3 -name "versions.tf" -printf "%h" -quit)
           # versions.tf lives in src/, so step up to the widget root
           WIDGET_DIR=$(dirname "$WIDGET_DIR")
           echo "Terraform widget at: $WIDGET_DIR"
