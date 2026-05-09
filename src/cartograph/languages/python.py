@@ -4,6 +4,7 @@ import ast
 import glob
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -339,6 +340,23 @@ class PythonEngine(LanguageEngine):
 
     def src_import_pattern(self) -> str | None:
         return r'from src\.|import src\.'
+
+    def run_blueprint_example(self, sandbox: str, example_file: str) -> dict:
+        """Run an example from a blueprint validation sandbox using the
+        venv python set up by install_deps. PYTHONPATH points at the
+        sandbox root so `from src.X` and `from cg.X` resolve."""
+        py = self._venv_python()
+        ep = os.path.join(sandbox, "examples", example_file)
+        env = {**os.environ, "PYTHONPATH": sandbox,
+               "PYTHONDONTWRITEBYTECODE": "1"}
+        res = subprocess.run(
+            [py, ep],
+            cwd=sandbox, capture_output=True, text=True, timeout=60, env=env,
+        )
+        if res.returncode != 0:
+            return {"passed": False,
+                    "error": (res.stderr or res.stdout or "").strip()}
+        return {"passed": True}
 
     def _venv_python(self) -> str:
         """Return the venv python path if a venv was created, else sys.executable."""

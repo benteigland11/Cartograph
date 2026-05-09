@@ -285,6 +285,31 @@ class NimEngine(LanguageEngine):
             return self._fail(res.stderr or res.stdout)
         return self._ok()
 
+    def run_blueprint_example(self, sandbox: str, example_file: str) -> dict:
+        """Compile and run a blueprint example with explicit search paths
+        for the blueprint's own src/ and every dep widget's src/ under
+        sandbox/cg/. The base default invokes python on the file, which
+        is wrong for any compiled language."""
+        ep = os.path.join(sandbox, "examples", example_file)
+        env = self._nimble_env()
+        cmd = ["nim", "r", "--hints:off", "--warnings:off"]
+        cmd.append(f"--path:{os.path.join(sandbox, 'src')}")
+        cg_root = os.path.join(sandbox, "cg")
+        if os.path.isdir(cg_root):
+            for entry in os.listdir(cg_root):
+                dep_src = os.path.join(cg_root, entry, "src")
+                if os.path.isdir(dep_src):
+                    cmd.append(f"--path:{dep_src}")
+        cmd.append(ep)
+        try:
+            res = self._run(cmd, cwd=sandbox, timeout=120, env=env)
+        except FileNotFoundError:
+            return {"passed": False, "error": "Nim not found - install Nim toolchain."}
+        if res.returncode != 0:
+            return {"passed": False,
+                    "error": (res.stderr or res.stdout or "").strip()}
+        return {"passed": True}
+
     def cleanup(self, path: str) -> None:
         self._cleanup_nimble_dir()
         self._cleanup_nimcache_dir()

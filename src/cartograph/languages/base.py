@@ -412,6 +412,74 @@ class LanguageEngine:
         """
         return None
 
+    def blueprint_scaffold(self, target_dir: str, module_name: str,
+                           display_name: str, **kwargs) -> None:
+        """Write starter files for a new blueprint of this language.
+
+        A blueprint is a widget that composes other widgets as deps -
+        same on-disk shape, only the manifest differs. By default we
+        reuse the engine's widget scaffold so blueprints inherit the
+        same opinionated starter the language already produces for
+        widgets. Engines without a widget scaffold fall back to minimal
+        placeholders so the structural checks have something to find.
+        """
+        if self.__class__.scaffold is not LanguageEngine.scaffold:
+            return self.scaffold(target_dir, module_name, display_name, **kwargs)
+
+        if not self.file_ext:
+            return None
+        ext = self.file_ext
+        src = os.path.join(target_dir, "src")
+        tests = os.path.join(target_dir, "tests")
+        examples = os.path.join(target_dir, "examples")
+        for d in (src, tests, examples):
+            os.makedirs(d, exist_ok=True)
+
+        marker = (
+            f"# [TODO] Blueprint: {display_name}\n"
+            f"# Compose declared widget deps here. Tests and examples must\n"
+            f"# consume only what src/ exposes - no direct cg/ imports past\n"
+            f"# this sealed surface.\n"
+        )
+        with open(os.path.join(src, f"{module_name}.{ext}"), "w") as f:
+            f.write(marker)
+        with open(os.path.join(tests, f"test_{module_name}.{ext}"), "w") as f:
+            f.write(f"# [TODO] Test the {display_name} blueprint surface.\n")
+        with open(os.path.join(examples, f"example_{module_name}.{ext}"), "w") as f:
+            f.write(f"# [TODO] Exercise the {display_name} blueprint.\n")
+        return None
+
+    def example_extension(self) -> str:
+        """File extension used to glob example files (without the dot)."""
+        return self.file_ext or "py"
+
+    def run_blueprint_example(self, sandbox: str, example_file: str) -> dict:
+        """Run a blueprint example from the validator sandbox.
+
+        If the engine has overridden run_example, delegate to it - the
+        engine already knows how to invoke its language runtime, and a
+        blueprint sandbox is shaped like a widget root. Engines that
+        need blueprint-specific wiring (e.g. Python's PYTHONPATH so
+        `from cg.X` resolves; Nim's --path: per dep dir) override.
+        """
+        if self.__class__.run_example is not LanguageEngine.run_example:
+            result = self.run_example(sandbox)
+            return {"passed": bool(result.get("passed", False)),
+                    "error": result.get("error", "") or ""}
+
+        ep = os.path.join(sandbox, "examples", example_file)
+        if self.example_command:
+            res = self._run(self.example_command + [ep], cwd=sandbox, timeout=60)
+        else:
+            res = subprocess.run(
+                [sys.executable, ep],
+                cwd=sandbox, capture_output=True, text=True, timeout=60,
+            )
+        if res.returncode != 0:
+            return {"passed": False,
+                    "error": (res.stderr or res.stdout or "").strip()}
+        return {"passed": True}
+
     def required_files(self, path: str) -> list[tuple[str, str]]:
         """Return [(relative_path, error_hint)] for files that must exist before tests run."""
         return []

@@ -11,7 +11,16 @@ def apply_filters(widget: dict, domain_filter: str | None,
                   language_filter: str | None) -> bool:
     """Return True if the widget passes all active filters."""
     if domain_filter and domain_filter != "all":
-        if widget["domain"] != domain_filter and widget["domain"] != "universal":
+        # Blueprints carry a multi-valued `domains` list (union of dep
+        # widget domains). Widgets carry single-valued `domain`. Either
+        # form satisfies the filter as long as the requested domain is
+        # listed (or the artifact is universal).
+        domains = widget.get("domains") or []
+        single = widget.get("domain", "")
+        if (domain_filter not in domains
+                and single != domain_filter
+                and single != "universal"
+                and "universal" not in domains):
             return False
 
     if language_filter:
@@ -67,7 +76,12 @@ def format_results(scored_widgets: list[dict], corpus_size: int = 0) -> dict:
             "trend": res.get("trend") or "insufficient data",
             "install_count": res.get("install_count", 0),
             "relevance_score": res["relevance_score"],
+            "kind": res.get("type", "widget"),
         }
+        # Blueprints expose their union-of-dep-domains so an agent can see
+        # cross-domain coverage at a glance.
+        if res.get("type") == "blueprint" and res.get("domains"):
+            entry["domains"] = list(res["domains"])
         results.append(entry)
 
     if corpus_size > 0 and corpus_size < _SMALL_CORPUS_THRESHOLD:

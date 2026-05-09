@@ -398,14 +398,27 @@ def _resolve_installed_widget(widget_dir: str, default_target: str):
                 f"(e.g. cg/<dirname>), its dir basename, or its widget_id. "
                 f"Run 'cartograph status --all' to list installed widgets."
             )})
-    manifest = os.path.join(candidate, "widget.json")
-    try:
-        with open(manifest) as f:
-            canonical_id = json.load(f).get("meta", {}).get("id", "")
-        if not canonical_id:
-            err({"error": f"widget.json at {manifest} is missing meta.id"})
-    except Exception as e:
-        err({"error": f"Could not read widget.json at {manifest}: {e}"})
+    # Kind-aware: a directory is a widget OR a blueprint by manifest filename.
+    bp_manifest = os.path.join(candidate, "blueprint.json")
+    w_manifest = os.path.join(candidate, "widget.json")
+    if os.path.isfile(bp_manifest):
+        manifest = bp_manifest
+        try:
+            with open(manifest) as f:
+                canonical_id = json.load(f).get("id", "")
+            if not canonical_id:
+                err({"error": f"blueprint.json at {manifest} is missing id"})
+        except Exception as e:
+            err({"error": f"Could not read blueprint.json at {manifest}: {e}"})
+    else:
+        manifest = w_manifest
+        try:
+            with open(manifest) as f:
+                canonical_id = json.load(f).get("meta", {}).get("id", "")
+            if not canonical_id:
+                err({"error": f"widget.json at {manifest} is missing meta.id"})
+        except Exception as e:
+            err({"error": f"Could not read widget.json at {manifest}: {e}"})
 
     dir_name = os.path.basename(candidate)
     target_dir = os.path.dirname(os.path.dirname(candidate))
@@ -494,6 +507,271 @@ def cmd_create(args):
     out(result)
 
 
+def cmd_blueprint_create(args):
+    _preflight_language(args.language)
+    target_abs = os.path.abspath(args.target)
+    # Same library-guard as cmd_create: blueprints must be authored in a
+    # project dir and checked in via `cartograph checkin` so they go through
+    # validation.
+    from .engine import LIBRARY_PATH
+    lib_abs = os.path.abspath(LIBRARY_PATH)
+    try:
+        in_library = os.path.commonpath([target_abs, lib_abs]) == lib_abs
+    except ValueError:
+        in_library = False
+    if in_library:
+        err({"error": (
+            f"Refusing to create a blueprint inside the library at {lib_abs}. "
+            f"Run from your project root without --target (defaults to .); "
+            f"then `cartograph checkin` publishes it to the library."
+        )})
+    result = _carto().create_blueprint(
+        name=args.name,
+        language=args.language,
+        target_dir=target_abs,
+    )
+    if result.get("status") == "error" or "error" in result:
+        err(result)
+    out(result)
+
+
+def cmd_blueprint_add_dep(args):
+    bp_path = os.path.abspath(args.path)
+    result = _carto().blueprint_add_dep(
+        blueprint_path=bp_path,
+        widget_id=args.widget_id,
+        validate=not args.no_validate,
+    )
+    if result.get("status") == "error" or "error" in result:
+        err(result)
+    out(result)
+
+
+def cmd_blueprint_remove_dep(args):
+    bp_path = os.path.abspath(args.path)
+    result = _carto().blueprint_remove_dep(
+        blueprint_path=bp_path,
+        widget_id=args.widget_id,
+        validate=not args.no_validate,
+    )
+    if result.get("status") == "error" or "error" in result:
+        err(result)
+    out(result)
+
+
+def cmd_architect_init(args):
+    from . import architect
+    path = architect.resolve_architect_path(args.path)
+    try:
+        architect.write_architect_template(path, overwrite=args.force)
+    except FileExistsError as e:
+        err({"error": str(e)})
+    out({
+        "status": "success",
+        "path": path,
+        "message": (
+            f"Wrote starter architect.py to {path}. Edit it to describe "
+            f"your project, then run `cartograph architect validate`."
+        ),
+    })
+
+
+def cmd_architect_validate(args):
+    from . import architect
+    path = architect.resolve_architect_path(args.path)
+    try:
+        arch = architect.load_architecture(path)
+    except architect.ArchitectLoadError as e:
+        err({"error": str(e)})
+    issues = architect.validate_architecture(
+        arch, project_root=os.path.dirname(path) or os.getcwd()
+    )
+    if issues:
+        err({
+            "status": "error",
+            "path": path,
+            "issue_count": len(issues),
+            "message": architect.format_issues(issues),
+        })
+    out({
+        "status": "success",
+        "path": path,
+        "message": (
+            f"Architecture is valid. "
+            f"{len(arch.components)} component(s), {len(arch.edges)} edge(s)."
+        ),
+    })
+
+
+def cmd_architect_render(args):
+    from . import architect
+    path = architect.resolve_architect_path(args.path)
+    try:
+        arch = architect.load_architecture(path)
+    except architect.ArchitectLoadError as e:
+        err({"error": str(e)})
+    issues = architect.validate_architecture(arch)
+    if issues and not args.force:
+        err({
+            "status": "error",
+            "path": path,
+            "issue_count": len(issues),
+            "message": (
+                "Refusing to render an invalid architecture. Fix the "
+                "issues below or pass --force to render anyway.\n"
+                + architect.format_issues(issues)
+            ),
+        })
+    diagram = architect.render(arch, direction=args.direction)
+    if args.stdout:
+        print(diagram, end="")
+        return
+    out_path = args.output or os.path.join(
+        os.path.dirname(path), "architect.mmd"
+    )
+    with open(out_path, "w") as f:
+        f.write(diagram)
+    out({
+        "status": "success",
+        "path": path,
+        "output": out_path,
+        "message": f"Wrote Mermaid diagram to {out_path}",
+    })
+
+
+def _architect_load_for_mutation(args):
+    """Resolve path, read source, load arch. Errs out on failure."""
+    from . import architect
+    path = architect.resolve_architect_path(args.path)
+    project_root = os.path.dirname(path) or os.getcwd()
+    try:
+        with open(path) as f:
+            src = f.read()
+    except FileNotFoundError:
+        err({
+            "status": "error",
+            "message": (
+                f"{path} not found. Run `cartograph architect init` first."
+            ),
+        })
+    try:
+        arch = architect.load_architecture(path)
+    except architect.ArchitectLoadError as e:
+        err({"status": "error", "message": str(e)})
+    return architect, path, project_root, src, arch
+
+
+def _find_component(arch, component_id):
+    for c in arch.components:
+        if c.id == component_id:
+            return c
+    err({
+        "status": "error",
+        "message": (
+            f"No Component with id={component_id!r} in architect.py"
+        ),
+    })
+
+
+def _write_widgets(architect, path, src, component_id, new_widgets):
+    try:
+        new_src = architect.set_component_widgets(src, component_id, new_widgets)
+    except architect.ArchitectMutationError as e:
+        err({"status": "error", "message": str(e)})
+    with open(path, "w") as f:
+        f.write(new_src)
+
+
+def cmd_architect_link(args):
+    architect, path, project_root, src, arch = _architect_load_for_mutation(args)
+    component = _find_component(arch, args.component_id)
+    current = list(component.widgets)
+
+    if args.clear:
+        if args.widget is None:
+            if not current:
+                err({
+                    "status": "error",
+                    "message": (
+                        f"Component {args.component_id!r} has no widgets "
+                        f"to clear."
+                    ),
+                })
+            new_widgets = []
+            removed = current
+            verb_msg = (
+                f"Cleared all {len(removed)} widget(s) from "
+                f"{args.component_id!r}: {removed}"
+            )
+        else:
+            if args.widget not in current:
+                err({
+                    "status": "error",
+                    "message": (
+                        f"Component {args.component_id!r} is not linked "
+                        f"to widget {args.widget!r}. Currently linked: "
+                        f"{current}."
+                    ),
+                })
+            new_widgets = [w for w in current if w != args.widget]
+            removed = [args.widget]
+            verb_msg = (
+                f"Unlinked {args.widget!r} from {args.component_id!r}"
+                + (f" ({len(new_widgets)} remaining)" if new_widgets
+                   else " (slot now empty)")
+            )
+    else:
+        if args.widget is None:
+            err({
+                "status": "error",
+                "message": (
+                    "Specify a widget to link, or pass --clear to remove "
+                    "links."
+                ),
+            })
+        widget_dir = os.path.join(project_root, "cg", args.widget)
+        manifest = os.path.join(widget_dir, "widget.json")
+        if not os.path.isdir(widget_dir):
+            err({
+                "status": "error",
+                "message": (
+                    f"cg/{args.widget}/ does not exist under "
+                    f"{project_root}. Install the widget first: "
+                    f"`cartograph install <widget_id>`."
+                ),
+            })
+        if not os.path.isfile(manifest):
+            err({
+                "status": "error",
+                "message": (
+                    f"cg/{args.widget}/widget.json missing - directory "
+                    f"does not look like a Cartograph widget install."
+                ),
+            })
+        if args.widget in current:
+            err({
+                "status": "error",
+                "message": (
+                    f"Component {args.component_id!r} is already linked "
+                    f"to widget {args.widget!r}."
+                ),
+            })
+        new_widgets = current + [args.widget]
+        verb_msg = (
+            f"Linked {args.component_id!r} -> cg/{args.widget}/ "
+            f"(now {len(new_widgets)} widget(s) on this slot)"
+        )
+
+    _write_widgets(architect, path, src, args.component_id, new_widgets)
+    out({
+        "status": "success",
+        "path": path,
+        "component_id": args.component_id,
+        "widgets": new_widgets,
+        "message": verb_msg,
+    })
+
+
 def cmd_rename(args):
     result = _carto().rename_widget(
         old_id=args.widget_id,
@@ -541,6 +819,23 @@ def _check_cg_namespace_hygiene(root: str) -> str | None:
 def cmd_validate(args):
     path = _resolve_widget_path(args)
     _preflight_from_path(path)
+    # Kind detection: route blueprints to the blueprint validator.
+    from .manifest import detect_kind, KIND_BLUEPRINT, ManifestError
+    try:
+        kind = detect_kind(path)
+    except ManifestError as e:
+        err({"status": "error", "error": str(e)})
+    if kind == KIND_BLUEPRINT:
+        result = _carto().validate_blueprint(path=path)
+        if result.get("status") == "error" or "error" in result:
+            err(result)
+        if result.get("warnings"):
+            print("\nWarnings:", file=sys.stderr)
+            for w in result["warnings"]:
+                print(f"  {w}", file=sys.stderr)
+            print("", file=sys.stderr)
+        out(result)
+        return
     # Project-level hygiene check — the user's cwd is where a toxic
     # cg/__init__.py would live. Hard block because validate is the gate
     # before checkin/publish, and the cost of this file shipping into
@@ -703,6 +998,36 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
 def cmd_checkin(args):
     install_path = _resolve_widget(args.path)
     _preflight_from_path(install_path)
+    # Kind-aware dispatch: blueprints have their own checkin path.
+    from .manifest import detect_kind, KIND_BLUEPRINT, ManifestError
+    try:
+        kind = detect_kind(install_path)
+    except ManifestError as e:
+        err({"status": "error", "error": str(e)})
+    if kind == KIND_BLUEPRINT:
+        result = _carto().checkin_blueprint(
+            path=install_path,
+            reason=args.reason,
+            version_bump=args.bump,
+            override_warnings=args.override_warnings,
+            override_reason=args.override_reason or "",
+        )
+        if result.get("status") == "error" or "error" in result:
+            err(result)
+        if getattr(args, "publish", False):
+            from . import blueprint_publish
+            push_result = blueprint_publish.publish_blueprint(
+                _carto(), install_path, dry_run=False,
+            )
+            if push_result.get("status") == "error":
+                result.setdefault("warnings", []).append(
+                    f"Blueprint checked in locally; cloud publish failed: "
+                    f"{push_result.get('message', 'unknown error')}"
+                )
+            else:
+                result["cloud_publish"] = push_result.get("upload", {})
+        out(result)
+        return
     result = _carto().checkin(
         path=install_path,
         reason=args.reason,
@@ -941,7 +1266,17 @@ def cmd_status(args):
                 f"cartograph status --page {pagination['page'] - 1} --size {pagination['size']}"
             )
 
-    payload = {**aggregate, "pagination": pagination, "widgets": page_items}
+    # Blueprint pin-health and orphan leaves run once per call regardless
+    # of pagination — both are project-wide states an agent needs to see
+    # in full to act on them.
+    bp_block = carto.all_blueprint_status(target)
+    payload = {
+        **aggregate,
+        "pagination": pagination,
+        "widgets": page_items,
+        "blueprints": bp_block.get("blueprints", []),
+        "orphan_leaves": bp_block.get("orphans", []),
+    }
     if not args.all_widgets:
         payload["note"] = (
             "Showing widgets with issues only. Run with --all to see all installed widgets."
@@ -1122,24 +1457,61 @@ def cmd_logout(args):
     out({"status": "success", "message": "Logged out."})
 
 
+def _cloud_publish_blueprint(path, args):
+    """Publish a blueprint directory to the cloud blueprints endpoint."""
+    from . import blueprint_publish
+    result = blueprint_publish.publish_blueprint(
+        _carto(), path, dry_run=False,
+    )
+    if result.get("status") == "error":
+        err({"error": result.get("message", "Blueprint publish failed.")})
+    upload = result.get("upload", {})
+    nid     = upload.get("namespaced_id", result.get("blueprint_id", ""))
+    version = result.get("version", "?")
+    bump    = result.get("bump", "")
+    print(f"\n  ✓ Published blueprint {nid}  ·  v{version}  ·  {bump}\n")
+
+
 def cmd_cloud_publish(args):
     from .auth import is_authenticated
     if not is_authenticated():
         err({"error": "Not authenticated. Run: cartograph login"})
 
     if getattr(args, "lib", False):
-        # Resolve path from library by widget_id
-        widget_id = args.widget_id
-        if not widget_id:
-            err({"error": "Usage: cartograph cloud publish <widget_id> --lib"})
+        # Resolve path from library by id. Could be a widget OR a blueprint —
+        # check both lists; the type drives the publish flow below.
+        ident = args.widget_id
+        if not ident:
+            err({"error": "Usage: cartograph cloud publish <id> --lib"})
         carto = _carto()
-        widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
-        if not widget:
-            err({"error": f"Widget '{widget_id}' not found in library."})
-        path = widget["path"]
+        widget = next((w for w in carto.widgets if w["id"] == ident), None)
+        bp = next((b for b in carto.blueprints if b["id"] == ident), None)
+        if widget:
+            path = widget["path"]
+            widget_id = ident
+        elif bp:
+            return _cloud_publish_blueprint(bp["path"], args)
+        else:
+            err({"error": f"'{ident}' not found in library (widget or blueprint)."})
     else:
         path = _resolve_widget(args.path)
         widget_id = args.widget_id
+
+        # Blueprint dispatch: a directory containing blueprint.json (and no
+        # widget.json) is a blueprint, not a widget. Branch before the
+        # widget-only resolution heuristics that follow.
+        if (os.path.isfile(os.path.join(path, "blueprint.json"))
+                and not os.path.isfile(os.path.join(path, "widget.json"))):
+            return _cloud_publish_blueprint(path, args)
+
+        # Try blueprint lookup by id when called with `cloud publish bp-...`
+        # from outside a widget dir.
+        if widget_id and args.path == "." and not os.path.isfile(os.path.join(path, "widget.json")):
+            carto = _carto()
+            lib_bp = next((b for b in carto.blueprints if b["id"] == widget_id), None)
+            if lib_bp:
+                return _cloud_publish_blueprint(lib_bp["path"], args)
+
         # If widget_id was given but path is default ".", the user likely
         # ran `cartograph cloud publish <widget_id>` from outside the widget
         # dir. Try resolving the widget_id as a path or library lookup.
@@ -2892,22 +3264,120 @@ def _build_cli() -> AgentCLI:
                  "help": "Actually delete (irreversible)"},
             ],
         },
+        {
+            "name": "blueprint create",
+            "help": "Scaffold a new blueprint (a higher-order widget composing other widgets)",
+            "handler": cmd_blueprint_create,
+            "args": [
+                {"name": "name",
+                 "help": "Blueprint slug (e.g. 'auth-flow'). The 'bp-' marker and "
+                         "--language suffix are added automatically, producing IDs like "
+                         "'bp-auth-flow-python'."},
+                {"name": "--language", "required": True, "choices": supported_languages(),
+                 "help": "Implementation language. Single-language for v0.7 — the "
+                         "blueprint and all its dep widgets share one language."},
+                {"name": "--target", "default": ".",
+                 "help": "Project root to create the blueprint under "
+                         "(blueprint lands in <target>/cg/<id>/). Default: ."},
+            ],
+        },
+        {
+            "name": "blueprint add-dep",
+            "help": "Add an installed widget to a blueprint's dependencies, pinned to its installed version",
+            "handler": cmd_blueprint_add_dep,
+            "args": [
+                {"name": "widget_id",
+                 "help": "Widget id to add as a dep (must be installed under <project>/cg/)."},
+                {"name": "--path", "default": ".",
+                 "help": "Blueprint directory (default: .). Must be inside a project's cg/."},
+                {"name": "--no-validate", "action": "store_true", "default": False,
+                 "dest": "no_validate",
+                 "help": "Skip re-validation after the edit. Use only for fast iteration; "
+                         "the next checkin will re-validate anyway."},
+            ],
+        },
+        {
+            "name": "blueprint remove-dep",
+            "help": "Remove a widget from a blueprint's dependencies",
+            "handler": cmd_blueprint_remove_dep,
+            "args": [
+                {"name": "widget_id", "help": "Widget id to remove from deps."},
+                {"name": "--path", "default": ".",
+                 "help": "Blueprint directory (default: .)."},
+                {"name": "--no-validate", "action": "store_true", "default": False,
+                 "dest": "no_validate",
+                 "help": "Skip re-validation after the edit."},
+            ],
+        },
+        {
+            "name": "architect init",
+            "help": "Scaffold a starter architect.py describing this project's structure",
+            "handler": cmd_architect_init,
+            "args": [
+                {"name": "--path", "default": None, "dest": "path",
+                 "help": "Where to write architect.py (default: ./architect.py)"},
+                {"name": "--force", "action": "store_true", "default": False,
+                 "help": "Overwrite an existing architect.py"},
+            ],
+        },
+        {
+            "name": "architect validate",
+            "help": "Check architect.py for structural issues (refs, ids, parent cycles, domains)",
+            "handler": cmd_architect_validate,
+            "args": [
+                {"name": "--path", "default": None, "dest": "path",
+                 "help": "Path to architect.py (default: ./architect.py)"},
+            ],
+        },
+        {
+            "name": "architect render",
+            "help": "Render architect.py as a Mermaid flowchart",
+            "handler": cmd_architect_render,
+            "args": [
+                {"name": "--path", "default": None, "dest": "path",
+                 "help": "Path to architect.py (default: ./architect.py)"},
+                {"name": "--output", "default": None,
+                 "help": "Output file (default: ./architect.mmd next to source)"},
+                {"name": "--stdout", "action": "store_true", "default": False,
+                 "help": "Write Mermaid to stdout instead of a file"},
+                {"name": "--direction", "default": "TD",
+                 "choices": ["TD", "TB", "LR", "BT", "RL"],
+                 "help": "Flowchart direction (default: TD)"},
+                {"name": "--force", "action": "store_true", "default": False,
+                 "help": "Render even if validation reports issues"},
+            ],
+        },
+        {
+            "name": "architect link",
+            "help": "Link or unlink an installed widget to a Component slot",
+            "handler": cmd_architect_link,
+            "args": [
+                {"name": "component_id",
+                 "help": "id of the Component in architect.py"},
+                {"name": "widget", "nargs": "?", "default": None,
+                 "help": "Directory name under cg/ of the installed widget. With --clear, the specific widget to remove (omit to remove all)."},
+                {"name": "--clear", "action": "store_true", "default": False,
+                 "help": "Remove a link instead of adding one. Targets the named widget, or all widgets if no widget is given."},
+                {"name": "--path", "default": None, "dest": "path",
+                 "help": "Path to architect.py (default: ./architect.py)"},
+            ],
+        },
     ])
 
     cli.add_commands("Cloud registry", [
         {
             "name": "cloud publish",
-            "help": "Publish a widget to the cloud registry",
+            "help": "Publish a widget or blueprint to the cloud registry",
             "handler": cmd_cloud_publish,
             "args": [
                 {"name": "widget_id", "nargs": "?", "default": None,
-                 "help": "Widget ID (required with --lib, inferred otherwise)"},
-                {"name": "path", "nargs": "?", "default": ".", "help": "Widget directory (default: .)"},
+                 "help": "Widget or blueprint ID (required with --lib, inferred otherwise)"},
+                {"name": "path", "nargs": "?", "default": ".", "help": "Widget or blueprint directory (default: .)"},
                 {"name": "--lib", "action": "store_true", "default": False},
                 {"name": "--visibility", "default": None, "choices": ["public", "private"],
-                 "help": "Override default visibility"},
+                 "help": "Override default visibility (widgets only)"},
                 {"name": "--governance", "default": None, "choices": ["open", "protected"],
-                 "help": "Override default governance model"},
+                 "help": "Override default governance model (widgets only)"},
                 {"name": "--override-warnings", "action": "store_true", "default": False, "dest": "override_warnings"},
                 {"name": "--override-reason", "default": None, "dest": "override_reason"},
             ],

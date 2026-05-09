@@ -1,8 +1,8 @@
 """
-Widget scaffolding.
+Widget and blueprint scaffolding.
 
 Usage:
-    from cartograph.scaffolding import create_widget
+    from cartograph.scaffolding import create_widget, create_blueprint
 """
 
 import json
@@ -122,3 +122,98 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
 
     log.info("Created widget: %s", target_dir)
     return {"status": "success", "path": target_dir, "item_id": item_id, "language": normalized_lang}
+
+
+def create_blueprint(carto, name, language, target_dir=None, description=None, tags=None):
+    """Scaffold a new blueprint directory.
+
+    A blueprint is a higher-order widget: same shape on disk (src/, tests/,
+    examples/) but with a blueprint.json manifest instead of widget.json
+    and a `dependencies` array that pins specific widget versions.
+
+    Returns a status dict.
+    """
+    from cartograph.blueprints import compose_blueprint_id, BP_PREFIX
+
+    if not language:
+        return {"status": "error", "message": "Language is required for blueprint creation."}
+    if not name:
+        return {"status": "error", "message": "Name is required for blueprint creation."}
+
+    normalized_lang = carto._normalize_language(language)
+
+    # v0.7 supports blueprints in any language whose engine is installed and
+    # exposes a blueprint scaffold + validation surface. Each engine owns its
+    # own skeleton via blueprint_scaffold(); the validator drives off
+    # engine.file_ext / src_import_pattern / run_blueprint_example.
+    from cartograph.languages import get_engine
+    engine = get_engine(normalized_lang)
+    if engine is None or not engine.supported:
+        return {
+            "status": "error",
+            "message": (
+                f"No language engine available for '{language}'. Run "
+                f"`cartograph doctor` to see which engines are installed."
+            ),
+        }
+
+    # Author supplies just the slug. Strip any leading bp- they may have typed.
+    slug = name
+    if slug.startswith(BP_PREFIX):
+        slug = slug[len(BP_PREFIX):]
+    # Strip trailing language if user typed the full id by accident.
+    if slug.endswith(f"-{normalized_lang}"):
+        slug = slug[: -len(normalized_lang) - 1]
+
+    try:
+        item_id = compose_blueprint_id(slug, normalized_lang)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    if not target_dir:
+        target_dir = os.getcwd()
+
+    target_dir = os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(item_id))
+
+    if os.path.exists(target_dir):
+        return {"status": "error", "message": f"Directory already exists: {target_dir}"}
+
+    log.info("Creating blueprint '%s' (%s) in %s", item_id, language, target_dir)
+
+    os.makedirs(target_dir)
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(target_dir, d))
+
+    manifest = {
+        "id": item_id,
+        "name": slug,
+        "language": normalized_lang,
+        "version": "0.1.0",
+        "description": description or f"[TODO] Describe what {slug} does",
+        "tags": tags or ["[TODO: add 3-5 tags]"],
+        "dependencies": [],
+        "domains": [],
+    }
+    with open(os.path.join(target_dir, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    # Derive a module name from the slug for placeholder files.
+    module_name = re.sub(r"[^a-zA-Z0-9_]", "_", slug.replace("-", "_"))
+    if module_name.startswith("test_") or module_name == "test":
+        module_name = "mod_" + module_name
+
+    # Each engine owns its own opinionated blueprint skeleton. The base
+    # default writes minimal placeholder files keyed off engine.file_ext so
+    # validate doesn't immediately complain about empty src/.
+    engine.blueprint_scaffold(target_dir, module_name, slug)
+
+    log.info("Created blueprint: %s", target_dir)
+    return {
+        "status": "success",
+        "path": target_dir,
+        "item_id": item_id,
+        "language": normalized_lang,
+        "kind": "blueprint",
+    }
+
+

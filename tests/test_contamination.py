@@ -1301,7 +1301,9 @@ class TestOrchestrator:
         result = scan_contamination(str(tmp_path))
         assert result["warnings"] == []
         assert len(result["blocks"]) == 1
-        assert "widget.json" in result["blocks"][0]
+        # Orchestrator now reports a generic "no manifest found" since it
+        # detects kind from filename (widget.json or blueprint.json).
+        assert "manifest" in result["blocks"][0].lower()
 
     def test_unknown_language_uses_base_fallback(self, tmp_path):
         wdir = _make_widget(tmp_path, "lua", "mod.lua",

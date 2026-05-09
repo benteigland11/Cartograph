@@ -193,6 +193,37 @@ def python_dir_name(widget_id: str) -> str:
     return canonical
 
 
+def find_installed_widget_dir(cg_root: str, canonical_id: str) -> str | None:
+    """Locate an installed widget's directory under cg/ by canonical id.
+
+    Prefers the canonical directory name. If absent, walks cg/ and matches
+    any widget.json whose meta.id equals canonical_id. This catches widgets
+    installed from a prefixed registry (e.g. `cg-foo-python` lives at
+    `cg/cg_foo_python/`) which the canonical lookup alone would miss.
+
+    Returns the absolute directory path or None if no match.
+    """
+    canonical = normalize_widget_id(canonical_id)
+    direct = os.path.join(cg_root, python_dir_name(canonical))
+    if os.path.isfile(os.path.join(direct, "widget.json")):
+        return direct
+    if not os.path.isdir(cg_root):
+        return None
+    for entry in os.listdir(cg_root):
+        wjson = os.path.join(cg_root, entry, "widget.json")
+        if not os.path.isfile(wjson):
+            continue
+        try:
+            with open(wjson) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        meta = data.get("meta") or data
+        if meta.get("id") == canonical:
+            return os.path.join(cg_root, entry)
+    return None
+
+
 def widget_path(widget_id: str, project_root: str = None) -> str:
     """Return the absolute path to an installed widget's directory.
 
@@ -234,20 +265,24 @@ class Cartograph:
     def __init__(self, library_path):
         self.library_path = library_path
         self.widgets = []
+        self.blueprints = []
         self.unstamped_widgets = []
         self.install_stats = self._load_install_stats()
         self._load_library()
+        self._load_blueprints()
 
         from .search import HybridBackend
         self._search_backend = HybridBackend()
-        self._search_backend.build(self.widgets)
+        self._search_backend.build(self.widgets + self._blueprints_for_search())
 
     def reload(self):
         """Re-scan the library from disk and rebuild the search index."""
         self.widgets = []
+        self.blueprints = []
         self.unstamped_widgets = []
         self._load_library()
-        self._search_backend.build(self.widgets)
+        self._load_blueprints()
+        self._search_backend.build(self.widgets + self._blueprints_for_search())
 
 
     def _calculate_implementation_hash(self, path):
@@ -624,6 +659,86 @@ class Cartograph:
             self.widgets = [w for w in self.widgets
                            if normalize_language(w.get("language", "")) in allowed]
 
+    def _load_blueprints(self):
+        """Scan the library for blueprint.json artifacts.
+
+        Mirrors `_load_library` but reads the blueprint manifest. Validation
+        stamp gating still applies (unstamped artifacts are invisible).
+        Blueprints are kept on a separate list so widget search ranking and
+        rating logic don't need to special-case kind on every read.
+        """
+        if not os.path.exists(self.library_path):
+            return
+        search_pattern = os.path.join(self.library_path, "**", "blueprint.json")
+        found = [p for p in glob.glob(search_pattern, recursive=True)
+                 if "history" not in p]
+        for manifest_path in found:
+            try:
+                with open(manifest_path, 'r') as f:
+                    data = json.load(f)
+                bp_path = os.path.dirname(manifest_path)
+                bp_id = data.get('id', os.path.basename(bp_path))
+                language = str(data.get('language', 'unknown')).lower()
+
+                from .validation_stamp import has_valid_stamp
+                if not has_valid_stamp(bp_path, language):
+                    log.info("Skipping unstamped blueprint %s at %s",
+                             bp_id, bp_path)
+                    self.unstamped_widgets.append({
+                        "id": bp_id, "path": bp_path, "language": language,
+                    })
+                    continue
+
+                self.blueprints.append({
+                    "id": bp_id,
+                    "name": data.get('name', bp_id),
+                    "version": data.get('version', '0.1.0'),
+                    "type": "blueprint",
+                    "path": bp_path,
+                    "tags": list(data.get('tags', []) or []),
+                    "domains": list(data.get('domains', []) or []),
+                    "description": data.get('description', ''),
+                    "language": language,
+                    "dependencies": [
+                        {"id": d.get("id"), "version": d.get("version")}
+                        for d in (data.get('dependencies') or [])
+                        if isinstance(d, dict)
+                    ],
+                    "install_count": self._get_install_count(bp_id),
+                })
+            except (OSError, json.JSONDecodeError, KeyError):
+                continue
+
+    def _blueprints_for_search(self):
+        """Project blueprints into the dict shape the search backend expects.
+
+        Blueprints carry multi-valued `domains` and a `type=blueprint` tag;
+        widgets carry single `domain`. The search backend ranks them in the
+        same index but the filter and result formatter branch on `type` so
+        downstream consumers see the right kind.
+        """
+        out = []
+        for b in self.blueprints:
+            primary_domain = (b["domains"][0] if b["domains"] else "universal")
+            out.append({
+                "id": b["id"],
+                "name": b["name"],
+                "version": b["version"],
+                "type": "blueprint",
+                "path": b["path"],
+                "tags": b["tags"],
+                "domain": primary_domain,
+                "domains": list(b["domains"]),
+                "description": b["description"],
+                "language": b["language"],
+                "dependencies": b["dependencies"],
+                "install_count": b.get("install_count", 0),
+                "rating": 0,
+                "review_count": 0,
+                "weighted_rating": 0,
+            })
+        return out
+
     def list_popular(self, limit=10):
         from .inspector import list_popular
         return list_popular(self, limit)
@@ -641,6 +756,12 @@ class Cartograph:
         return create_widget(self, item_id, language=language, name=name, domain=domain,
                              tags=tags, target_dir=target_dir, gpu_targets=gpu_targets,
                              widget_type=widget_type)
+
+    def create_blueprint(self, name, language, target_dir=None,
+                          description=None, tags=None):
+        from .scaffolding import create_blueprint
+        return create_blueprint(self, name, language=language, target_dir=target_dir,
+                                description=description, tags=tags)
 
     def search(self, query, domain_filter=None, language_filter=None, top_k=10):
         """Search the widget library using hybrid TF-IDF + n-gram fuzzy matching."""
@@ -667,11 +788,26 @@ class Cartograph:
     def validate_item(self, path):
         from .validator import validate_item
         return validate_item(self, path)
+    def validate_blueprint(self, path):
+        from .blueprint_validator import validate_blueprint
+        return validate_blueprint(self, path)
     def checkin(self, path, reason="", version_bump="minor",
                 override_warnings=False, override_reason=""):
         from .checkin import checkin
         return checkin(self, path, reason=reason, version_bump=version_bump,
                        override_warnings=override_warnings, override_reason=override_reason)
+    def checkin_blueprint(self, path, reason="", version_bump="minor",
+                          override_warnings=False, override_reason=""):
+        from .blueprint_checkin import checkin_blueprint
+        return checkin_blueprint(self, path, reason=reason, version_bump=version_bump,
+                                 override_warnings=override_warnings,
+                                 override_reason=override_reason)
+    def blueprint_add_dep(self, blueprint_path, widget_id, validate=True):
+        from .blueprint_deps import add_dep
+        return add_dep(self, blueprint_path, widget_id, validate=validate)
+    def blueprint_remove_dep(self, blueprint_path, widget_id, validate=True):
+        from .blueprint_deps import remove_dep
+        return remove_dep(self, blueprint_path, widget_id, validate=validate)
     def restore(self, item_id, version, reason):
         from .checkin import restore
         return restore(self, item_id, version, reason)
@@ -680,12 +816,24 @@ class Cartograph:
         widget_id = normalize_widget_id(widget_id)
         return add_review(self, widget_id, target_dir, score, comment=comment)
     def widget_status(self, widget_id, target_dir, check_cloud=True):
+        widget_id = normalize_widget_id(widget_id)
+        from .blueprints import is_blueprint_id
+        if is_blueprint_id(widget_id):
+            from .blueprint_status import blueprint_status
+            return blueprint_status(self, widget_id, target_dir)
         from .checkin import widget_status
-        widget_id = normalize_widget_id(widget_id)
         return widget_status(self, widget_id, target_dir, check_cloud=check_cloud)
+
+    def all_blueprint_status(self, target_dir):
+        from .blueprint_status import all_blueprint_status
+        return all_blueprint_status(self, target_dir)
     def install(self, widget_id, target_dir, version=None):
-        from .installer import install
         widget_id = normalize_widget_id(widget_id)
+        from .blueprints import is_blueprint_id
+        if is_blueprint_id(widget_id):
+            from .blueprint_install import install_blueprint
+            return install_blueprint(self, widget_id, target_dir, version=version)
+        from .installer import install
         return install(self, widget_id, target_dir, version=version)
     def uninstall(self, widget_id, target_dir):
         from .installer import uninstall

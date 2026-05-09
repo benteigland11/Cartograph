@@ -382,6 +382,7 @@ class JavaScriptEngine(LanguageEngine):
         t = _COVERAGE_THRESHOLD
         cmd = [
             "npx", "vitest", "run", "--coverage",
+            "--coverage.include=src/**",
             f"--coverage.thresholds.statements={t}",
             f"--coverage.thresholds.branches={t}",
             f"--coverage.thresholds.functions={t}",

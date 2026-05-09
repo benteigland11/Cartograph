@@ -48,25 +48,40 @@ def _widget_dir(target_dir, widget_id):
     return os.path.join(target_dir, DEFAULT_INSTALL_DIR, python_dir_name(widget_id))
 
 
+def _build_registry_router():
+    """Build a PrefixRouter mapping `<prefix>-` to registry URL.
+
+    The trailing hyphen is part of each registered key so that a key
+    like `cg-bp-foo` only matches `cg-`, not a prefix-colliding
+    registry named `c`.
+    """
+    from cg.infra_prefix_router_python.src.prefix_router import PrefixRouter
+    from .config import get_registries, _PUBLIC_REGISTRY_PREFIX, _PUBLIC_REGISTRY_URL
+
+    router: PrefixRouter = PrefixRouter(default=None)
+    router.register(_PUBLIC_REGISTRY_PREFIX + "-", _PUBLIC_REGISTRY_URL)
+    for reg in get_registries():
+        key = reg["prefix"] + "-"
+        if key in router:
+            continue
+        router.register(key, reg["url"])
+    return router
+
+
 def _resolve_registry(widget_id: str):
     """Check if widget_id starts with a known registry prefix.
 
     Returns (registry_url, prefix, bare_widget_id) if a prefix is recognized,
     or None if no prefix matches (caller uses default local-first behavior).
     """
-    from .config import get_registries, _PUBLIC_REGISTRY_PREFIX, _PUBLIC_REGISTRY_URL
-
-    if widget_id.startswith(_PUBLIC_REGISTRY_PREFIX + "-"):
-        bare_id = widget_id[len(_PUBLIC_REGISTRY_PREFIX) + 1:]
-        return _PUBLIC_REGISTRY_URL, _PUBLIC_REGISTRY_PREFIX, bare_id
-
-    for reg in get_registries():
-        prefix = reg["prefix"]
-        if widget_id.startswith(prefix + "-"):
-            bare_id = widget_id[len(prefix) + 1:]
-            return reg["url"], prefix, bare_id
-
-    return None
+    router = _build_registry_router()
+    hit = router.match(widget_id)
+    if hit is None:
+        return None
+    key, url = hit
+    prefix = key[:-1]
+    bare_id = widget_id[len(key):]
+    return url, prefix, bare_id
 
 
 def _install_from_cloud(widget_id, dest_path, registry_url=None, owner_hint=None):
@@ -218,7 +233,7 @@ def install(carto, widget_id, target_dir, version=None,
         source_path = widget["path"]
         installed_version = widget.get("version", "0.0.0")
 
-        if version:
+        if version and version != installed_version:
             history_path = os.path.join(source_path, "history", version)
             if not os.path.exists(history_path):
                 return {"error": f"Version '{version}' not found for '{widget_id}'."}
@@ -360,7 +375,14 @@ def uninstall(carto, widget_id, target_dir):
     widget_path = _widget_dir(target_dir, widget_id)
 
     if not os.path.exists(widget_path):
-        return {"error": f"'{widget_id}' not found at {widget_path}."}
+        # Fall back to scanning cg/ for a prefixed install of the same
+        # canonical id (e.g. cg-foo-python under cg/cg_foo_python/).
+        from .engine import find_installed_widget_dir, DEFAULT_INSTALL_DIR
+        cg_root = os.path.join(target_dir, DEFAULT_INSTALL_DIR)
+        found = find_installed_widget_dir(cg_root, widget_id)
+        if found is None:
+            return {"error": f"'{widget_id}' not found at {widget_path}."}
+        widget_path = found
 
     # Safety: must be inside the target dir
     if not os.path.abspath(widget_path).startswith(os.path.abspath(target_dir)):

@@ -76,8 +76,10 @@ current directory (or the directory specified by `--target`).
 
 **Cloud registry**
 
-    cloud publish [widget_id] [path] [--visibility ...] [--governance ...]
-      Publish a widget to the cloud registry.
+    cloud publish [id] [path] [--visibility ...] [--governance ...]
+      Publish a widget or blueprint to the cloud registry. Dispatches by
+      manifest type: blueprint.json -> blueprint flow, widget.json ->
+      widget flow. Versions are immutable - fix and bump.
 
     cloud unpublish <widget_id> [--confirm]
       Remove a widget from the cloud registry.
@@ -104,6 +106,38 @@ current directory (or the directory specified by `--target`).
 
     rules reset --language <lang> [--global]
       Restore a rules file to its default template.
+
+**Architect (project-level planning)**
+
+    architect init [--path X] [--force]
+      Scaffold a starter architect.py at the project root. Architect is
+      a project-local Python file describing components and relationships
+      (cross-domain: software, modeling, rtl, physical). The agent reads
+      it for app-level planning context before reaching for widgets.
+
+    architect validate [--path X]
+      Structural checks only: unique component ids, edge/parent ref
+      integrity, parent cycles, schema_version, known domains. The
+      vibes layer (kind/description/what) is intentionally not checked.
+
+    architect render [--path X] [--output X | --stdout] [--direction TD|TB|LR|BT|RL] [--force]
+      Render architect.py as a Mermaid flowchart. Defaults to writing
+      architect.mmd next to the source so it commits cleanly and renders
+      in GitHub. Refuses to render an invalid architecture unless --force.
+
+    architect link <component_id> <widget_dir> [--path X]
+      Link an installed widget to a Component slot. Multiple widgets
+      may compose one slot (router + validator + logger as one
+      service). Refuses if the widget is not installed under cg/, or
+      if it is already linked.
+
+    architect link <component_id> <widget_dir> --clear [--path X]
+      Unlink a specific widget from a Component slot.
+
+    architect link <component_id> --clear [--path X]
+      Unlink ALL widgets from a Component slot. Edits architect.py via
+      AST surgery; comments outside the target Component block are
+      preserved.
 
 **Configuration**
 

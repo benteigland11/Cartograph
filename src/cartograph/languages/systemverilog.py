@@ -379,9 +379,17 @@ class SystemVerilogEngine(LanguageEngine):
             result["warnings"] = warnings
         return result
 
+    def _collect_src_files(self, path: str) -> list[str]:
+        """Blueprint-aware src collection: include the widget/blueprint's own
+        src/*.sv plus every dep widget's src/*.sv under cg/. Widgets have no
+        cg/ dir so the second glob is a harmless no-op for them."""
+        src_files = _glob.glob(os.path.join(path, "src", "*.sv"))
+        src_files += _glob.glob(os.path.join(path, "cg", "*", "src", "*.sv"))
+        return src_files
+
     def run_tests(self, path: str) -> dict:
         """Compile and simulate each tests/test_*.sv with all src/*.sv files."""
-        src_files = _glob.glob(os.path.join(path, "src", "*.sv"))
+        src_files = self._collect_src_files(path)
         test_files = _glob.glob(os.path.join(path, "tests", "test_*.sv"))
 
         if not src_files:
@@ -406,7 +414,7 @@ class SystemVerilogEngine(LanguageEngine):
         if not os.path.exists(ep):
             return self._fail("examples/example_usage.sv not found")
 
-        src_files = _glob.glob(os.path.join(path, "src", "*.sv"))
+        src_files = self._collect_src_files(path)
         error = self._compile_and_run(src_files, ep, path)
         if error:
             return self._fail(error)

@@ -437,13 +437,17 @@ def download_widget(owner_handle: str, widget_id: str,
           response="RegistryInfoResponse",
           tags=["Registry"],
           summary="Advertise registry capabilities (e.g. supports_visibility)")
-def registry_info() -> dict:
+def registry_info(registry_url: str | None = None) -> dict:
     """Fetch registry capabilities (e.g. whether it validates widgets).
 
-    Returns {"validates": bool, ...} or {"error": ...}.
-    Falls back to {"validates": False} if the endpoint doesn't exist yet.
+    Returns {"validates": bool, "allow_blueprints": bool, ...} or
+    {"error": ...}. Falls back to {"validates": False} if the endpoint
+    doesn't exist yet. The `allow_blueprints` field is absent on older
+    registries — callers that care should treat missing as True for
+    backwards compatibility (the field was added when the public registry
+    chose to opt out).
     """
-    result = _get("/v1/registry/info")
+    result = _get("/v1/registry/info", registry_url=registry_url)
     if "error" in result:
         # Endpoint doesn't exist yet - assume no validation
         return {"validates": False}
@@ -632,6 +636,41 @@ def update_widget(owner_handle: str, widget_id: str,
 _ZIP_WARN_BYTES = 5 * 1024 * 1024     # 5 MB — likely an artifact slipped through
 _ZIP_ERROR_BYTES = 25 * 1024 * 1024   # 25 MB — fail before the server 413s
 
+# Compiled / linker output extensions that should never appear in a widget
+# zip. The cloud rejects anything outside its allowlist; we pre-flight here
+# so the user gets the offending paths locally instead of after a failed
+# upload. This is a denylist (not the cloud's full allowlist) to avoid
+# duplicating that table — it only catches the recurring "build artifact
+# under a non-standard cache dir slipped past the exclude list" failure.
+_BLOCKED_BINARY_EXTS = frozenset({
+    ".o", ".obj", ".a", ".lib", ".so", ".dylib", ".dll", ".exe",
+    ".class", ".pyc", ".pyo", ".pyd",
+})
+
+
+def _check_for_build_artifacts(buf: BytesIO) -> None:
+    """Scan a built zip for compiled artifacts the cloud will reject.
+
+    Raises ValueError listing every offending path. Cheap second pass over
+    the zip's central directory — no payload reads.
+    """
+    offenders: list[str] = []
+    with zipfile.ZipFile(buf, "r") as zf:
+        for name in zf.namelist():
+            ext = os.path.splitext(name)[1].lower()
+            if ext in _BLOCKED_BINARY_EXTS:
+                offenders.append(name)
+    if offenders:
+        sample = "\n  ".join(offenders[:10])
+        more = "" if len(offenders) <= 10 else f"\n  ... ({len(offenders) - 10} more)"
+        raise ValueError(
+            f"Widget zip contains {len(offenders)} build artifact(s) the "
+            f"registry will reject:\n  {sample}{more}\n"
+            "These are likely from a build cache (e.g. nimcache, target/, "
+            "build/) under a non-standard path. Delete them from the widget "
+            "directory and re-run."
+        )
+
 
 def _zip_widget(widget_path: str) -> bytes:
     """Bundle widget files into a zip in memory (shared by push and propose).
@@ -643,10 +682,13 @@ def _zip_widget(widget_path: str) -> bytes:
     """
     from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
         excludes_for,
+        filter_dirs,
+        prefix_excludes_for,
     )
 
     language = _read_widget_language(widget_path)
     artifacts = excludes_for(language=language) | {"history"}
+    prefixes = set(prefix_excludes_for(language=language))
     # If the engine declares an optional sidecar (e.g. openscad's python/
     # calc helpers), union in that language's artifacts too — pytest leaves
     # .pytest_cache at widget root, which would otherwise slip through.
@@ -656,6 +698,7 @@ def _zip_widget(widget_path: str) -> bytes:
         sidecar = engine.sidecar() if engine else None
         if sidecar is not None:
             artifacts = artifacts | excludes_for(language=sidecar[0])
+            prefixes |= set(prefix_excludes_for(language=sidecar[0]))
     except Exception:
         pass
     skip_files = {".validation_stamp.json", ".file_stamp.json",
@@ -664,7 +707,7 @@ def _zip_widget(widget_path: str) -> bytes:
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, dirs, files in os.walk(widget_path):
-            dirs[:] = [d for d in dirs if d not in artifacts]
+            dirs[:] = filter_dirs(dirs, artifacts, prefixes=prefixes)
             for fname in files:
                 # Apply both the explicit per-file skip set and the
                 # build-artifact set — the latter contains generated files
@@ -674,6 +717,8 @@ def _zip_widget(widget_path: str) -> bytes:
                 fpath = os.path.join(root, fname)
                 arcname = os.path.relpath(fpath, widget_path)
                 zf.write(fpath, arcname)
+
+    _check_for_build_artifacts(buf)
 
     payload = buf.getvalue()
     size = len(payload)
@@ -871,3 +916,81 @@ def reject_proposal(owner_handle: str, widget_id: str,
         {},
         registry_url=registry_url,
     )
+
+
+# ---------------------------------------------------------------------------
+# Blueprints (v0.7) — composition manifests with pinned leaf deps.
+# Tarball transport. Cloud handles all storage/Firestore details; these
+# wrappers are pure HTTP plumbing.
+# ---------------------------------------------------------------------------
+
+def publish_blueprint(blueprint_id: str, tarball: bytes,
+                      visibility: str = "public",
+                      registry_url: str | None = None) -> dict:
+    """POST a packed blueprint tarball to the cloud.
+
+    The tarball must contain a top-level blueprint.json whose 'id' matches
+    `blueprint_id` and whose 'version' is the version being published.
+
+    Returns {"status": "success", "version": ..., "namespaced_id": ...}
+    on success, or {"error": ...} on failure.
+    """
+    from .auth import is_authenticated
+    if not is_authenticated():
+        return {"error": "Not authenticated. Run: cartograph login"}
+
+    return _http_client().post_multipart(
+        f"/v1/blueprints/{urllib.parse.quote(blueprint_id, safe='')}/publish",
+        fields={"visibility": visibility},
+        file_data=tarball,
+        filename=f"{blueprint_id}.tar.gz",
+        file_field_name="file",
+        file_content_type="application/gzip",
+        base_url=_resolve_base(registry_url),
+    )
+
+
+def inspect_blueprint(owner_handle: str, blueprint_id: str,
+                      registry_url: str | None = None) -> dict:
+    """Fetch blueprint metadata from the cloud. Returns {"error": ...} on
+    miss; the install-side cloud-version probe relies on that to fall back
+    to first-publish."""
+    return _get(
+        f"/v1/blueprints/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(blueprint_id)}",
+        registry_url=registry_url,
+    )
+
+
+def download_blueprint(owner_handle: str, blueprint_id: str,
+                       version: str | None = None,
+                       registry_url: str | None = None) -> dict:
+    """Download a blueprint tarball.
+
+    Returns {"tar_bytes": bytes, "version": str} on success,
+    or {"error": ...} on failure.
+    """
+    base = registry_url.rstrip("/") if registry_url else _registry_url()
+    path = (
+        f"/v1/blueprints/{urllib.parse.quote(owner_handle)}"
+        f"/{urllib.parse.quote(blueprint_id)}/download"
+    )
+    if version:
+        path += f"?version={urllib.parse.quote(version)}"
+    url = base + path
+    headers = _headers(registry_url)
+    headers["Accept"] = "application/gzip"
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            ver = resp.headers.get("X-Blueprint-Version", version or "0.0.0")
+            return {"tar_bytes": resp.read(), "version": ver}
+    except urllib.error.HTTPError as e:
+        body = {}
+        try:
+            body = json.loads(e.read())
+        except Exception:
+            pass
+        return {"error": body.get("detail", f"HTTP {e.code}")}
+    except urllib.error.URLError as e:
+        return {"error": f"Network error: {e.reason}"}
