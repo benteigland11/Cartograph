@@ -1,0 +1,118 @@
+%%{init: {'flowchart': {'defaultRenderer': 'elk'}}}%%
+flowchart TD
+    classDef backend fill:#e6f3ff,stroke:#3a78c9,color:#1a3a6a
+    classDef data fill:#fff5e6,stroke:#c98c3a,color:#6a4a1a
+    classDef frontend fill:#fffae6,stroke:#c9b03a,color:#6a5a1a
+    classDef glue fill:#fafafa,stroke:#999999,color:#444444,stroke-dasharray:4 3
+    classDef infra fill:#e6ffe6,stroke:#3ac93a,color:#1a6a1a
+    classDef security fill:#ffe6e6,stroke:#c93a3a,color:#6a1a1a
+    developer(["developer
+[external]"])
+    agent(["agent
+[external]"])
+    gcp_services(["gcp_services
+[external]"])
+    tools_site["tools_site
+[frontend]"]:::frontend
+    subgraph cli_engine["cli_engine
+[application]"]
+        cli_surface["◆ cli_surface
+[entrypoint]
+<infra_agent_cli_python, infra_command_catalog_python, infra_http_endpoint_registry_python>"]:::infra
+        registry["◆ registry
+[subsystem]
+<infra_prefix_router_python, universal_list_paginator_python>"]:::backend
+        contamination_orchestrator("contamination_orchestrator
+[pipeline]"):::security
+        validator_pipeline("◆ validator_pipeline
+[pipeline]
+<infra_file_stamp_python, infra_directory_tarball_python, infra_version_bump_policy_python>"):::infra
+        mcp_server("mcp_server
+[service]
+(backend, glue)"):::glue
+        architect_feature["◆ architect_feature
+[subsystem]
+<cg_universal_graph_cycles_python, cg_universal_python_module_loader_python, cg_universal_mermaid_graph_renderer_python>
+(backend, infra)"]:::backend
+        blueprint_feature["◆ blueprint_feature
+[subsystem]
+<infra_directory_tarball_python>"]:::backend
+        cloud_client["◆ cloud_client
+[client]
+<infra_urllib_client_python>"]:::backend
+        agent_skills["agent_skills
+[content]
+(frontend, glue)"]:::glue
+        local_state[("local_state
+[datastore]")]:::data
+        subgraph engine_dispatcher["◆ engine_dispatcher
+[subsystem]
+<infra_binary_resolver_python>"]
+            python_engine("◆ python_engine
+[engine]
+<universal_block_walker_python>
+(backend, infra)"):::backend
+        end
+    end
+    subgraph cloud_service["cloud_service
+[deployment]"]
+        cloud_api("cloud_api
+[service]
+(backend, glue)"):::glue
+        governance{"governance
+[policy]"}:::security
+        safeguard_engine{"safeguard_engine
+[policy]"}:::security
+        registry_db[("registry_db
+[datastore]")]:::data
+        widget_blob_storage[("widget_blob_storage
+[datastore]")]:::data
+        blog_subsystem["blog_subsystem
+[feature]
+(backend, frontend)"]:::backend
+    end
+    subgraph _legend["Legend"]
+        _legend_domain_backend["backend"]:::backend
+        _legend_domain_data["data"]:::data
+        _legend_domain_frontend["frontend"]:::frontend
+        _legend_domain_glue["glue"]:::glue
+        _legend_domain_infra["infra"]:::infra
+        _legend_domain_security["security"]:::security
+        _legend_shape_cylinder[("datastore")]
+        _legend_shape_rhombus{"policy"}
+        _legend_shape_rounded("service / engine / pipeline")
+        _legend_shape_stadium(["external"])
+        _legend_edge_dpdg_a[" "]
+        _legend_edge_dpdg_b["hosted / served"]
+        _legend_edge_eeg_a[" "]
+        _legend_edge_eeg_b["data flow / constraint"]
+    end
+    developer -->|"invokes: terminal commands"| cli_surface
+    agent -->|"calls: MCP JSON-RPC"| mcp_server
+    agent ==>|"reads: markdown context"| agent_skills
+    developer -->|"visits: HTTPS"| tools_site
+    cli_surface -->|"delegates_to"| registry
+    cli_surface -->|"delegates_to"| validator_pipeline
+    cli_surface -->|"delegates_to"| architect_feature
+    cli_surface -->|"delegates_to"| blueprint_feature
+    cli_surface -->|"delegates_to"| cloud_client
+    mcp_server -->|"reuses: shared command handlers"| cli_surface
+    validator_pipeline -->|"runs: stage 1"| contamination_orchestrator
+    validator_pipeline -->|"runs: stage 2"| engine_dispatcher
+    contamination_orchestrator -->|"calls: scan_contamination per language"| engine_dispatcher
+    registry -->|"uses: cloud lookups"| cloud_client
+    registry ==>|"reads_writes"| local_state
+    cloud_client -->|"calls: HTTPS"| cloud_api
+    cloud_api ==>|"enforces"| governance
+    cloud_api -->|"runs: at publish time"| safeguard_engine
+    cloud_api ==>|"reads_writes"| registry_db
+    cloud_api ==>|"reads_writes"| widget_blob_storage
+    cloud_api -->|"hosts"| blog_subsystem
+    tools_site -.->|"served_by"| cloud_api
+    cloud_service -.->|"hosted_on"| gcp_services
+    _legend_edge_dpdg_a -.-> _legend_edge_dpdg_b
+    _legend_edge_eeg_a ==> _legend_edge_eeg_b
+    click engine_dispatcher href "cg/infra_binary_resolver_python/" "Open infra_binary_resolver_python"
+    click python_engine href "cg/universal_block_walker_python/" "Open universal_block_walker_python"
+    click blueprint_feature href "cg/infra_directory_tarball_python/" "Open infra_directory_tarball_python"
+    click cloud_client href "cg/infra_urllib_client_python/" "Open infra_urllib_client_python"
