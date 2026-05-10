@@ -64,6 +64,14 @@ _BY_LANGUAGE: dict[str, frozenset[str]] = {
 }
 
 
+# Prefix patterns matched against directory or file basenames, with any
+# leading dots stripped before comparison. Catches non-standard variants
+# like `.nimcache_example` that exact-name matching misses.
+_PREFIX_BY_LANGUAGE: dict[str, frozenset[str]] = {
+    "nim": frozenset({"nimcache"}),
+}
+
+
 def default_excludes() -> frozenset[str]:
     """Return the universal exclusion set (VCS, IDE, OS metadata)."""
     return _UNIVERSAL
@@ -88,6 +96,33 @@ def excludes_for(
     return frozenset(result)
 
 
+def prefix_excludes_for(
+    language: str | None = None,
+    languages: Iterable[str] = (),
+) -> frozenset[str]:
+    """Return prefix patterns for the given language(s).
+
+    A name matches a prefix when, after stripping any leading dots, it
+    starts with the prefix. Example: prefix ``nimcache`` matches
+    ``nimcache``, ``.nimcache_example``, and ``nimcache_old``.
+    """
+    result: set[str] = set()
+    tags: list[str] = []
+    if language is not None:
+        tags.append(language)
+    tags.extend(languages)
+    for tag in tags:
+        result.update(_PREFIX_BY_LANGUAGE.get(tag.lower(), frozenset()))
+    return frozenset(result)
+
+
+def _matches_prefix(name: str, prefixes: Iterable[str]) -> bool:
+    if not name:
+        return False
+    stripped = name.lstrip(".")
+    return any(stripped.startswith(p) for p in prefixes)
+
+
 def all_known_excludes() -> frozenset[str]:
     """Return the union across every known language. Catch-all when the
     consumer doesn't know which ecosystems live in a tree."""
@@ -97,23 +132,46 @@ def all_known_excludes() -> frozenset[str]:
     return frozenset(result)
 
 
-def should_skip(path: str, excludes: Iterable[str]) -> bool:
+def should_skip(
+    path: str,
+    excludes: Iterable[str],
+    prefixes: Iterable[str] = (),
+) -> bool:
     """Return True if any path component matches an exclude entry.
 
     Designed for use inside ``os.walk`` loops or against a relative
-    path inside a zip-build loop.
+    path inside a zip-build loop. ``prefixes`` is checked with leading
+    dots stripped (so ``nimcache`` matches ``.nimcache_example``).
     """
     exclude_set = set(excludes)
+    prefix_tuple = tuple(prefixes)
     parts = path.replace("\\", "/").split("/")
-    return any(part in exclude_set for part in parts if part)
+    for part in parts:
+        if not part:
+            continue
+        if part in exclude_set:
+            return True
+        if prefix_tuple and _matches_prefix(part, prefix_tuple):
+            return True
+    return False
 
 
-def filter_dirs(dirs: list[str], excludes: Iterable[str]) -> list[str]:
+def filter_dirs(
+    dirs: list[str],
+    excludes: Iterable[str],
+    prefixes: Iterable[str] = (),
+) -> list[str]:
     """Return a new list with excluded entries removed. Convenience
     wrapper for the common ``dirs[:] = filter_dirs(dirs, excludes)``
-    pattern inside ``os.walk``."""
+    pattern inside ``os.walk``. ``prefixes`` is checked with leading
+    dots stripped."""
     exclude_set = set(excludes)
-    return [d for d in dirs if d not in exclude_set]
+    prefix_tuple = tuple(prefixes)
+    return [
+        d for d in dirs
+        if d not in exclude_set
+        and not (prefix_tuple and _matches_prefix(d, prefix_tuple))
+    ]
 
 
 def supported_languages() -> tuple[str, ...]:

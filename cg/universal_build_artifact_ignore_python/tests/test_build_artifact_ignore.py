@@ -12,6 +12,7 @@ from src.build_artifact_ignore import (
     default_excludes,
     excludes_for,
     filter_dirs,
+    prefix_excludes_for,
     should_skip,
     supported_languages,
 )
@@ -137,6 +138,41 @@ def test_supported_languages_returns_sorted_tuple():
     assert list(langs) == sorted(langs)
     assert "python" in langs
     assert "angular" in langs
+
+
+def test_prefix_excludes_for_nim_includes_nimcache():
+    assert "nimcache" in prefix_excludes_for(language="nim")
+
+
+def test_prefix_excludes_for_unknown_language_is_empty():
+    assert prefix_excludes_for(language="ada95") == frozenset()
+
+
+def test_filter_dirs_with_prefix_strips_dotted_variant():
+    dirs = ["src", ".nimcache_example", "nimcache_old", "tests"]
+    excludes = excludes_for(language="nim")
+    prefixes = prefix_excludes_for(language="nim")
+    result = filter_dirs(dirs, excludes, prefixes=prefixes)
+    assert ".nimcache_example" not in result
+    assert "nimcache_old" not in result
+    assert "src" in result
+    assert "tests" in result
+
+
+def test_filter_dirs_without_prefix_keeps_variants():
+    dirs = ["src", ".nimcache_example", "nimcache_old"]
+    excludes = excludes_for(language="nim")
+    result = filter_dirs(dirs, excludes)
+    assert ".nimcache_example" in result
+    assert "nimcache_old" in result
+
+
+def test_should_skip_with_prefix_matches_dotted_variant():
+    excludes = excludes_for(language="nim")
+    prefixes = prefix_excludes_for(language="nim")
+    assert should_skip("foo/.nimcache_example/file.o", excludes, prefixes)
+    assert should_skip("foo/nimcache_old/file.o", excludes, prefixes)
+    assert not should_skip("foo/src/file.nim", excludes, prefixes)
 
 
 def test_walk_integration(tmp_path):
