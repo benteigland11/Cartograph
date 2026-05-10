@@ -161,7 +161,13 @@ def validate_blueprint(carto, path: str) -> dict:
 
     # 7. Build sandbox: temp dir + copy of blueprint + each dep into cg/.
     from .engine import python_dir_name
-    sandbox_root = tempfile.mkdtemp(prefix="cartograph_bp_validate_")
+    # realpath resolves Windows 8.3 short-names (e.g. RUNNER~1 -> runneradmin)
+    # to their long form. Without this, vitest+v8 coverage records hits under
+    # the long path while the include-glob enumerates under the short path,
+    # producing a phantom 0% report on Windows. No-op on POSIX.
+    sandbox_root = os.path.realpath(
+        tempfile.mkdtemp(prefix="cartograph_bp_validate_")
+    )
     sandbox = os.path.join(sandbox_root, os.path.basename(path.rstrip(os.sep)))
     try:
         # Copy the blueprint itself, but skip any pre-existing .venv / cg / __pycache__.
