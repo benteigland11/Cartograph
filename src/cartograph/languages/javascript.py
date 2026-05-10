@@ -382,7 +382,9 @@ class JavaScriptEngine(LanguageEngine):
         t = _COVERAGE_THRESHOLD
         cmd = [
             "npx", "vitest", "run", "--coverage",
-            "--coverage.include=src/**",
+            # Explicit file extensions: a bare `src/**` glob has been observed
+            # matching nothing on Windows under v8 coverage path normalization.
+            "--coverage.include=src/**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}",
             f"--coverage.thresholds.statements={t}",
             f"--coverage.thresholds.branches={t}",
             f"--coverage.thresholds.functions={t}",
@@ -390,7 +392,8 @@ class JavaScriptEngine(LanguageEngine):
         ]
         res = self._run(cmd, cwd=path, timeout=300)
         if res.returncode != 0:
-            return self._fail(res.stderr or res.stdout)
+            combined = ((res.stdout or "") + "\n" + (res.stderr or "")).strip()
+            return self._fail(combined or "vitest failed with no output")
         return self._ok()
 
     # ------------------------------------------------------------------ example
