@@ -352,6 +352,12 @@ def test_javascript_blueprint_validates_end_to_end(carto, project):
     bp = _write_js_blueprint(str(project))
 
     res = carto.validate_blueprint(bp)
+    if res.get("status") != "success":
+        # Print the full vitest output to captured stdout so it survives
+        # pytest's short-tb assertion repr truncation.
+        print("---VITEST FULL OUTPUT---")
+        print(res.get("message", "<no message>"))
+        print("---END VITEST OUTPUT---")
     assert res.get("status") == "success", res
     assert res["kind"] == "blueprint"
     assert res["id"] == "bp-shouter-javascript"
