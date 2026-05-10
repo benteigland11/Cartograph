@@ -354,9 +354,12 @@ def test_javascript_blueprint_validates_end_to_end(carto, project):
     res = carto.validate_blueprint(bp)
     if res.get("status") != "success":
         # Print the full vitest output to captured stdout so it survives
-        # pytest's short-tb assertion repr truncation.
+        # pytest's short-tb assertion repr truncation. The test_output
+        # field carries up to 3000 chars of combined stdout+stderr.
         print("---VITEST FULL OUTPUT---")
-        print(res.get("message", "<no message>"))
+        print("message:", res.get("message", "<no message>"))
+        print("test_output:")
+        print(res.get("test_output", "<no test_output>"))
         print("---END VITEST OUTPUT---")
     assert res.get("status") == "success", res
     assert res["kind"] == "blueprint"
