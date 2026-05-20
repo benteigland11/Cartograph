@@ -60,6 +60,11 @@ def test_resolve_default_uses_cwd(tmp_path, monkeypatch):
     assert out == str(tmp_path / "architect.py")
 
 
+def test_resolve_explicit_directory_appends_filename(tmp_path):
+    out = architect.resolve_architect_path(str(tmp_path))
+    assert out == str(tmp_path / "architect.py")
+
+
 # ---------------------------------------------------------------------------
 # Loader error surfacing
 # ---------------------------------------------------------------------------
