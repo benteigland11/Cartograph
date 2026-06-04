@@ -240,3 +240,61 @@ def clear_token() -> None:
         pass
     except OSError as e:
         log.debug("Could not remove credentials file: %s", e)
+    # Profile cache is auth-scoped — clear it alongside credentials so the
+    # next session doesn't read a stale handle for the previous account.
+    try:
+        os.remove(_profile_cache_path())
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        log.debug("Could not remove profile cache file: %s", e)
+
+
+def _profile_cache_path() -> str:
+    from .engine import _user_data_dir
+    return os.path.join(_user_data_dir(), "profile_cache.json")
+
+
+_PROFILE_CACHE_TTL_SECONDS = 24 * 60 * 60  # 24h
+
+
+def cached_whoami(ttl_seconds: int = _PROFILE_CACHE_TTL_SECONDS) -> dict:
+    """Return the current user's profile, hitting a disk cache when fresh.
+
+    Reads from `<data_dir>/profile_cache.json`; on cache miss or expiry
+    calls `cloud.whoami()` and rewrites the cache. Read-only callers
+    (search, status) should prefer this over the live whoami to avoid a
+    network round-trip per invocation. Mutating flows (publish, checkin,
+    cloud adopt) should keep calling live whoami where stale identity
+    could cause writes to land under the wrong handle.
+
+    Returns {} when not authenticated. Returns whatever whoami() returned
+    on cache miss (including its error shape) without writing the cache.
+    """
+    if not is_authenticated():
+        return {}
+    path = _profile_cache_path()
+    try:
+        with open(path) as f:
+            entry = json.load(f)
+        if time.time() - entry.get("cached_at", 0) < ttl_seconds:
+            profile = entry.get("profile") or {}
+            if profile:
+                return profile
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    # Cache miss or stale — go live.
+    from .cloud import whoami as _live_whoami
+    profile = _live_whoami()
+    if isinstance(profile, dict) and "error" not in profile and profile:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump({"profile": profile, "cached_at": time.time()}, f)
+            try:
+                os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+            except OSError:
+                pass
+        except OSError as e:
+            log.debug("Could not write profile cache: %s", e)
+    return profile

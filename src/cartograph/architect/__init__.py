@@ -11,6 +11,7 @@ Public API:
 """
 
 from .loader import ArchitectLoadError, load_architecture
+from .markdown import render_markdown
 from .mutate import ArchitectMutationError, set_component_widgets
 from .paths import ARCHITECT_FILENAME, resolve_architect_path
 from .renderer import render
@@ -41,6 +42,7 @@ __all__ = [
     "format_issues",
     "load_architecture",
     "render",
+    "render_markdown",
     "resolve_architect_path",
     "set_component_widgets",
     "validate_architecture",

@@ -1,9 +1,10 @@
 """
-Character n-gram index for fuzzy / typo-tolerant search.
+Character n-gram inverted index for fuzzy / typo-tolerant search.
 
-Builds a per-widget n-gram set from searchable fields at index time.
-At query time, computes a weighted Jaccard similarity between the query's
-n-grams and each widget's field n-grams.
+Build pass produces posting lists keyed by gram plus a sidecar
+`_field_sizes` map so the Jaccard denominator stays computable without
+storing per-widget gram sets. Query work scales with the number of
+widgets that share grams with the query, not the corpus size.
 
 Field weights (higher = more important):
   id / name : 3.0
@@ -13,6 +14,8 @@ Field weights (higher = more important):
 """
 
 from __future__ import annotations
+
+from collections import defaultdict
 
 
 _FIELD_WEIGHTS = {
@@ -40,44 +43,67 @@ def _field_ngrams(text: str, sizes=(2, 3)) -> set[str]:
     return grams
 
 
-def _jaccard(a: set, b: set) -> float:
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
-
-
 class NgramIndex:
-    """Builds once, queries many times."""
+    """Inverted n-gram index. O(query_grams * avg_posting_len) per query."""
 
     def __init__(self):
-        # Per-widget, per-field n-gram sets
-        self._index: list[dict[str, set[str]]] = []
         self._widgets: list[dict] = []
+        # gram -> list of (widget_idx, field)
+        self._postings: dict[str, list[tuple[int, str]]] = {}
+        # (widget_idx, field) -> |field_grams|, denominator for Jaccard
+        self._field_sizes: dict[tuple[int, str], int] = {}
 
     def build(self, widgets: list[dict]) -> None:
         self._widgets = widgets
-        self._index = []
-        for w in widgets:
+        postings: dict[str, list[tuple[int, str]]] = defaultdict(list)
+        sizes: dict[tuple[int, str], int] = {}
+
+        for widget_idx, w in enumerate(widgets):
             tags_text = " ".join(w.get("tags", []))
-            entry = {
-                "id":          _field_ngrams(w.get("id", "")),
-                "name":        _field_ngrams(w.get("name", "")),
-                "tags":        _field_ngrams(tags_text),
-                "description": _field_ngrams(w.get("description", "")),
-                "code":        _field_ngrams(w.get("_code_tokens", "")),
+            field_texts = {
+                "id":          w.get("id", ""),
+                "name":        w.get("name", ""),
+                "tags":        tags_text,
+                "description": w.get("description", ""),
+                "code":        w.get("_code_tokens", ""),
             }
-            self._index.append(entry)
+            for field, text in field_texts.items():
+                grams = _field_ngrams(text)
+                if not grams:
+                    continue
+                sizes[(widget_idx, field)] = len(grams)
+                for g in grams:
+                    postings[g].append((widget_idx, field))
+
+        self._postings = dict(postings)
+        self._field_sizes = sizes
 
     def score(self, query: str) -> list[float]:
         """Return a weighted n-gram score for every widget."""
+        n = len(self._widgets)
+        if n == 0:
+            return []
+
         query_grams = _field_ngrams(query)
-        scores = []
-        for entry in self._index:
-            weighted = sum(
-                _FIELD_WEIGHTS[field] * _jaccard(query_grams, entry[field])
-                for field in _FIELD_WEIGHTS
-            )
-            scores.append(weighted)
+        if not query_grams:
+            return [0.0] * n
+
+        intersections: dict[tuple[int, str], int] = defaultdict(int)
+        for g in query_grams:
+            for posting in self._postings.get(g, ()):
+                intersections[posting] += 1
+
+        if not intersections:
+            return [0.0] * n
+
+        q_size = len(query_grams)
+        scores = [0.0] * n
+        for (widget_idx, field), inter in intersections.items():
+            f_size = self._field_sizes[(widget_idx, field)]
+            union = q_size + f_size - inter
+            if union <= 0:
+                continue
+            jaccard = inter / union
+            scores[widget_idx] += _FIELD_WEIGHTS[field] * jaccard
+
         return scores

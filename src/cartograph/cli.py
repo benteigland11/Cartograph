@@ -171,23 +171,38 @@ def _parse_registry_id(widget_id):
 # Command handlers
 # ---------------------------------------------------------------------------
 
-def _search_registries(query, domain_filter, language_filter, top_k):
+def _search_registries(query, domain_filter, language_filter, top_k,
+                       registry_filter=None, owner_filter=None):
     """Search public registry + all configured company registries.
 
-    Returns (all_widgets, errors) where each widget is annotated with
-    'registry_prefix' so callers can construct the correct install command.
+    Returns (all_widgets, errors, scoped_prefixes) where each widget is
+    annotated with 'registry_prefix' so callers can construct the correct
+    install command. `registry_filter`, if given, is an iterable of
+    prefixes to restrict the fan-out to. `owner_filter` is an @handle to
+    filter results to client-side (the server doesn't accept owner today).
+    `scoped_prefixes` is the list of prefixes actually queried, so the
+    caller can detect single-registry scope and skip the cross-registry
+    merge math.
     """
     from .cloud import search as cloud_search
     from .config import get_registries, _PUBLIC_REGISTRY_PREFIX
 
+    allowlist = set(registry_filter) if registry_filter else None
+    owner_bare = owner_filter.lstrip("@") if owner_filter else None
+
     all_widgets = []
     errors = {}
+    scoped_prefixes = []
 
     def _fetch(prefix, registry_url):
+        if allowlist is not None and prefix not in allowlist:
+            return []
+        scoped_prefixes.append(prefix)
         result = cloud_search(query, domain_filter, language_filter,
                               top_k=top_k, registry_url=registry_url)
         if result.get("error"):
             errors[prefix] = result["error"]
+        widgets = []
         for w in result.get("widgets", []):
             # Rewrite id to unambiguous install form: @owner/prefix-widget-name
             wid = w.get("id", "")
@@ -195,9 +210,12 @@ def _search_registries(query, domain_filter, language_filter, top_k):
                 owner_part, base = wid.split("/", 1)  # "@owner", "widget-name"
             else:
                 owner_part, base = "", wid
+            if owner_bare and owner_part.lstrip("@") != owner_bare:
+                continue
             w["id"] = f"{owner_part}/{prefix}-{base}" if owner_part else f"{prefix}-{base}"
             w["registry_prefix"] = prefix
-        return result.get("widgets", [])
+            widgets.append(w)
+        return widgets
 
     # Public registry (None = default URL)
     all_widgets.extend(_fetch(_PUBLIC_REGISTRY_PREFIX, None))
@@ -206,10 +224,26 @@ def _search_registries(query, domain_filter, language_filter, top_k):
     for reg in get_registries():
         all_widgets.extend(_fetch(reg["prefix"], reg["url"]))
 
-    return all_widgets, errors
+    # If the filter named registries that don't exist, surface that as an
+    # error so the agent isn't silently empty-handed.
+    if allowlist is not None:
+        unknown = allowlist - set(scoped_prefixes)
+        for prefix in unknown:
+            errors[prefix] = f"Unknown registry prefix {prefix!r}. Run `cartograph registry` to list."
+
+    return all_widgets, errors, scoped_prefixes
 
 
 def cmd_search(args):
+    # Validate flag combinations before any work
+    registries_filter = getattr(args, "registries", None) or None
+    owner_filter = getattr(args, "owner", None)
+    local_only = getattr(args, "local_only", False)
+    if owner_filter and not registries_filter:
+        err({"error": "--owner requires --registry (owner is scoped per-registry)."})
+    if local_only and (registries_filter or owner_filter):
+        err({"error": "--local-only cannot be combined with --registry or --owner."})
+
     local = _carto().search(
         query=args.query,
         domain_filter=args.domain,
@@ -217,11 +251,14 @@ def cmd_search(args):
         top_k=args.top_k,
     )
 
-    # Search all registries if cloud is enabled
+    # Search registries if cloud is enabled and not --local-only
     from .config import cloud_enabled
-    if cloud_enabled():
-        registry_widgets, registry_errors = _search_registries(
-            args.query, args.domain, args.language, args.top_k
+    scoped_prefixes = []
+    if cloud_enabled() and not local_only:
+        registry_widgets, registry_errors, scoped_prefixes = _search_registries(
+            args.query, args.domain, args.language, args.top_k,
+            registry_filter=registries_filter,
+            owner_filter=owner_filter,
         )
     else:
         registry_widgets, registry_errors = [], {}
@@ -252,14 +289,12 @@ def cmd_search(args):
 
     # Only suppress a local widget if the cloud version belongs to the current user.
     # Someone else's same-named widget in a registry should not hide your local copy.
-    # Short-circuit if not authenticated to avoid a network call on every search.
+    # Use the disk-cached profile so we don't pay a whoami round-trip per search.
     _me = ""
     try:
-        from .auth import is_authenticated
-        from .cloud import whoami as _whoami
-        if is_authenticated():
-            _profile = _whoami()
-            _me = _profile.get("owner", "") or _profile.get("username", "")
+        from .auth import cached_whoami
+        _profile = cached_whoami()
+        _me = _profile.get("owner", "") or _profile.get("username", "")
     except Exception:
         pass
 
@@ -284,7 +319,12 @@ def cmd_search(args):
     registry_sorted = sorted(seen_registry.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
 
     # Local fills first; all registries combined share the remaining half.
-    _REGISTRY_CAP = args.top_k // 2
+    # When the agent explicitly scoped to one or more registries, that's a
+    # signal of intent — drop the cap so the requested registries fill
+    # whatever local didn't.
+    explicit_registry_scope = registries_filter is not None
+    _REGISTRY_CAP = (args.top_k if explicit_registry_scope
+                     else args.top_k // 2)
     if local_sorted and registry_sorted:
         local_take = min(len(local_sorted), args.top_k)
         registry_take = min(len(registry_sorted), args.top_k - local_take, _REGISTRY_CAP)
@@ -557,219 +597,6 @@ def cmd_blueprint_remove_dep(args):
     if result.get("status") == "error" or "error" in result:
         err(result)
     out(result)
-
-
-def cmd_architect_init(args):
-    from . import architect
-    path = architect.resolve_architect_path(args.path)
-    try:
-        architect.write_architect_template(path, overwrite=args.force)
-    except FileExistsError as e:
-        err({"error": str(e)})
-    out({
-        "status": "success",
-        "path": path,
-        "message": (
-            f"Wrote starter architect.py to {path}. Edit it to describe "
-            f"your project, then run `cartograph architect validate`."
-        ),
-    })
-
-
-def cmd_architect_validate(args):
-    from . import architect
-    path = architect.resolve_architect_path(args.path)
-    try:
-        arch = architect.load_architecture(path)
-    except architect.ArchitectLoadError as e:
-        err({"error": str(e)})
-    issues = architect.validate_architecture(
-        arch, project_root=os.path.dirname(path) or os.getcwd()
-    )
-    if issues:
-        err({
-            "status": "error",
-            "path": path,
-            "issue_count": len(issues),
-            "message": architect.format_issues(issues),
-        })
-    out({
-        "status": "success",
-        "path": path,
-        "message": (
-            f"Architecture is valid. "
-            f"{len(arch.components)} component(s), {len(arch.edges)} edge(s)."
-        ),
-    })
-
-
-def cmd_architect_render(args):
-    from . import architect
-    path = architect.resolve_architect_path(args.path)
-    try:
-        arch = architect.load_architecture(path)
-    except architect.ArchitectLoadError as e:
-        err({"error": str(e)})
-    issues = architect.validate_architecture(arch)
-    if issues and not args.force:
-        err({
-            "status": "error",
-            "path": path,
-            "issue_count": len(issues),
-            "message": (
-                "Refusing to render an invalid architecture. Fix the "
-                "issues below or pass --force to render anyway.\n"
-                + architect.format_issues(issues)
-            ),
-        })
-    diagram = architect.render(arch, direction=args.direction)
-    if args.stdout:
-        print(diagram, end="")
-        return
-    out_path = args.output or os.path.join(
-        os.path.dirname(path), "architect.mmd"
-    )
-    with open(out_path, "w") as f:
-        f.write(diagram)
-    out({
-        "status": "success",
-        "path": path,
-        "output": out_path,
-        "message": f"Wrote Mermaid diagram to {out_path}",
-    })
-
-
-def _architect_load_for_mutation(args):
-    """Resolve path, read source, load arch. Errs out on failure."""
-    from . import architect
-    path = architect.resolve_architect_path(args.path)
-    project_root = os.path.dirname(path) or os.getcwd()
-    try:
-        with open(path) as f:
-            src = f.read()
-    except FileNotFoundError:
-        err({
-            "status": "error",
-            "message": (
-                f"{path} not found. Run `cartograph architect init` first."
-            ),
-        })
-    try:
-        arch = architect.load_architecture(path)
-    except architect.ArchitectLoadError as e:
-        err({"status": "error", "message": str(e)})
-    return architect, path, project_root, src, arch
-
-
-def _find_component(arch, component_id):
-    for c in arch.components:
-        if c.id == component_id:
-            return c
-    err({
-        "status": "error",
-        "message": (
-            f"No Component with id={component_id!r} in architect.py"
-        ),
-    })
-
-
-def _write_widgets(architect, path, src, component_id, new_widgets):
-    try:
-        new_src = architect.set_component_widgets(src, component_id, new_widgets)
-    except architect.ArchitectMutationError as e:
-        err({"status": "error", "message": str(e)})
-    with open(path, "w") as f:
-        f.write(new_src)
-
-
-def cmd_architect_link(args):
-    architect, path, project_root, src, arch = _architect_load_for_mutation(args)
-    component = _find_component(arch, args.component_id)
-    current = list(component.widgets)
-
-    if args.clear:
-        if args.widget is None:
-            if not current:
-                err({
-                    "status": "error",
-                    "message": (
-                        f"Component {args.component_id!r} has no widgets "
-                        f"to clear."
-                    ),
-                })
-            new_widgets = []
-            removed = current
-            verb_msg = (
-                f"Cleared all {len(removed)} widget(s) from "
-                f"{args.component_id!r}: {removed}"
-            )
-        else:
-            if args.widget not in current:
-                err({
-                    "status": "error",
-                    "message": (
-                        f"Component {args.component_id!r} is not linked "
-                        f"to widget {args.widget!r}. Currently linked: "
-                        f"{current}."
-                    ),
-                })
-            new_widgets = [w for w in current if w != args.widget]
-            removed = [args.widget]
-            verb_msg = (
-                f"Unlinked {args.widget!r} from {args.component_id!r}"
-                + (f" ({len(new_widgets)} remaining)" if new_widgets
-                   else " (slot now empty)")
-            )
-    else:
-        if args.widget is None:
-            err({
-                "status": "error",
-                "message": (
-                    "Specify a widget to link, or pass --clear to remove "
-                    "links."
-                ),
-            })
-        widget_dir = os.path.join(project_root, "cg", args.widget)
-        manifest = os.path.join(widget_dir, "widget.json")
-        if not os.path.isdir(widget_dir):
-            err({
-                "status": "error",
-                "message": (
-                    f"cg/{args.widget}/ does not exist under "
-                    f"{project_root}. Install the widget first: "
-                    f"`cartograph install <widget_id>`."
-                ),
-            })
-        if not os.path.isfile(manifest):
-            err({
-                "status": "error",
-                "message": (
-                    f"cg/{args.widget}/widget.json missing - directory "
-                    f"does not look like a Cartograph widget install."
-                ),
-            })
-        if args.widget in current:
-            err({
-                "status": "error",
-                "message": (
-                    f"Component {args.component_id!r} is already linked "
-                    f"to widget {args.widget!r}."
-                ),
-            })
-        new_widgets = current + [args.widget]
-        verb_msg = (
-            f"Linked {args.component_id!r} -> cg/{args.widget}/ "
-            f"(now {len(new_widgets)} widget(s) on this slot)"
-        )
-
-    _write_widgets(architect, path, src, args.component_id, new_widgets)
-    out({
-        "status": "success",
-        "path": path,
-        "component_id": args.component_id,
-        "widgets": new_widgets,
-        "message": verb_msg,
-    })
 
 
 def cmd_rename(args):
@@ -3112,6 +2939,14 @@ def _build_cli() -> AgentCLI:
                 {"name": "--domain", "default": None, "help": "Filter by domain"},
                 {"name": "--language", "default": None, "help": "Filter by language"},
                 {"name": "--top-k", "type": int, "default": 10, "dest": "top_k"},
+                {"name": "--registry", "action": "append", "default": None, "dest": "registries",
+                 "help": "Restrict fan-out to the given registry prefix (e.g. cg, myorg). "
+                         "Repeatable. Without this flag, all configured registries are searched."},
+                {"name": "--owner", "default": None,
+                 "help": "Filter to widgets owned by @handle. Requires --registry "
+                         "(owner is scoped per-registry)."},
+                {"name": "--local-only", "action": "store_true", "default": False, "dest": "local_only",
+                 "help": "Search only the local library; skip all registry calls."},
             ],
         },
         {
@@ -3307,59 +3142,6 @@ def _build_cli() -> AgentCLI:
                 {"name": "--no-validate", "action": "store_true", "default": False,
                  "dest": "no_validate",
                  "help": "Skip re-validation after the edit."},
-            ],
-        },
-        {
-            "name": "architect init",
-            "help": "Scaffold a starter architect.py describing this project's structure",
-            "handler": cmd_architect_init,
-            "args": [
-                {"name": "--path", "default": None, "dest": "path",
-                 "help": "Where to write architect.py (default: ./architect.py)"},
-                {"name": "--force", "action": "store_true", "default": False,
-                 "help": "Overwrite an existing architect.py"},
-            ],
-        },
-        {
-            "name": "architect validate",
-            "help": "Check architect.py for structural issues (refs, ids, parent cycles, domains)",
-            "handler": cmd_architect_validate,
-            "args": [
-                {"name": "--path", "default": None, "dest": "path",
-                 "help": "Path to architect.py (default: ./architect.py)"},
-            ],
-        },
-        {
-            "name": "architect render",
-            "help": "Render architect.py as a Mermaid flowchart",
-            "handler": cmd_architect_render,
-            "args": [
-                {"name": "--path", "default": None, "dest": "path",
-                 "help": "Path to architect.py (default: ./architect.py)"},
-                {"name": "--output", "default": None,
-                 "help": "Output file (default: ./architect.mmd next to source)"},
-                {"name": "--stdout", "action": "store_true", "default": False,
-                 "help": "Write Mermaid to stdout instead of a file"},
-                {"name": "--direction", "default": "TD",
-                 "choices": ["TD", "TB", "LR", "BT", "RL"],
-                 "help": "Flowchart direction (default: TD)"},
-                {"name": "--force", "action": "store_true", "default": False,
-                 "help": "Render even if validation reports issues"},
-            ],
-        },
-        {
-            "name": "architect link",
-            "help": "Link or unlink an installed widget to a Component slot",
-            "handler": cmd_architect_link,
-            "args": [
-                {"name": "component_id",
-                 "help": "id of the Component in architect.py"},
-                {"name": "widget", "nargs": "?", "default": None,
-                 "help": "Directory name under cg/ of the installed widget. With --clear, the specific widget to remove (omit to remove all)."},
-                {"name": "--clear", "action": "store_true", "default": False,
-                 "help": "Remove a link instead of adding one. Targets the named widget, or all widgets if no widget is given."},
-                {"name": "--path", "default": None, "dest": "path",
-                 "help": "Path to architect.py (default: ./architect.py)"},
             ],
         },
     ])
