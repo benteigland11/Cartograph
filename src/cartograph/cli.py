@@ -612,13 +612,26 @@ def cmd_rename(args):
 
 
 def _resolve_widget_path(args) -> str:
-    """Resolve a widget path from either --lib <widget_id> or a filesystem path."""
+    """Resolve a widget path from either --lib <widget_id> or a filesystem path.
+
+    With --lib, the lookup checks the index first (the normal case). If the
+    widget isn't in the index, fall back to the unstamped-widgets list so
+    `validate --lib <id>` can reach phantom entries — library dirs that
+    exist on disk but have no validation stamp and are filtered out by the
+    integrity gate. Re-validating a phantom writes a fresh stamp on success
+    (see validator.py write_stamp), which restores the entry to the index.
+    """
     if getattr(args, "lib", False):
         carto = _carto()
         widget = next((w for w in carto.widgets if w["id"] == args.path), None)
-        if not widget:
-            err({"error": f"Widget '{args.path}' not found in library. Use 'cartograph search' to browse."})
-        return widget["path"]
+        if widget:
+            return widget["path"]
+        phantom = next(
+            (p for p in carto.unstamped_widgets if p["id"] == args.path), None,
+        )
+        if phantom:
+            return phantom["path"]
+        err({"error": f"Widget '{args.path}' not found in library. Use 'cartograph search' to browse."})
     return _resolve_widget(args.path)
 
 
@@ -2097,6 +2110,29 @@ def cmd_doctor(args):
             lib_checks.append(("Library", False, str(e), "Check disk permissions"))
     else:
         lib_checks.append(("Library", True, LIBRARY_PATH, None))
+        # Phantom integrity scan: widgets that exist under Widget_Library/
+        # but lack a stamp are hidden from the index. They cause silent
+        # "not found in library" errors and block fresh checkin.
+        try:
+            phantoms = list(_carto().unstamped_widgets)
+        except Exception as e:
+            lib_checks.append(("Integrity", False, f"scan failed: {e}", None))
+            phantoms = []
+        if phantoms:
+            preview = ", ".join(p["id"] for p in phantoms[:3])
+            extra = f" (+{len(phantoms) - 3} more)" if len(phantoms) > 3 else ""
+            lib_checks.append((
+                "Integrity",
+                False,
+                f"{len(phantoms)} phantom entr"
+                f"{'y' if len(phantoms) == 1 else 'ies'} "
+                f"(unstamped, hidden from index): {preview}{extra}",
+                "Restamp with `cartograph validate <widget_id> --lib`. "
+                "Run once per id (use the list above) or script it: "
+                "`for id in <ids>; do cartograph validate $id --lib; done`.",
+            ))
+        else:
+            lib_checks.append(("Integrity", True, "no phantom entries", None))
     groups.append(("Library", lib_checks))
 
     # --- Cloud registry ---
@@ -2380,7 +2416,15 @@ def _detect_agent(directory: str) -> tuple[str | None, str | None]:
 
 
 def cmd_export(args):
-    """Export the widget library as a zip file."""
+    """Export the widget library as a zip file.
+
+    Only stamped widgets (those visible to the index) are exported. Phantom
+    entries — unstamped library dirs hidden by the integrity gate — are
+    skipped so an export never propagates unverifiable widgets to the
+    recipient. Stamps themselves are carried in the zip; if the recipient's
+    files match the stamped fingerprint, no re-validation is needed at
+    import time.
+    """
     import zipfile
     from .engine import LIBRARY_PATH
 
@@ -2393,23 +2437,53 @@ def cmd_export(args):
 
     skip = {"__pycache__", ".pytest_cache", "node_modules"}
 
+    carto = _carto()
+    stamped_paths = {os.path.realpath(w["path"]) for w in carto.widgets}
+    phantom_count = len(carto.unstamped_widgets)
+
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(LIBRARY_PATH):
-            dirs[:] = [d for d in dirs if d not in skip]
-            for fname in files:
-                if fname.endswith(".pyc"):
-                    continue
-                full = os.path.join(root, fname)
-                arcname = os.path.relpath(full, LIBRARY_PATH)
-                zf.write(full, arcname)
+        for widget_path in stamped_paths:
+            for root, dirs, files in os.walk(widget_path):
+                dirs[:] = [d for d in dirs if d not in skip]
+                for fname in files:
+                    if fname.endswith(".pyc"):
+                        continue
+                    full = os.path.join(root, fname)
+                    arcname = os.path.relpath(full, LIBRARY_PATH)
+                    zf.write(full, arcname)
 
     size_mb = os.path.getsize(output) / (1024 * 1024)
-    carto = _carto()
-    print(f"\n  Exported {len(carto.widgets)} widgets to {output} ({size_mb:.1f} MB)\n")
+    msg = f"\n  Exported {len(stamped_paths)} widgets to {output} ({size_mb:.1f} MB)"
+    if phantom_count:
+        msg += (
+            f"\n  Skipped {phantom_count} phantom entr"
+            f"{'y' if phantom_count == 1 else 'ies'} "
+            f"(unstamped, hidden from index). Run `cartograph doctor` for details."
+        )
+    print(msg + "\n")
 
 
 def cmd_import(args):
-    """Import a widget library from a zip file."""
+    """Import a widget library from a zip file.
+
+    Files are unzipped into Widget_Library/, then every imported widget
+    goes through the integrity gate:
+
+      1. If the widget already has a valid stamp (fingerprint still
+         matches its files), accept silently. Stamps that survive the
+         round-trip from a trusted exporter mean we don't re-pay
+         validation cost.
+      2. Otherwise, run the full validation pipeline (same gate as
+         checkin). On success, write a fresh stamp.
+      3. On validation failure, quarantine the widget — move it to
+         Widget_Library/.quarantine/ with a reason file so the user
+         can inspect and either fix or drop it. Quarantined widgets
+         do not stay in the live library, where they'd accumulate as
+         phantoms hidden by the integrity gate.
+
+    This closes the historical leak where `cartograph import` was a
+    pure file-copy and silently created phantom entries.
+    """
     import zipfile
     from .engine import LIBRARY_PATH
 
@@ -2422,13 +2496,13 @@ def cmd_import(args):
 
     with zipfile.ZipFile(path, "r") as zf:
         names = zf.namelist()
-        # Verify it looks like a widget library (has at least one widget.json)
         manifests = [n for n in names if n.endswith("widget.json") and n.count("/") == 1]
         if not manifests:
             err({"error": "Zip does not appear to contain a widget library (no widget.json files found)."})
 
         os.makedirs(LIBRARY_PATH, exist_ok=True)
 
+        imported_widget_ids = set()
         imported = 0
         skipped = 0
         for name in names:
@@ -2436,7 +2510,6 @@ def cmd_import(args):
             if name.endswith("/"):
                 os.makedirs(dest, exist_ok=True)
                 continue
-            # Don't overwrite existing files unless --force
             if os.path.exists(dest) and not getattr(args, "force", False):
                 skipped += 1
                 continue
@@ -2444,13 +2517,110 @@ def cmd_import(args):
             with zf.open(name) as src, open(dest, "wb") as dst:
                 dst.write(src.read())
             imported += 1
+            # Track which top-level widget dirs we touched, so we know
+            # what to gate after extraction.
+            head = name.split("/", 1)[0]
+            if head and "/" in name:
+                imported_widget_ids.add(head)
 
-    # Reload to pick up new widgets
+    # Integrity gate: walk each freshly-imported widget. Accept stamped
+    # ones, validate-and-stamp unstamped ones, quarantine failures.
+    from .validation_stamp import has_valid_stamp, write_stamp
+    from .languages import get_engine
+    from .validator import validate_item
+    import shutil
+
+    quarantine_dir = os.path.join(LIBRARY_PATH, ".quarantine")
     carto = _carto()
-    print(f"\n  Imported {imported} files ({len(manifests)} widgets). {skipped} files skipped (already exist).")
+    accepted_stamped = []
+    accepted_revalidated = []
+    quarantined = []
+
+    for wid_dir in sorted(imported_widget_ids):
+        widget_path = os.path.join(LIBRARY_PATH, wid_dir)
+        manifest_path = os.path.join(widget_path, "widget.json")
+        if not os.path.isfile(manifest_path):
+            continue
+        try:
+            with open(manifest_path) as f:
+                data = json.load(f)
+            language = data.get("tech_stack", {}).get("language", "unknown")
+            if isinstance(language, list):
+                language = language[0] if language else "unknown"
+        except Exception as e:
+            quarantined.append({"id": wid_dir, "reason": f"unreadable manifest: {e}"})
+            _quarantine_widget(widget_path, quarantine_dir, f"unreadable manifest: {e}")
+            continue
+
+        if has_valid_stamp(widget_path, language):
+            accepted_stamped.append(wid_dir)
+            continue
+
+        engine = get_engine(language)
+        if engine is None:
+            quarantined.append({"id": wid_dir, "reason": f"no engine for language {language!r}"})
+            _quarantine_widget(widget_path, quarantine_dir, f"no engine for language {language!r}")
+            continue
+
+        result = validate_item(carto, widget_path)
+        if isinstance(result, dict) and result.get("status") == "error":
+            reason = result.get("message", "validation failed")
+            quarantined.append({"id": wid_dir, "reason": reason})
+            _quarantine_widget(widget_path, quarantine_dir, reason)
+            continue
+        try:
+            write_stamp(widget_path, language, engine, test_results=None)
+            accepted_revalidated.append(wid_dir)
+        except Exception as e:
+            quarantined.append({"id": wid_dir, "reason": f"stamp write failed: {e}"})
+            _quarantine_widget(widget_path, quarantine_dir, f"stamp write failed: {e}")
+
+    # Reload so any new widgets show up.
+    _carto()
+    print(f"\n  Imported {imported} files from {len(imported_widget_ids)} widget(s).")
+    if accepted_stamped:
+        print(f"    accepted (stamp valid): {len(accepted_stamped)}")
+    if accepted_revalidated:
+        print(f"    accepted (re-validated): {len(accepted_revalidated)}")
+    if quarantined:
+        print(f"    quarantined: {len(quarantined)} → {quarantine_dir}")
+        for q in quarantined[:5]:
+            print(f"      - {q['id']}: {q['reason'][:120]}")
+        if len(quarantined) > 5:
+            print(f"      ... +{len(quarantined) - 5} more")
     if skipped:
-        print(f"  Re-run with --force to overwrite existing files.")
+        print(f"    skipped (already exist, no --force): {skipped}")
     print()
+
+
+def _quarantine_widget(widget_path: str, quarantine_dir: str, reason: str) -> None:
+    """Move a failed-import widget out of the live library.
+
+    Keeps the files reachable for inspection (under .quarantine/<id>/)
+    but ensures they don't appear as phantoms in the live tree.
+    """
+    import shutil
+    os.makedirs(quarantine_dir, exist_ok=True)
+    dest = os.path.join(quarantine_dir, os.path.basename(widget_path))
+    if os.path.exists(dest):
+        # Don't clobber a prior quarantine — append a suffix so audits
+        # see the history of failed imports.
+        i = 2
+        while os.path.exists(f"{dest}.{i}"):
+            i += 1
+        dest = f"{dest}.{i}"
+    try:
+        shutil.move(widget_path, dest)
+    except OSError:
+        # If the move fails, the widget stays in the live library as a
+        # phantom rather than disappearing entirely. The doctor surface
+        # will still flag it.
+        return
+    try:
+        with open(os.path.join(dest, ".quarantine_reason"), "w") as f:
+            f.write(reason + "\n")
+    except OSError:
+        pass
 
 
 def cmd_stats(args):

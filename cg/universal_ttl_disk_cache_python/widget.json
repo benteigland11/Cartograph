@@ -1,18 +1,18 @@
 {
   "meta": {
-    "id": "universal-graph-cycles-python",
-    "name": "Graph Cycles",
-    "version": "1.0.1",
+    "id": "universal-ttl-disk-cache-python",
+    "name": "Ttl Disk Cache",
+    "version": "1.0.0",
     "domain": "universal",
     "tags": [
-      "graph",
-      "cycle",
-      "detection",
-      "directed-graph",
-      "algorithms"
+      "cache",
+      "ttl",
+      "disk",
+      "persistence",
+      "json"
     ]
   },
-  "description": "Identifies simple cycles in a directed graph using DFS.",
+  "description": "Persistent on-disk TTL cache. One JSON file per key under a caller-supplied root; each entry carries its own expires_at. Atomic writes via tmp + os.replace so crashes never corrupt a previously valid entry. Files written 0600 since values may be sensitive. Keys are restricted to [A-Za-z0-9_-]+ so they map to filenames without escaping. Designed for short-lived processes (CLIs, scripts, cron) that need to survive across invocations without paying a network round-trip every time. Corrupt or expired entries miss silently. Zero dependencies beyond stdlib.",
   "tech_stack": {
     "language": "python",
     "dependencies": []
@@ -25,7 +25,7 @@
   },
   "validation": {
     "engine_version": 1,
-    "validated_at": "2026-06-04T21:40:31.582833+00:00",
+    "validated_at": "2026-06-04T21:18:57.322584+00:00",
     "runtime": "python 3.14.5"
   }
 }
