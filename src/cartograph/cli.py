@@ -217,12 +217,19 @@ def _search_registries(query, domain_filter, language_filter, top_k,
             widgets.append(w)
         return widgets
 
-    # Public registry (None = default URL)
-    all_widgets.extend(_fetch(_PUBLIC_REGISTRY_PREFIX, None))
+    # Fan-out order is display order (registry order = registry ranking, and
+    # fetch order = pool order). The home registry (publish-registry) speaks
+    # first; remaining registries keep config order with public cg last.
+    # With no home configured, publish-registry defaults to cg, so the
+    # public registry leads as before.
+    from .config import get_value
+    home_prefix, _ = get_value("publish-registry")
+    entries = [(reg["prefix"], reg["url"]) for reg in get_registries()]
+    entries.append((_PUBLIC_REGISTRY_PREFIX, None))
+    entries.sort(key=lambda e: e[0] != home_prefix)  # stable: home first
 
-    # Company registries
-    for reg in get_registries():
-        all_widgets.extend(_fetch(reg["prefix"], reg["url"]))
+    for prefix, url in entries:
+        all_widgets.extend(_fetch(prefix, url))
 
     # If the filter named registries that don't exist, surface that as an
     # error so the agent isn't silently empty-handed.
@@ -232,6 +239,27 @@ def _search_registries(query, domain_filter, language_filter, top_k,
             errors[prefix] = f"Unknown registry prefix {prefix!r}. Run `cartograph registry` to list."
 
     return all_widgets, errors, scoped_prefixes
+
+
+# Search rows are bounded so total payload size is predictable for agents:
+# top_k x bounded-row = hard ceiling. Search is the brochure rack, not the
+# brochure - the full description lives behind `inspect`.
+_SEARCH_DESC_LIMIT = 200
+
+
+def _search_row(w):
+    """Bound a search result row for display.
+
+    Drops review-trend noise and truncates the description at a word
+    boundary. Applies identically to local and registry rows so both
+    payloads obey the same row contract.
+    """
+    row = {k: v for k, v in w.items() if k != "trend"}
+    desc = row.get("description")
+    if isinstance(desc, str) and len(desc) > _SEARCH_DESC_LIMIT:
+        cut = desc[:_SEARCH_DESC_LIMIT].rsplit(" ", 1)[0].rstrip(" ,;:.")
+        row["description"] = cut + "..."
+    return row
 
 
 def cmd_search(args):
@@ -278,13 +306,14 @@ def cmd_search(args):
 
     local_widgets = local.get("results", [])
 
-    # Dedup registry results: same (registry_prefix, base_id) → highest relevance wins.
+    # Dedup registry results: same (registry_prefix, base_id) → first occurrence
+    # wins. The registry's response order IS its ranking, so the first time a
+    # widget appears is the registry's strongest opinion of it.
     # Same base_id across DIFFERENT registries stays separate (different install targets).
     seen_registry = {}
     for w in registry_widgets:
         key = (w.get("registry_prefix", ""), _base_id(w))
-        existing = seen_registry.get(key)
-        if existing is None or w.get("relevance_score", 0) > existing.get("relevance_score", 0):
+        if key not in seen_registry:
             seen_registry[key] = w
 
     # Only suppress a local widget if the cloud version belongs to the current user.
@@ -315,47 +344,66 @@ def cmd_search(args):
             seen_local[bid] = w
 
     local_sorted = sorted(seen_local.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
-    # All registry results pooled and sorted by relevance
-    registry_sorted = sorted(seen_registry.values(), key=lambda w: w.get("relevance_score", 0), reverse=True)
+    # Registry results stay in received order: each registry owns its own
+    # ranking, and cross-registry relevance scores aren't comparable anyway.
+    # Order is fetch order (public first, then config order), each registry's
+    # block in the order it returned.
+    registry_ordered = list(seen_registry.values())
 
-    # Local fills first; all registries combined share the remaining half.
+    # One pool fills its slate first; the other shares the remaining budget,
+    # capped at half so it can never be invisible-by-default. search-priority
+    # picks who goes first: 'local' (default — your own validated widgets win)
+    # or 'registry' (orgs that want the vetted registry versions fronted).
     # When the agent explicitly scoped to one or more registries, that's a
-    # signal of intent — drop the cap so the requested registries fill
-    # whatever local didn't.
+    # signal of intent — drop the registry cap so the requested registries
+    # fill whatever local didn't.
+    from .config import get_value
+    registry_first = get_value("search-priority")[0] == "registry"
     explicit_registry_scope = registries_filter is not None
     _REGISTRY_CAP = (args.top_k if explicit_registry_scope
                      else args.top_k // 2)
-    if local_sorted and registry_sorted:
+    if not local_sorted or not registry_ordered:
         local_take = min(len(local_sorted), args.top_k)
-        registry_take = min(len(registry_sorted), args.top_k - local_take, _REGISTRY_CAP)
-    elif local_sorted:
-        local_take = min(len(local_sorted), args.top_k)
-        registry_take = 0
+        registry_take = min(len(registry_ordered), args.top_k)
+    elif registry_first:
+        registry_take = min(len(registry_ordered), args.top_k)
+        local_take = min(len(local_sorted), args.top_k - registry_take, args.top_k // 2)
     else:
-        local_take = 0
-        registry_take = min(len(registry_sorted), args.top_k)
+        local_take = min(len(local_sorted), args.top_k)
+        registry_take = min(len(registry_ordered), args.top_k - local_take, _REGISTRY_CAP)
 
-    combined = local_sorted[:local_take] + registry_sorted[:registry_take]
+    local_results = [_search_row(w) for w in local_sorted[:local_take]]
+    registry_results = [_search_row(w) for w in registry_ordered[:registry_take]]
 
-    merged = {
-        "local_count": local_take,
-        "registry_count": registry_take,
-        "widgets": combined,
-    }
+    # Payload key order mirrors priority — agents read top-down.
+    local_block = {"count": local_take, "widgets": local_results}
+    registry_block = {"count": registry_take, "widgets": registry_results}
+    if registry_first:
+        payload = {"registry": registry_block, "local": local_block}
+    else:
+        payload = {"local": local_block, "registry": registry_block}
+    # No silent caps: when the budget cut matches from a pool, say how many,
+    # so the agent knows there is more to see (raise --top-k or scope with
+    # --registry / --local-only). Registry 'omitted' counts what we received
+    # and dropped; registries themselves return at most top_k each.
+    local_omitted = len(local_sorted) - local_take
+    registry_omitted = len(registry_ordered) - registry_take
+    if local_omitted > 0:
+        payload["local"]["omitted"] = local_omitted
+    if registry_omitted > 0:
+        payload["registry"]["omitted"] = registry_omitted
     if registry_errors:
-        merged["registry_errors"] = registry_errors
+        payload["registry_errors"] = registry_errors
 
-    if not combined:
-        out({
-            "local_count": 0,
-            "registry_count": 0,
-            "widgets": [],
-            "message": f"No widgets found for \'{args.query}\'.",
-            "suggestion": "Try broadening your search by removing --domain or --language filters." if args.domain or args.language else "Run \'cartograph doctor\' to check available language engines."
-        })
-        return
+    if not local_results and not registry_results:
+        payload["message"] = f"No widgets found for '{args.query}'."
+        payload["suggestion"] = (
+            "Try broadening your search by removing --domain or --language filters."
+            if args.domain or args.language
+            else "Run 'cartograph doctor' to check available language engines."
+        )
 
-    out(merged)
+    out(payload)
 
 
 def cmd_inspect(args):

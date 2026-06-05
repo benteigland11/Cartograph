@@ -80,3 +80,38 @@ def test_search_empty_library():
 def test_search_top_k_respected(carto):
     result = carto.search("backend", top_k=2)
     assert len(result["results"]) <= 2
+
+
+# ---------------------------------------------------------------------------
+# Search row contract (cli._search_row) — bounded rows for predictable payload
+# ---------------------------------------------------------------------------
+
+def test_search_row_drops_trend():
+    from cartograph.cli import _search_row
+    row = _search_row({"id": "x", "trend": "up", "rating": 4.5})
+    assert "trend" not in row
+    assert row["rating"] == 4.5
+
+
+def test_search_row_truncates_long_description_at_word_boundary():
+    from cartograph.cli import _search_row, _SEARCH_DESC_LIMIT
+    desc = "word " * 100  # 500 chars
+    row = _search_row({"id": "x", "description": desc})
+    assert row["description"].endswith("...")
+    assert len(row["description"]) <= _SEARCH_DESC_LIMIT + 3
+    # No mid-word cut: everything before the ellipsis is whole words
+    assert row["description"][:-3].split(" ")[-1] == "word"
+
+
+def test_search_row_keeps_short_description_untouched():
+    from cartograph.cli import _search_row
+    row = _search_row({"id": "x", "description": "Short and sweet."})
+    assert row["description"] == "Short and sweet."
+
+
+def test_search_row_does_not_mutate_input():
+    from cartograph.cli import _search_row
+    original = {"id": "x", "trend": "up", "description": "d" * 999}
+    _search_row(original)
+    assert original["trend"] == "up"
+    assert len(original["description"]) == 999

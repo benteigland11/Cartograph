@@ -31,6 +31,7 @@ _DEFAULTS = {
         "show_unavailable": True,
         "cloud": True,
         "auto_update": True,
+        "search_priority": "local",
     },
     "publish": {
         "auto_publish": False,
@@ -55,7 +56,11 @@ _SCHEMA = {
                          "Show widgets for languages not installed on this machine"),
     "publish-registry": ("publish", "registry", "str", None,
                          "Default registry prefix for --publish on local widgets (e.g. myorg). "
-                         "Defaults to the public registry (cg) if not set."),
+                         "Defaults to the public registry (cg) if not set. "
+                         "Also ranks that registry first in search results."),
+    "search-priority":  ("library", "search_priority", "str", ["local", "registry"],
+                         "Which pool fills the search budget first: your local library "
+                         "or the registry pool"),
 }
 
 
@@ -222,6 +227,16 @@ def _known_engine_binaries() -> list[tuple[str, str]]:
             seen.add(binary)
             pairs.append((binary, lang))
     return sorted(pairs)
+
+
+def config_keys() -> list[str]:
+    """Return all settable config keys (excluding the dynamic paths.* namespace).
+
+    Public accessor so downstream surfaces (MCP server, agent tooling) can
+    derive their key enums from the CLI instead of hardcoding a copy that
+    drifts when new settings land.
+    """
+    return sorted(_SCHEMA)
 
 
 def list_values() -> list[dict]:

@@ -67,8 +67,8 @@ def test_search_emits_json(cli_env, tmp_path):
     rc, stdout, stderr = _run(["search", "http"], cli_env, str(tmp_path))
     result = _parse_json_stdout(stdout, stderr)
     assert isinstance(result, dict)
-    # Should surface the http-client fixture widget
-    widgets = result.get("widgets") or result.get("results") or []
+    # Should surface the http-client fixture widget in the local payload
+    widgets = (result.get("local") or {}).get("widgets") or []
     ids = [w.get("id") for w in widgets]
     assert "http-client" in ids, f"search did not find http-client: {ids}"
 
