@@ -114,9 +114,8 @@ what the tool actually supports.
 - **PHP**: Composer + PHPUnit 11, Xdebug or PCOV for coverage, 80% threshold via `--min-coverage`. PSR-4 autoloading under `Cartograph\` namespace. Contamination scanner blocks WordPress globals (`wp_*`, `add_action`, `$wpdb`, etc.) and `echo` in src/ to enforce pure PHP utility widgets.
 - **Terraform**: `terraform validate` against src/, tests/, and examples/ (shape-only - no test runner, no coverage; modules harden through use). Blocks provider/backend blocks in src/, real AWS account IDs, and credential-shaped assignments. Providers cached via `TF_PLUGIN_CACHE_DIR`.
 - **Go**: `go test` with built-in coverage (80% via `-coverpkg`), `go vet` + build check, native `go/ast` contamination scanner. Single-binary toolchain. Widgets are libraries: console output, `os.Exit`, and `panic` in `init()` are blocked in src/.
-- **SPICE**: parametric analog/mixed-signal circuit blocks validated by `ngspice -b` simulation (artifact-style, like OpenSCAD). src/ is a pure `.subckt`; the testbench must measure each claimed quantity with `.meas` and assert it within a tolerance band (the no-line-coverage substitute - a circuit that measures nothing is untested). Output is parsed, not the exit code (ngspice returns 0 even when a measurement fails). Python contamination scanner blocks analysis cards / `.control` in src/ and non-portable includes; hardcoded component values warn.
 
-Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD, SystemVerilog, and SPICE use Python-based scanners since none of these declarative formats has a general-purpose runtime suitable for hosting static analysis tooling.
+Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD and SystemVerilog use Python-based scanners since neither language has general-purpose file I/O suitable for static analysis tooling.
 
 ## Cloud registry
 
@@ -146,7 +145,7 @@ pytest
 
 The widget library lives in your platform's user data directory. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
-Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, terraform, go, ngspice) are installed correctly.
+Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, terraform, go) are installed correctly.
 
 ### Pre-push checks and release preflight
 
