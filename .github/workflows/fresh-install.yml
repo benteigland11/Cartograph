@@ -11,9 +11,9 @@ jobs:
 
     # Wait for PyPI to have the package available
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -108,7 +108,7 @@ jobs:
           test -d "$WIDGET_DIR/tests"
 
       - name: Install Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: '1.9.0'
           terraform_wrapper: false

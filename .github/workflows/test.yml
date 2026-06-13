@@ -31,13 +31,13 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Detect which engines are affected by this change so we can skip
       # unneeded tool installs on unrelated commits. Any edit to a cross-
       # cutting file (base.py, registry.py, validator.py, contamination.py,
       # pyproject.toml, or the workflow itself) triggers every install.
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: changes
         with:
           filters: |
@@ -57,7 +57,7 @@ jobs:
             terraform:
               - 'src/cartograph/languages/terraform.py'
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -87,7 +87,7 @@ jobs:
 
       - name: Install Terraform
         if: inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.terraform == 'true'
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: '1.9.0'
           terraform_wrapper: false
@@ -118,9 +118,9 @@ jobs:
     name: Verify engines in built wheel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -156,7 +156,7 @@ jobs:
       contents: write
       actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
