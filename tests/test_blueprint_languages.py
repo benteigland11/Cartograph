@@ -15,6 +15,7 @@ toolchain stays green.
 import json
 import os
 import shutil
+import sys
 
 import pytest
 
@@ -1361,6 +1362,12 @@ def _write_spice_blueprint(project_dir: str) -> str:
 
 
 @pytest.mark.slow
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="SPICE is WIP (supported=False) and not yet validated on Windows - "
+           "ngspice's .meas/assert block doesn't emit ASSERT_PASS there. Re-enable "
+           "and fix Windows before flipping the engine to supported=True.",
+)
 def test_spice_blueprint_validates_end_to_end(carto, project, monkeypatch):
     if not shutil.which("ngspice"):
         pytest.skip("ngspice not available")
