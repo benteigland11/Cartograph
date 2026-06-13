@@ -35,6 +35,21 @@ jobs:
       - name: cartograph --help
         run: cartograph --help
 
+      # Engines import bundled cg/ widgets; a path or shadowing bug makes one
+      # silently vanish from the registry in wheel installs while repo CI stays
+      # green (openscad was missing from every wheel v0.5.17-v0.7.4 this way).
+      - name: Verify all engines register in wheel install
+        run: |
+          python -c "
+          from cartograph.languages import supported_languages
+          langs = set(supported_languages())
+          expected = {'angular', 'javascript', 'nim', 'openscad', 'php',
+                      'python', 'systemverilog', 'terraform', 'typescript'}
+          missing = expected - langs
+          assert not missing, f'engines missing from wheel install: {missing}'
+          print('all engines registered:', sorted(langs))
+          "
+
       - name: cartograph doctor
         run: cartograph doctor || true
 

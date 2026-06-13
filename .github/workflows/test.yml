@@ -110,13 +110,46 @@ jobs:
       - name: Run tests
         run: pytest --tb=short -q
 
+  # Repo tests run against the checkout (editable install + repo cwd), which
+  # hides wheel-layout bugs: openscad's engine was missing from every wheel
+  # v0.5.17-v0.7.4 because its bundled-widget path only resolved in the repo.
+  # Build the real wheel, install it clean, and verify away from the repo.
+  wheel-verify:
+    name: Verify engines in built wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and install wheel
+        run: |
+          pip install build
+          python -m build --wheel
+          pip install dist/*.whl
+
+      - name: Verify all engines register (outside repo)
+        working-directory: /tmp
+        run: |
+          python -c "
+          from cartograph.languages import supported_languages
+          langs = set(supported_languages())
+          expected = {'angular', 'javascript', 'nim', 'openscad', 'php',
+                      'python', 'systemverilog', 'terraform', 'typescript'}
+          missing = expected - langs
+          assert not missing, f'engines missing from wheel install: {missing}'
+          print('all engines registered:', sorted(langs))
+          "
+
   # After tests pass on master, auto-tag if pyproject.toml's version was
   # bumped. The tag push then fires publish.yml (PyPI -> fresh-install ->
   # GitHub release) on its own. Skipped on PRs and on workflow_call from
   # publish.yml (that workflow already triggered from a tag).
   auto-tag:
     name: Auto-tag on version bump
-    needs: test
+    needs: [test, wheel-verify]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:

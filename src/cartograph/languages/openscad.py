@@ -5,19 +5,18 @@ import logging
 import os
 import re
 import shutil
-import sys
 import tempfile
 
 from .base import LanguageEngine
 
-# Import block_walker widget - installed at cg/universal_block_walker_python/.
+# Import block_walker widget - bundled at cg/universal_block_walker_python/.
 # Dogfooded for OpenSCAD's parameter splitting, comment stripping, and module
 # block extraction so we don't maintain a parallel implementation here.
-_WIDGET_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "cg",
-                            "universal_block_walker_python")
-if _WIDGET_PATH not in sys.path:
-    sys.path.insert(0, _WIDGET_PATH)
-from src.block_walker import (  # noqa: E402
+# Package-qualified import (same pattern as cli.py's agent_cli import): a bare
+# `from src...` after a sys.path insert collides with any other top-level
+# `src` namespace package (sloppy third-party wheels, src-layout cwds) and
+# silently knocks this engine out of the registry.
+from cg.universal_block_walker_python.src.block_walker import (  # noqa: E402
     split_at_depth as _split_at_depth,
     strip_comments as _strip_comments_raw,
     extract_blocks as _extract_blocks_raw,

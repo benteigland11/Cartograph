@@ -344,3 +344,34 @@ def test_openscad_watched_patterns_include_python_dir():
     engine = get_engine("openscad")
     patterns = engine.watched_patterns("/some/path")
     assert any("python" in p and "**" in p for p in patterns)
+
+
+def test_engines_survive_src_namespace_shadowing(tmp_path):
+    """All bundled engines must register even when another top-level `src`
+    namespace package wins the name first (sloppy third-party wheels ship
+    stray src/ dirs into site-packages; src-layout cwds do the same).
+
+    Regression: openscad/systemverilog imported block_walker as a bare
+    `from src...` after a sys.path insert, so a pre-existing `src` in
+    sys.modules knocked both engines out of the registry silently.
+    """
+    import os
+    import subprocess
+    import sys
+
+    decoy = tmp_path / "src"
+    decoy.mkdir()  # no __init__.py -> namespace package, like the wild cases
+    code = (
+        "import sys; sys.path.insert(0, {decoy!r}); import src\n"
+        "from cartograph.languages import supported_languages\n"
+        "langs = supported_languages()\n"
+        "missing = {{'openscad', 'systemverilog'}} - set(langs)\n"
+        "assert not missing, f'engines lost to src shadowing: {{missing}}'\n"
+    ).format(decoy=str(tmp_path))
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        env={**os.environ, "PYTHONPATH": "src" + os.pathsep + "."},
+    )
+    assert result.returncode == 0, result.stderr

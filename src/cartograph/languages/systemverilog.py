@@ -30,25 +30,16 @@ import glob as _glob
 import logging
 import os
 import re
-import sys
 import tempfile
 
 from .base import LanguageEngine
 
-# Import block_walker widget. cg/ sits two levels up in a wheel install
-# (site-packages/cg alongside site-packages/cartograph) and three levels up
-# in an editable dev install (<repo>/cg alongside <repo>/src/cartograph/).
-# Try both and keep the first that resolves.
-_HERE = os.path.dirname(__file__)
-_WIDGET_PATH_CANDIDATES = [
-    os.path.join(_HERE, "..", "..", "..", "cg", "universal_block_walker_python"),
-    os.path.join(_HERE, "..", "..", "cg", "universal_block_walker_python"),
-]
-_WIDGET_PATH = next((p for p in _WIDGET_PATH_CANDIDATES if os.path.isdir(p)),
-                   _WIDGET_PATH_CANDIDATES[-1])
-if _WIDGET_PATH not in sys.path:
-    sys.path.insert(0, _WIDGET_PATH)
-from src.block_walker import (  # noqa: E402
+# Import block_walker widget - bundled at cg/universal_block_walker_python/.
+# Package-qualified import (same pattern as cli.py's agent_cli import): a bare
+# `from src...` after a sys.path insert collides with any other top-level
+# `src` namespace package (sloppy third-party wheels, src-layout cwds) and
+# silently knocks this engine out of the registry.
+from cg.universal_block_walker_python.src.block_walker import (  # noqa: E402
     extract_blocks as _extract_blocks,
     strip_comments as _strip_comments_raw,
     HDL_STYLE as _HDL_STYLE,
