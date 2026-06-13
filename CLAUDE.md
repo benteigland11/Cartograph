@@ -21,6 +21,8 @@ creates `backend-retry-backoff-python`.
     infra      CLI tools, file ops, system utilities
     modeling   3D geometry, CAD, parametric design (OpenSCAD)
     rtl        register-transfer level hardware design (SystemVerilog)
+    devops     infrastructure-as-code, deployment, ops tooling (Terraform)
+    analog     analog/mixed-signal circuits, SPICE simulation (ngspice)
     universal  language-agnostic, cross-domain
 
 ### Commands
