@@ -43,6 +43,7 @@ These are requirements. Validation fails if any are not met.
 | Nim | No | N/A | No stdlib coverage tool exists |
 | OpenSCAD | No | N/A | Render passes = validation passes |
 | SystemVerilog | No | N/A | Testbench `$finish` exit code = pass; no per-line coverage |
+| Go | Yes | 80% | go test -coverpkg=./src/... (built into the toolchain) |
 
 Nim coverage would require compiling via `--debugger:native` and running `gcov`/`lcov` on the generated C code. This produces C-level line coverage, not Nim source-level coverage. Decided it was too unreliable and confusing to impose on widget authors.
 
@@ -144,6 +145,55 @@ Nim coverage would require compiling via `--debugger:native` and running `gcov`/
 | Each tests/test_*.sv compiles and simulates | iverilog or vvp non-zero exit | iverilog + vvp subprocess |
 | examples/example_usage.sv compiles and simulates | iverilog or vvp non-zero exit | iverilog + vvp subprocess |
 | Python fallback contamination scanner passes | issues found | regex + block_walker primitives |
+
+
+### Go
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| go.mod exists | missing | file check |
+| src/ has .go files | missing | file check |
+| go vet passes on ./... | analyzer/type errors | subprocess (includes tests/ and examples/) |
+| go build ./src/... passes | compile errors | subprocess (library only - no artifacts) |
+| Native Go scanner passes on src/ | issues found | go_scanner.go (go/ast) |
+| All declared dependencies are version-pinned | unpinned dep found | dep pinning check |
+| go test ./tests/... passes | any test fails | subprocess |
+| Coverage meets threshold | below 80% | -coverpkg=./src/... + go tool cover -func |
+| Example runs and exits cleanly | non-zero exit | go run ./examples |
+
+**Layout:** `go.mod` at the widget root declares `module <widget-slug>`. The
+library package lives in `src/` and is imported by module path
+(`"<module>/src"`); tests in `tests/` are black-box (`package tests`,
+`*_test.go` filenames); `examples/example_usage.go` is `package main`.
+
+**Coverage:** 80% enforced. `go test ./tests/... -coverpkg=./src/...
+-coverprofile=<tmp>` followed by `go tool cover -func` to read the `total:`
+line. Coverage support is built into the toolchain - no extra dependency.
+
+**Dependencies:** declared in widget.json as `<module-path>>=<version>`
+(e.g. `github.com/google/uuid>=1.6.0`). The validator runs `go get
+<module>@v<floor>` plus `go mod tidy`, so the floor becomes the go.mod
+requirement (Go's minimal-version selection resolves exactly the floor
+unless a consumer raises it). No per-validation isolation: GOMODCACHE is
+version-addressed and checksummed (go.sum), so the shared cache is safe.
+
+**Scanner:** native `go_scanner.go`, stdlib-only (`go/ast` + `go/parser`),
+string- and comment-aware by construction. Compiled once to a cached binary
+because `go run scanner.go <files...>` would consume the target files as
+additional sources rather than passing them as argv. Blocks in src/:
+`fmt.Print*/print/println`, `os.Exit`/`log.Fatal*`, `panic` inside
+`init()`, credentials, absolute paths, hardcoded IPs, `time.Sleep`.
+Warnings: hardcoded URLs, env var access (`os.Getenv`/`os.LookupEnv`),
+top-level mutable `var`s, hardcoded numeric tunables, unlisted module
+imports (resolved against go.mod's module path and widget.json deps;
+stdlib detected by the no-dot-in-first-path-element rule). Sleeps in
+tests warn only above 1s, with durations estimated statically from
+`N * time.Second`-shaped expressions.
+
+**Blueprints:** Go composition uses `require` + `replace` directives
+pointing at `./cg/<dep-widget>/` in the blueprint's go.mod.
+`run_blueprint_example` additionally synthesizes a temporary `go.work`
+spanning the sandbox root and each dep widget module.
 
 ## Contamination Scanning
 

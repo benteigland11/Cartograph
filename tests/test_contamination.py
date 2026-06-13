@@ -29,6 +29,7 @@ from cartograph.languages.systemverilog import SystemVerilogEngine
 from cartograph.languages.angular import AngularEngine
 from cartograph.languages.php import PhpEngine
 from cartograph.languages.terraform import TerraformEngine
+from cartograph.languages.go import GoEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
 
@@ -84,6 +85,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "angular": AngularEngine,
         "php": PhpEngine,
         "terraform": TerraformEngine,
+        "go": GoEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -114,6 +116,7 @@ CLEAN = {
     "angular":    ("export class ItemComponent { getValue() { return 'world'; } }\n", "", None),
     "php":        ("<?php\nclass Item { public function getValue(): mixed { return 'world'; } }\n", "", None),
     "terraform":  ('resource "null_resource" "x" {\n  triggers = { name = var.name }\n}\n', "", None),
+    "go":         ('package module\n\nfunc Hello() string { return "world" }\n', "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -125,6 +128,7 @@ ABS_PATH_SRC = {
     "angular":    "const LOG = '/home/user/logs/app.log'\n",
     "php":        "<?php\n$log = '/home/user/logs/app.log';\n",
     "terraform":  'locals {\n  log = "/home/user/logs/app.log"\n}\n',
+    "go":         'package module\n\nfunc LogPath() string { return "/home/user/logs/app.log" }\n',
 }
 
 # Check 2: Credentials in src/ -> block
@@ -136,6 +140,7 @@ CREDENTIAL_SRC = {
     "angular":    "const api_key = 'sk-abc123verylongkey'\n",
     "php":        "<?php\n$api_key = 'sk-abc123verylongkey';\n",
     "terraform":  'locals {\n  api_key = "sk-abc123verylongkey"\n}\n',
+    "go":         'package module\n\nfunc Key() string {\n\tapiKey := "sk-abc123verylongkey"\n\treturn apiKey\n}\n',
 }
 
 # Check 2b: Credentials in tests/ -> warning (not block)
@@ -147,6 +152,7 @@ CREDENTIAL_TEST = {
     "angular":    "const password = 'fake_test_password_123'\n",
     "php":        "<?php\n$password = 'fake_test_password_123';\n",
     "terraform":  'locals {\n  password = "fake_test_password_123"\n}\n',
+    "go":         'package tests\n\nfunc fakeCred() string {\n\tpassword := "fake_test_password_123"\n\treturn password\n}\n',
 }
 
 # Check 3: Hardcoded URLs -> block
@@ -158,6 +164,7 @@ URL_SRC = {
     "angular":    "const API = 'https://api.mycompany.com/v1'\n",
     "php":        "<?php\n$api = 'https://api.mycompany.com/v1';\n",
     "terraform":  'locals {\n  api = "https://api.mycompany.com/v1"\n}\n',
+    "go":         'package module\n\nfunc API() string { return "https://api.mycompany.com/v1" }\n',
 }
 
 # Check 3b: localhost/example.com URLs -> allowed
@@ -169,6 +176,7 @@ URL_ALLOWED = {
     "angular":    "const API = 'http://localhost:8080/api'\n",
     "php":        "<?php\n$api = 'http://localhost:8080/api';\n",
     "terraform":  'locals {\n  api = "http://localhost:8080/api"\n}\n',
+    "go":         'package module\n\nfunc API() string { return "http://localhost:8080/api" }\n',
 }
 
 # Check 4: Hardcoded IPs -> block
@@ -180,6 +188,7 @@ IP_SRC = {
     "angular":    "const HOST = '192.168.1.100'\n",
     "php":        "<?php\n$host = '192.168.1.100';\n",
     "terraform":  'locals {\n  host = "192.168.1.100"\n}\n',
+    "go":         'package module\n\nfunc Host() string { return "192.168.1.100" }\n',
 }
 
 # Check 5: Sleep in src/ -> block
@@ -189,6 +198,7 @@ SLEEP_SRC = {
     "nim":        "sleep(1000)\n",
     "angular":    "setTimeout(() => {}, 1000)\n",
     "php":        "<?php\nsleep(1);\n",
+    "go":         'package module\n\nimport "time"\n\nfunc Wait() { time.Sleep(1 * time.Second) }\n',
 }
 
 # Check 5b: Sleep in tests/ with small duration -> no warning
@@ -198,6 +208,7 @@ SLEEP_TEST_SMALL = {
     "nim":        "sleep(500)\n",
     "angular":    "setTimeout(() => {}, 500)\n",
     "php":        "<?php\nsleep(1);\n",  # 1 second - not > 1, no warning
+    "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(500 * time.Millisecond) }\n',
 }
 
 # Check 5c: Sleep in tests/ with large duration -> warning
@@ -207,6 +218,7 @@ SLEEP_TEST_LARGE = {
     "nim":        "sleep(5000)\n",
     "angular":    "setTimeout(() => {}, 5000)\n",
     "php":        "<?php\nsleep(5);\n",
+    "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(5 * time.Second) }\n',
 }
 
 # Check 6: Hardcoded values -> warning
@@ -216,6 +228,7 @@ HARDCODED_VALUE = {
     "nim":        "let timeout = 30\n",
     "angular":    "const TIMEOUT = 30\n",
     "php":        "<?php\nclass Item { private $TIMEOUT = 30; }\n",
+    "go":         'package module\n\nconst Timeout = 30\n',
 }
 
 # Check 7: Env var access -> warning
@@ -225,6 +238,7 @@ ENV_VAR = {
     "nim":        'let v = getEnv("KEY")\n',
     "angular":    "const v = process.env['KEY']\n",
     "php":        "<?php\n$v = getenv('KEY');\n",
+    "go":         'package module\n\nimport "os"\n\nfunc Cfg() string { return os.Getenv("KEY") }\n',
 }
 
 # Check 8: Unlisted imports -> warning
@@ -234,6 +248,7 @@ UNLISTED_IMPORT = {
     "nim":        "import somepkg\n",
     "angular":    "import { something } from 'some-unregistered-pkg'\n",
     "php":        "<?php\nuse GuzzleHttp\\Client;\n",
+    "go":         'package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n',
 }
 
 # Check 8b: Listed imports -> no warning
@@ -243,6 +258,7 @@ LISTED_IMPORT = {
     "nim":        ("import somepkg\n", ["somepkg>=1.0.0"]),
     "angular":    ("import { something } from 'some-registered-pkg'\n", ["some-registered-pkg>=1.0.0"]),
     "php":        ("<?php\nuse GuzzleHttp\\Client;\n", ["guzzlehttp/guzzle>=7.0.0"]),
+    "go":         ('package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n', ["github.com/google/uuid>=1.6.0"]),
 }
 
 # Check 8c: Stdlib imports -> no warning
@@ -253,13 +269,14 @@ STDLIB_IMPORT = {
     "angular":    "import * as path from 'path'\n",
     # PHP builtins don't need use statements - calling strlen() has no import to flag
     "php":        "<?php\nclass Item { public function run(): void { strlen('test'); } }\n",
+    "go":         'package module\n\nimport "encoding/json"\n\nvar _ = json.Marshal\n',
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go"}
 
 # Which languages need external tools to run their scanners
-NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node"}
+NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go"}
 
 
 # ---------------------------------------------------------------------------
@@ -267,10 +284,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go"]
 
 
 def _skip_if_missing(lang):
@@ -2086,3 +2103,117 @@ class TestTerraformSpecific:
             f"IP in tests/ must not block: {result['blocks']}"
         assert any("ip" in w.lower() for w in result["warnings"]), \
             f"IP in tests/ must warn: {result['warnings']}"
+
+
+# ---------------------------------------------------------------------------
+# Go-specific checks (go/ast native scanner)
+# ---------------------------------------------------------------------------
+
+class TestGoSpecific:
+    """Checks unique to the Go engine's native scanner."""
+
+    def _go_scan(self, tmp_path, src_code, **kw):
+        _skip_if_missing("go")
+        return _scan(tmp_path, "go", "go", src_code, **kw)
+
+    def test_fmt_println_in_src_blocks(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "fmt"\n\n'
+            'func Hello() { fmt.Println("debug") }\n')
+        assert any("console output" in b for b in result["blocks"]), \
+            f"fmt.Println in src must block: {result}"
+
+    def test_fmt_println_in_string_not_blocked(self, tmp_path):
+        """AST-based scanning: calls named inside string literals don't trip."""
+        result = self._go_scan(tmp_path,
+            'package module\n\n'
+            'func Doc() string { return "call fmt.Println(x) to print" }\n')
+        assert not any("console output" in b for b in result["blocks"]), \
+            f"fmt.Println in a string must not block: {result['blocks']}"
+
+    def test_fmt_println_in_comment_not_blocked(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\n'
+            '// Use fmt.Println(x) in your own code to inspect values.\n'
+            'func Hello() string { return "world" }\n')
+        assert not any("console output" in b for b in result["blocks"]), \
+            f"fmt.Println in a comment must not block: {result['blocks']}"
+
+    def test_os_exit_in_src_blocks(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "os"\n\n'
+            'func Quit() { os.Exit(1) }\n')
+        assert any("exit" in b.lower() for b in result["blocks"]), \
+            f"os.Exit in src must block: {result}"
+
+    def test_log_fatal_in_src_blocks(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "log"\n\n'
+            'func Quit() { log.Fatal("boom") }\n')
+        assert any("exit" in b.lower() for b in result["blocks"]), \
+            f"log.Fatal in src must block: {result}"
+
+    def test_panic_in_init_blocks(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\n'
+            'func init() { panic("boom") }\n')
+        assert any("init" in b.lower() for b in result["blocks"]), \
+            f"panic in init must block: {result}"
+
+    def test_panic_in_regular_func_allowed(self, tmp_path):
+        """panic in a normal function is a legitimate Go idiom (Must* helpers)."""
+        result = self._go_scan(tmp_path,
+            'package module\n\n'
+            'func MustPositive(n int) int {\n'
+            '\tif n <= 0 {\n\t\tpanic("not positive")\n\t}\n'
+            '\treturn n\n}\n')
+        assert result["blocks"] == [], \
+            f"panic outside init must not block: {result['blocks']}"
+
+    def test_top_level_var_warns(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nvar counter int\n\n'
+            'func Inc() { counter++ }\n')
+        assert any("mutable state" in w.lower() for w in result["warnings"]), \
+            f"top-level var must warn: {result['warnings']}"
+
+    def test_top_level_const_no_mutable_warning(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nconst Greeting = "hello"\n\n'
+            'func Hello() string { return Greeting }\n')
+        assert not any("mutable state" in w.lower() for w in result["warnings"]), \
+            f"const must not warn as mutable state: {result['warnings']}"
+
+    def test_fmt_sprintf_allowed(self, tmp_path):
+        """Only printing variants block - fmt.Sprintf/Errorf are pure."""
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "fmt"\n\n'
+            'func Greet(name string) string { return fmt.Sprintf("hi %s", name) }\n')
+        assert result["blocks"] == [], \
+            f"fmt.Sprintf must not block: {result['blocks']}"
+
+    def test_println_allowed_in_example(self, tmp_path):
+        """Examples are package main demos - console output is their job."""
+        result = self._go_scan(tmp_path,
+            'package module\n\nfunc Hello() string { return "world" }\n',
+            example_code='package main\n\nimport "fmt"\n\n'
+                         'func main() { fmt.Println("demo") }\n')
+        assert result["blocks"] == [], \
+            f"fmt.Println in examples must not block: {result['blocks']}"
+
+    def test_sentinel_error_var_allowed(self, tmp_path):
+        """var ErrX = errors.New(...) is the idiomatic Go error contract."""
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "errors"\n\n'
+            'var ErrNotFound = errors.New("not found")\n\n'
+            'func Find() error { return ErrNotFound }\n')
+        assert not any("mutable state" in w.lower() for w in result["warnings"]), \
+            f"sentinel error var must not warn: {result['warnings']}"
+
+    def test_version_string_not_flagged_as_ip(self, tmp_path):
+        """Dotted runs longer than 4 octets (1.2.3.4.5) are versions, not IPs."""
+        result = self._go_scan(tmp_path,
+            'package module\n\n'
+            'func V() string { return "1.2.3.4.5" }\n')
+        assert not any("ip" in b.lower() for b in result["blocks"]), \
+            f"version string must not block as IP: {result['blocks']}"

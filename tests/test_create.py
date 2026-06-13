@@ -133,3 +133,29 @@ def test_create_duplicate_widget_errors(carto, tmp_path):
     carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=str(tmp_path))
     result = carto.create("dupe-widget", language="python", name="Dupe", domain="backend", tags=[], target_dir=str(tmp_path))
     assert result.get("status") == "error"
+
+
+def test_create_go_widget(carto, tmp_path, monkeypatch):
+    # Go ships supported=False until its stress test passes; the scaffold
+    # itself is testable regardless of the ship gate.
+    from cartograph.languages.go import GoEngine
+    monkeypatch.setattr(GoEngine, "supported", True)
+    result = carto.create(
+        "my-go-widget",
+        language="go",
+        name="My Go Widget",
+        domain="backend",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "go.mod",
+        "src/my_go_widget.go",
+        "tests/my_go_widget_test.go",
+        "examples/example_usage.go",
+    ])
+    # The module path in go.mod must match what the test/example imports.
+    with open(f"{result['path']}/go.mod") as f:
+        assert "module my_go_widget" in f.read()

@@ -1044,3 +1044,189 @@ def test_systemverilog_blueprint_validates_end_to_end(carto, project):
     res = carto.validate_blueprint(bp)
     assert res.get("status") == "success", res
     assert res["id"] == "bp-shouter-systemverilog"
+
+
+# ---------------------------------------------------------------------------
+# Go
+# ---------------------------------------------------------------------------
+
+_GO_GREET_MOD = """\
+module greet
+
+go 1.24
+"""
+
+_GO_GREET_SRC = """\
+// Package greet builds greeting strings.
+package greet
+
+// Greeting returns a greeting for name.
+func Greeting(name string) string {
+	return "hello, " + name
+}
+"""
+
+_GO_GREET_TEST = """\
+package tests
+
+import (
+	"testing"
+
+	greet "greet/src"
+)
+
+func TestGreeting(t *testing.T) {
+	if got := greet.Greeting("test"); got != "hello, test" {
+		t.Fatalf("Greeting() = %q", got)
+	}
+}
+"""
+
+_GO_GREET_EXAMPLE = """\
+package main
+
+import (
+	"fmt"
+
+	greet "greet/src"
+)
+
+func main() {
+	fmt.Println(greet.Greeting("world"))
+}
+"""
+
+# The blueprint composes the greet widget. Go's local-module composition
+# mechanism is require + replace pointing at the sandbox's cg/ copy.
+_GO_SHOUTER_MOD = """\
+module shouter
+
+go 1.24
+
+require greet v0.0.0
+
+replace greet => ./cg/infra-greet-go
+"""
+
+_GO_SHOUTER_SRC = """\
+// Package shouter uppercases greetings from the greet widget.
+package shouter
+
+import (
+	"strings"
+
+	greet "greet/src"
+)
+
+// Shout returns an uppercased greeting for name.
+func Shout(name string) string {
+	return strings.ToUpper(greet.Greeting(name))
+}
+"""
+
+_GO_SHOUTER_TEST = """\
+package tests
+
+import (
+	"testing"
+
+	shouter "shouter/src"
+)
+
+func TestShout(t *testing.T) {
+	if got := shouter.Shout("test"); got != "HELLO, TEST" {
+		t.Fatalf("Shout() = %q", got)
+	}
+}
+"""
+
+_GO_SHOUTER_EXAMPLE = """\
+package main
+
+import (
+	"fmt"
+
+	shouter "shouter/src"
+)
+
+func main() {
+	fmt.Println(shouter.Shout("world"))
+}
+"""
+
+
+def _write_go_widget(project_dir: str) -> str:
+    wdir = os.path.join(project_dir, "cg", "infra-greet-go")
+    os.makedirs(os.path.join(wdir, "src"))
+    os.makedirs(os.path.join(wdir, "tests"))
+    os.makedirs(os.path.join(wdir, "examples"))
+
+    manifest = {
+        "meta": {
+            "id": "infra-greet-go", "name": "greet", "version": "1.0.0",
+            "domain": "infra", "tags": ["greeting", "demo", "test"],
+        },
+        "tech_stack": {"language": "go", "dependencies": []},
+        "description": "Builds a greeting string.",
+    }
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(wdir, "go.mod"), "w") as f:
+        f.write(_GO_GREET_MOD)
+    with open(os.path.join(wdir, "src", "greet.go"), "w") as f:
+        f.write(_GO_GREET_SRC)
+    with open(os.path.join(wdir, "tests", "greet_test.go"), "w") as f:
+        f.write(_GO_GREET_TEST)
+    with open(os.path.join(wdir, "examples", "example_usage.go"), "w") as f:
+        f.write(_GO_GREET_EXAMPLE)
+    return wdir
+
+
+def _write_go_blueprint(project_dir: str) -> str:
+    bp = os.path.join(project_dir, "cg", "bp-shouter-go")
+    os.makedirs(os.path.join(bp, "src"))
+    os.makedirs(os.path.join(bp, "tests"))
+    os.makedirs(os.path.join(bp, "examples"))
+
+    manifest = {
+        "id": "bp-shouter-go",
+        "name": "shouter",
+        "language": "go",
+        "version": "0.1.0",
+        "description": "Uppercases a greeting via the greet widget.",
+        "tags": ["greeting", "demo", "blueprint"],
+        "dependencies": [
+            {"id": "infra-greet-go", "version": "1.0.0"},
+        ],
+        "domains": [],
+    }
+    with open(os.path.join(bp, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(bp, "go.mod"), "w") as f:
+        f.write(_GO_SHOUTER_MOD)
+    with open(os.path.join(bp, "src", "shouter.go"), "w") as f:
+        f.write(_GO_SHOUTER_SRC)
+    with open(os.path.join(bp, "tests", "shouter_test.go"), "w") as f:
+        f.write(_GO_SHOUTER_TEST)
+    with open(os.path.join(bp, "examples", "example_usage.go"), "w") as f:
+        f.write(_GO_SHOUTER_EXAMPLE)
+    return bp
+
+
+@pytest.mark.slow
+def test_go_blueprint_validates_end_to_end(carto, project):
+    if not shutil.which("go"):
+        pytest.skip("go not available")
+    engine = get_engine("go")
+    if engine is None or not engine.supported:
+        pytest.skip("go engine not available")
+    ok, msg = engine.check_available()
+    if not ok:
+        pytest.skip(f"go engine not ready: {msg}")
+
+    _write_go_widget(str(project))
+    bp = _write_go_blueprint(str(project))
+
+    res = carto.validate_blueprint(bp)
+    assert res.get("status") == "success", res
+    assert res["id"] == "bp-shouter-go"
