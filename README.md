@@ -131,6 +131,10 @@ export CARTOGRAPH_REGISTRY_URL=https://your-registry.example.com
 
 `cartograph login` opens a browser-based authentication flow provided by whichever registry you're connected to.
 
+Running or building a registry? The protocol contract - endpoints, the
+widget row schema, search ordering semantics, auth - is documented in
+[REGISTRY.md](REGISTRY.md).
+
 ## Development
 
 ```bash

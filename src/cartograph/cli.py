@@ -1286,6 +1286,7 @@ def cmd_login(args):
         received.get("signing_key", ""),
         client_id=received.get("client_id", ""),
         client_secret=received.get("client_secret", ""),
+        token_url=received.get("token_url", ""),
     )
     print(f"  Logged in as @{handle}\n")
 
@@ -1308,15 +1309,40 @@ def cmd_login(args):
 
 
 def cmd_whoami(args):
-    from .auth import is_authenticated
-    if not is_authenticated():
+    """Report identity on every registry you hold credentials for.
+
+    Public registry profile spreads at the top level (backward compatible);
+    company registries with stored tokens appear under 'registries', each
+    resolved live via that registry's /v1/auth/me.
+    """
+    from .auth import is_authenticated, get_token
+    from .config import get_registries
+    from .cloud import whoami
+
+    public = None
+    if is_authenticated():
+        result = whoami()
+        public = result if "error" not in result else {"error": result["error"]}
+
+    registries = {}
+    for reg in get_registries():
+        if not get_token(reg["url"]):
+            continue
+        r = whoami(registry_url=reg["url"])
+        registries[reg["prefix"]] = (
+            r if "error" not in r else {"error": r["error"]}
+        )
+
+    if public is None and not registries:
         out({"authenticated": False})
         return
-    from .cloud import whoami
-    result = whoami()
-    if "error" in result:
-        err(result)
-    out({"authenticated": True, **result})
+
+    payload = {"authenticated": True}
+    if public is not None:
+        payload.update(public)
+    if registries:
+        payload["registries"] = registries
+    out(payload)
 
 
 def cmd_dashboard(args):
@@ -1337,6 +1363,20 @@ def cmd_dashboard(args):
 
 
 def cmd_logout(args):
+    registry_prefix = getattr(args, "registry", None)
+    if registry_prefix:
+        # Company registry logout: drop only that registry's token.
+        from .config import get_registry_url_for_prefix
+        registry_url = get_registry_url_for_prefix(registry_prefix)
+        if not registry_url:
+            err({"error": f"Registry '{registry_prefix}' not configured. Run `cartograph registry` to list."})
+        from .auth import remove_registry_token
+        if remove_registry_token(registry_url):
+            out({"status": "success", "message": f"Logged out of registry '{registry_prefix}'."})
+        else:
+            out({"status": "already_logged_out", "registry": registry_prefix})
+        return
+
     from .auth import clear_token, is_authenticated
     if not is_authenticated():
         out({"status": "already_logged_out"})
@@ -3572,11 +3612,15 @@ def _build_cli() -> AgentCLI:
             "name": "logout",
             "help": "Remove stored cloud credentials",
             "handler": cmd_logout,
-            "args": [],
+            "args": [
+                {"name": "--registry", "default": None,
+                 "help": "Log out of a private registry by prefix (e.g. --registry myorg). "
+                         "Without this, logs out of the public registry."},
+            ],
         },
         {
             "name": "whoami",
-            "help": "Show current authenticated user",
+            "help": "Show current authenticated user on all registries",
             "handler": cmd_whoami,
             "args": [],
         },

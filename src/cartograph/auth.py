@@ -80,6 +80,18 @@ def store_registry_token(registry_url: str, token: str) -> None:
         pass
 
 
+def remove_registry_token(registry_url: str) -> bool:
+    """Remove the stored token for a company registry. Returns True if one existed."""
+    tokens = _read_registry_tokens()
+    key = registry_url.rstrip("/")
+    if key not in tokens:
+        return False
+    del tokens[key]
+    with open(_registry_tokens_path(), "w") as f:
+        json.dump(tokens, f, indent=2)
+    return True
+
+
 def _read_credentials() -> dict:
     """Read the credentials file, or return empty dict."""
     try:
@@ -113,28 +125,40 @@ def _is_token_expired(token: str) -> bool:
 
 
 def _refresh_id_token(refresh_token: str) -> str | None:
-    """Use a refresh token to get a new ID token from Google.
+    """Use a refresh token to get a new ID token from the identity provider.
+
+    The token endpoint comes from stored credentials (handed back by the
+    registry at login - any OIDC issuer), falling back to Google for
+    credentials saved before token_url existed.
 
     Returns the new id_token, or None on failure.
     """
     if not refresh_token:
         return None
 
-    # Need client_id and client_secret for refresh
-    client_id = _google_client_id()
-    client_secret = _google_client_secret()
-    if not client_id or not client_secret:
-        log.debug("Cannot refresh token: GOOGLE_CLIENT_ID/SECRET not set")
+    creds = _read_credentials()
+    token_url = creds.get("token_url") or _GOOGLE_TOKEN_URL
+    if not token_url.startswith("https://"):
+        log.debug("Refusing token refresh against non-https endpoint")
         return None
 
-    data = urllib.parse.urlencode({
+    # Need client_id (and usually client_secret) for refresh
+    client_id = _google_client_id()
+    client_secret = _google_client_secret()
+    if not client_id:
+        log.debug("Cannot refresh token: no client_id stored")
+        return None
+
+    form = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
         "client_id": client_id,
-        "client_secret": client_secret,
-    }).encode()
+    }
+    if client_secret:  # public OIDC clients have no secret
+        form["client_secret"] = client_secret
+    data = urllib.parse.urlencode(form).encode()
 
-    req = urllib.request.Request(_GOOGLE_TOKEN_URL, data=data, method="POST")
+    req = urllib.request.Request(token_url, data=data, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read())
@@ -216,8 +240,14 @@ def _write_credentials(creds: dict) -> None:
 
 
 def save_credentials(id_token: str, refresh_token: str, signing_key: str,
-                     client_id: str = "", client_secret: str = "") -> None:
-    """Persist OAuth credentials to disk."""
+                     client_id: str = "", client_secret: str = "",
+                     token_url: str = "") -> None:
+    """Persist OAuth credentials to disk.
+
+    token_url is the issuer's token endpoint for refreshes - handed back
+    by the registry at login so org tenants refresh against their own
+    identity provider instead of Google.
+    """
     if not id_token or not id_token.strip():
         raise ValueError("Received empty id_token - credentials not saved.")
     creds = {
@@ -229,6 +259,8 @@ def save_credentials(id_token: str, refresh_token: str, signing_key: str,
         creds["client_id"] = client_id
     if client_secret:
         creds["client_secret"] = client_secret
+    if token_url:
+        creds["token_url"] = token_url
     _write_credentials(creds)
 
 

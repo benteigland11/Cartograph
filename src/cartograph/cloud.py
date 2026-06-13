@@ -358,9 +358,9 @@ def push(widget_path: str, widget_id: str, visibility: str = "public",
           response="WhoamiResponse",
           tags=["Auth"],
           summary="Return the current authenticated user's profile")
-def whoami() -> dict:
+def whoami(registry_url: str | None = None) -> dict:
     """Return the current user's profile, or {"error": ...}."""
-    return _get("/v1/auth/me")
+    return _get("/v1/auth/me", registry_url=registry_url)
 
 
 @endpoint("GET", "/v1/widgets/{owner_handle}/{widget_id}",
