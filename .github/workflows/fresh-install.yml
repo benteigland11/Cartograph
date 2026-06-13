@@ -43,8 +43,9 @@ jobs:
           python -c "
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
-          expected = {'angular', 'javascript', 'nim', 'openscad', 'php',
-                      'python', 'systemverilog', 'terraform', 'typescript'}
+          expected = {'angular', 'go', 'javascript', 'nim', 'openscad',
+                      'php', 'python', 'systemverilog', 'terraform',
+                      'typescript'}
           missing = expected - langs
           assert not missing, f'engines missing from wheel install: {missing}'
           print('all engines registered:', sorted(langs))
@@ -125,6 +126,23 @@ jobs:
           test -f "$WIDGET_DIR/src/versions.tf"
           test -f "$WIDGET_DIR/src/variables.tf"
           test -f "$WIDGET_DIR/src/outputs.tf"
+          test -d "$WIDGET_DIR/tests"
+          test -d "$WIDGET_DIR/examples"
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+
+      - name: cartograph create (go)
+        run: cartograph create universal-ci-test-go --language go --domain universal --name "CI Go Test"
+
+      - name: Verify go widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "go.mod" -printf "%h" -quit)
+          echo "Go widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/go.mod"
+          test -d "$WIDGET_DIR/src"
           test -d "$WIDGET_DIR/tests"
           test -d "$WIDGET_DIR/examples"
 

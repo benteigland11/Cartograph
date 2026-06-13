@@ -110,7 +110,7 @@ class GoEngine(LanguageEngine):
     file_ext = "go"
     aliases = ["golang"]
     toolchain = {"go": "Install Go 1.23+ - go.dev/dl"}
-    supported = False  # flip only after the real-widget stress test passes
+    supported = True
 
     # NOTE: `go run scanner.go <files...>` cannot work - go run consumes
     # every leading .go argument as a source file to compile, so the target
