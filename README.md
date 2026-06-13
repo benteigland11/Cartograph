@@ -112,6 +112,8 @@ what the tool actually supports.
 - **SystemVerilog**: Icarus Verilog (iverilog + vvp), `-g2012` mode. Enforces `always_comb`/`always_ff` (legacy `always @(...)` blocked). Contamination scanner checks vendor primitives, simulation-only constructs (`initial`, `#delay`, `$display`), blocking/non-blocking assignment misuse, and hardcoded constants. Vendor primitives allowed when the vendor library is declared as a dependency.
 - **Angular**: Angular CLI (`ng test` + `ng build`), Karma + Jasmine with ChromeHeadless, 80% coverage via `karma.conf.js` thresholds. Standalone components (Angular 14+). Reuses JS contamination scanner. Example validation: `ng build` (build artifact, not script execution). Requires `@angular/cli` globally and Chrome/Chromium installed.
 - **PHP**: Composer + PHPUnit 11, Xdebug or PCOV for coverage, 80% threshold via `--min-coverage`. PSR-4 autoloading under `Cartograph\` namespace. Contamination scanner blocks WordPress globals (`wp_*`, `add_action`, `$wpdb`, etc.) and `echo` in src/ to enforce pure PHP utility widgets.
+- **Terraform**: `terraform validate` against src/, tests/, and examples/ (shape-only - no test runner, no coverage; modules harden through use). Blocks provider/backend blocks in src/, real AWS account IDs, and credential-shaped assignments. Providers cached via `TF_PLUGIN_CACHE_DIR`.
+- **Go**: `go test` with built-in coverage (80% via `-coverpkg`), `go vet` + build check, native `go/ast` contamination scanner. Single-binary toolchain. Widgets are libraries: console output, `os.Exit`, and `panic` in `init()` are blocked in src/.
 
 Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD and SystemVerilog use Python-based scanners since neither language has general-purpose file I/O suitable for static analysis tooling.
 
@@ -139,7 +141,7 @@ pytest
 
 The widget library lives in your platform's user data directory. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
-Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog) are installed correctly.
+Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, terraform, go) are installed correctly.
 
 ### Pre-push checks and release preflight
 
