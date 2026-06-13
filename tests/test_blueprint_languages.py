@@ -1230,3 +1230,153 @@ def test_go_blueprint_validates_end_to_end(carto, project):
     res = carto.validate_blueprint(bp)
     assert res.get("status") == "success", res
     assert res["id"] == "bp-shouter-go"
+
+
+# ---------------------------------------------------------------------------
+# SPICE
+# ---------------------------------------------------------------------------
+
+_SPICE_LOWPASS_SRC = """\
+* RC lowpass block
+.subckt lowpass in out params: r=1k c=159.155n
+R1 in out {r}
+C1 out 0 {c}
+.ends lowpass
+"""
+
+_SPICE_LOWPASS_TEST = """\
+.include ../src/lowpass.cir
+Vin in 0 AC 1
+Xdut in out lowpass r=1k c=159.155n
+.control
+ac dec 100 10 100k
+meas ac fc when vdb(out)=-3
+if (fc < 950) | (fc > 1050)
+  echo "ASSERT_FAIL cutoff $&fc Hz"
+else
+  echo "ASSERT_PASS cutoff $&fc Hz"
+end
+.endc
+.end
+"""
+
+_SPICE_LOWPASS_EXAMPLE = """\
+.include ../src/lowpass.cir
+Vin in 0 AC 1
+Xf in out lowpass r=1k c=159.155n
+.control
+ac dec 50 10 100k
+meas ac fc when vdb(out)=-3
+echo "lowpass fc = $&fc Hz"
+.endc
+.end
+"""
+
+# Blueprint: cascade two lowpass stages from the widget into a steeper filter.
+_SPICE_CASCADE_SRC = """\
+.include ../cg/analog-lowpass-spice/src/lowpass.cir
+.subckt cascade in out params: r=1k c=159.155n
+X1 in mid lowpass r={r} c={c}
+X2 mid out lowpass r={r} c={c}
+.ends cascade
+"""
+
+_SPICE_CASCADE_TEST = """\
+.include ../src/cascade.cir
+Vin in 0 AC 1
+Xdut in out cascade r=1k c=159.155n
+.control
+ac dec 100 10 100k
+meas ac att find vdb(out) at=1000
+if (att > -6) | (att < -15)
+  echo "ASSERT_FAIL cascade attenuation $&att dB at 1kHz"
+else
+  echo "ASSERT_PASS cascade attenuation $&att dB at 1kHz steeper than one stage"
+end
+.endc
+.end
+"""
+
+_SPICE_CASCADE_EXAMPLE = """\
+.include ../src/cascade.cir
+Vin in 0 AC 1
+Xc in out cascade r=1k c=159.155n
+.control
+ac dec 50 10 100k
+meas ac att find vdb(out) at=1000
+echo "cascade attenuation at 1kHz = $&att dB"
+.endc
+.end
+"""
+
+
+def _write_spice_widget(project_dir: str) -> str:
+    wdir = os.path.join(project_dir, "cg", "analog-lowpass-spice")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(wdir, d))
+    manifest = {
+        "meta": {
+            "id": "analog-lowpass-spice", "name": "lowpass", "version": "1.0.0",
+            "domain": "analog", "tags": ["filter", "rc", "demo"],
+        },
+        "tech_stack": {"language": "spice", "dependencies": []},
+        "description": "Parametric RC low-pass filter block.",
+    }
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(wdir, "src", "lowpass.cir"), "w") as f:
+        f.write(_SPICE_LOWPASS_SRC)
+    with open(os.path.join(wdir, "tests", "test_lowpass.cir"), "w") as f:
+        f.write(_SPICE_LOWPASS_TEST)
+    with open(os.path.join(wdir, "examples", "example_usage.cir"), "w") as f:
+        f.write(_SPICE_LOWPASS_EXAMPLE)
+    return wdir
+
+
+def _write_spice_blueprint(project_dir: str) -> str:
+    bp = os.path.join(project_dir, "cg", "bp-cascade-spice")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(bp, d))
+    manifest = {
+        "id": "bp-cascade-spice",
+        "name": "cascade",
+        "language": "spice",
+        "version": "0.1.0",
+        "description": "Two-stage RC cascade composing the lowpass block.",
+        "tags": ["filter", "cascade", "blueprint"],
+        "dependencies": [
+            {"id": "analog-lowpass-spice", "version": "1.0.0"},
+        ],
+        "domains": [],
+    }
+    with open(os.path.join(bp, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(bp, "src", "cascade.cir"), "w") as f:
+        f.write(_SPICE_CASCADE_SRC)
+    with open(os.path.join(bp, "tests", "test_cascade.cir"), "w") as f:
+        f.write(_SPICE_CASCADE_TEST)
+    with open(os.path.join(bp, "examples", "example_usage.cir"), "w") as f:
+        f.write(_SPICE_CASCADE_EXAMPLE)
+    return bp
+
+
+@pytest.mark.slow
+def test_spice_blueprint_validates_end_to_end(carto, project, monkeypatch):
+    if not shutil.which("ngspice"):
+        pytest.skip("ngspice not available")
+    engine = get_engine("spice")
+    if engine is None:
+        pytest.skip("spice engine not available")
+    # SPICE ships supported=False until its stress test passes; the blueprint
+    # composition itself is testable regardless of the ship gate.
+    monkeypatch.setattr(type(engine), "supported", True)
+    ok, msg = engine.check_available()
+    if not ok:
+        pytest.skip(f"spice engine not ready: {msg}")
+
+    _write_spice_widget(str(project))
+    bp = _write_spice_blueprint(str(project))
+
+    res = carto.validate_blueprint(bp)
+    assert res.get("status") == "success", res
+    assert res["id"] == "bp-cascade-spice"

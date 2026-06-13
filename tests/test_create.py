@@ -159,3 +159,33 @@ def test_create_go_widget(carto, tmp_path, monkeypatch):
     # The module path in go.mod must match what the test/example imports.
     with open(f"{result['path']}/go.mod") as f:
         assert "module my_go_widget" in f.read()
+
+
+def test_create_spice_widget(carto, tmp_path, monkeypatch):
+    # SPICE ships supported=False until its stress test passes; the scaffold
+    # itself is testable regardless of the ship gate.
+    from cartograph.languages.spice import SpiceEngine
+    monkeypatch.setattr(SpiceEngine, "supported", True)
+    result = carto.create(
+        "my-filter",
+        language="spice",
+        name="My Filter",
+        domain="analog",
+        tags=["filter"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "src/my_filter.cir",
+        "tests/test_my_filter.cir",
+        "examples/example_usage.cir",
+    ])
+    # src/ must be a reusable .subckt block; the testbench must include it
+    # and assert a measured quantity.
+    with open(f"{result['path']}/src/my_filter.cir") as f:
+        assert ".subckt my_filter" in f.read()
+    with open(f"{result['path']}/tests/test_my_filter.cir") as f:
+        tb = f.read()
+    assert ".include ../src/my_filter.cir" in tb
+    assert "meas" in tb and "ASSERT_PASS" in tb

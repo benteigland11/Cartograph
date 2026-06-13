@@ -30,6 +30,7 @@ from cartograph.languages.angular import AngularEngine
 from cartograph.languages.php import PhpEngine
 from cartograph.languages.terraform import TerraformEngine
 from cartograph.languages.go import GoEngine
+from cartograph.languages.spice import SpiceEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
 
@@ -86,6 +87,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "php": PhpEngine,
         "terraform": TerraformEngine,
         "go": GoEngine,
+        "spice": SpiceEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -2308,3 +2310,95 @@ class TestGoSpecific:
             'func Check(err error) bool { return errors.Is(err, ErrGone) }\n')
         assert not any("errors.is" in w.lower() for w in result["warnings"]), \
             f"errors.Is is the correct form, must not warn: {result['warnings']}"
+
+
+_SUBCKT_CLEAN = (
+    "* clean parametric block\n"
+    ".subckt lowpass_rc in out params: r=1k c=159n\n"
+    "R1 in out {r}\n"
+    "C1 out 0 {c}\n"
+    ".ends lowpass_rc\n"
+)
+
+
+class TestSpiceSpecific:
+    """SPICE-only checks - .subckt-only src/, portability of includes,
+    parameterization of component values."""
+
+    def _spice_scan(self, tmp_path, src_code, dependencies=None):
+        return _scan(tmp_path, "spice", "cir", src_code,
+                     dependencies=dependencies)
+
+    def test_clean_subckt_no_findings(self, tmp_path):
+        result = self._spice_scan(tmp_path, _SUBCKT_CLEAN)
+        assert result["blocks"] == [], f"clean block flagged: {result}"
+        assert result["warnings"] == [], f"clean block warned: {result}"
+
+    def test_missing_subckt_blocks(self, tmp_path):
+        """src/ must define a reusable block, not a flat netlist."""
+        result = self._spice_scan(tmp_path,
+            "R1 in out 1k\nC1 out 0 159n\n")
+        assert any("subckt" in b.lower() for b in result["blocks"]), \
+            f"flat netlist in src/ must block: {result}"
+
+    def test_analysis_card_in_src_blocks(self, tmp_path):
+        """Analyses belong in the testbench, not the reusable block."""
+        result = self._spice_scan(tmp_path,
+            _SUBCKT_CLEAN + "\n.ac dec 10 1 1k\n")
+        assert any("analysis card" in b.lower() and ".ac" in b
+                   for b in result["blocks"]), \
+            f"analysis card in src/ must block: {result}"
+
+    def test_control_block_in_src_blocks(self, tmp_path):
+        result = self._spice_scan(tmp_path,
+            _SUBCKT_CLEAN + "\n.control\nop\n.endc\n")
+        assert any(".control" in b for b in result["blocks"]), \
+            f".control in src/ must block: {result}"
+
+    def test_absolute_include_blocks(self, tmp_path):
+        result = self._spice_scan(tmp_path,
+            ".include /home/user/models/bjt.lib\n" + _SUBCKT_CLEAN)
+        assert any("absolute path" in b.lower() for b in result["blocks"]), \
+            f"absolute include must block: {result}"
+
+    def test_undeclared_model_lib_blocks_in_src(self, tmp_path):
+        result = self._spice_scan(tmp_path,
+            ".lib mosfet_models.lib nom\n" + _SUBCKT_CLEAN)
+        assert any("undeclared" in b.lower() and "model" in b.lower()
+                   for b in result["blocks"]), \
+            f"undeclared model lib must block in src/: {result}"
+
+    def test_declared_model_lib_allowed(self, tmp_path):
+        result = self._spice_scan(tmp_path,
+            ".lib mosfet_models.lib nom\n" + _SUBCKT_CLEAN,
+            dependencies=["mosfet_models>=1.0.0"])
+        assert not any("undeclared" in b.lower() for b in result["blocks"]), \
+            f"declared model lib must not block: {result['blocks']}"
+
+    def test_hardcoded_value_in_subckt_warns(self, tmp_path):
+        result = self._spice_scan(tmp_path,
+            ".subckt lp in out\nR1 in out 1k\nC1 out 0 {c}\n.ends\n")
+        assert any("hardcoded value" in w.lower() and "R1" in w
+                   for w in result["warnings"]), \
+            f"hardcoded device value must warn: {result['warnings']}"
+
+    def test_parameterized_value_not_flagged(self, tmp_path):
+        result = self._spice_scan(tmp_path, _SUBCKT_CLEAN)
+        assert not any("hardcoded value" in w.lower()
+                       for w in result["warnings"]), \
+            f"{{param}} values must not warn: {result['warnings']}"
+
+    def test_credential_blocks(self, tmp_path):
+        result = self._spice_scan(tmp_path,
+            _SUBCKT_CLEAN + '\n* token = "sk-abc123verylongkey"\n'
+            'Vsupply n1 0 token="sk-abc123verylongkey"\n')
+        assert any("credential" in b.lower() for b in result["blocks"]), \
+            f"credential must block: {result}"
+
+    def test_credential_in_comment_not_blocked(self, tmp_path):
+        """Inline ';' and full-line '*' comments are stripped before scanning."""
+        result = self._spice_scan(tmp_path,
+            _SUBCKT_CLEAN + '\n* password = "hunter2-do-not-use"\n'
+            'R2 a b {r}  ; secret = "do-not-flag-this-comment"\n')
+        assert not any("credential" in b.lower() for b in result["blocks"]), \
+            f"credential in comment must not block: {result['blocks']}"

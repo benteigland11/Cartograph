@@ -218,6 +218,75 @@ pointing at `./cg/<dep-widget>/` in the blueprint's go.mod.
 `run_blueprint_example` additionally synthesizes a temporary `go.work`
 spanning the sandbox root and each dep widget module.
 
+### SPICE
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| src/ defines a `.subckt` | no reusable block in src/ | netlist scan |
+| src/ has no analysis cards | `.ac`/`.dc`/`.tran`/`.op`/... in src/ | netlist scan |
+| src/ has no `.control` blocks | `.control` in src/ | netlist scan |
+| Includes are portable | absolute path in `.include`/`.lib` | netlist scan |
+| External model libs declared | undeclared `.lib`/`.include` in src/ | netlist scan vs widget.json deps |
+| No credentials | credential-shaped assignment | netlist scan (comment-aware) |
+| All declared dependencies version-pinned | unpinned dep | dep pinning check |
+| Testbench measures something | no `meas` in test_*.cir | source check |
+| Testbench asserts | no `ASSERT_PASS`/`ASSERT_FAIL` sentinel | source check |
+| Tests simulate to convergence and assert | `Error`/`aborted`/`fatal`/`failed!`, any `ASSERT_FAIL`, or no `ASSERT_PASS` | `ngspice -b`, output parsed (NOT exit code) |
+| Example simulates to convergence | error marker in output | `ngspice -b` |
+
+**Layout:** source files are SPICE netlists (`.cir`). `src/<module>.cir`
+defines one or more reusable `.subckt` blocks and nothing else - no analysis
+cards, no `.control` blocks (the analog of OpenSCAD's no-top-level-geometry
+rule). `tests/test_<module>.cir` includes the block via
+`.include ../src/<module>.cir`, drives it with a stimulus, runs an analysis
+inside a `.control` block, and asserts. `examples/example_usage.cir` is a
+runnable demonstration netlist.
+
+**Coverage: no line-coverage requirement.** A netlist has no statements to
+cover. The coverage floor is instead *behavioral*: every claimed output must
+be measured with a `.meas`/`meas` and asserted within a tolerance band. A
+testbench that measures nothing or asserts nothing is rejected as untested -
+this is what makes "fully validated" mean something for a circuit. Banded
+asserts (cutoff within +/-5%) are preferred over exact-value checks because
+convergence is sensitive across ngspice versions.
+
+**The exit-code gotcha:** `ngspice -b` returns 0 even when a `.meas` cannot
+find its target and even on some analysis errors. The engine therefore never
+trusts the return code - it classifies stdout/stderr. A run fails on any
+`Error`/`aborted`/`fatal`/`failed!`/`could not be simulated`/`incomplete or
+empty netlist` marker, on any `ASSERT_FAIL` sentinel, or when the run
+produced no `ASSERT_PASS` (the assertion block never executed).
+
+**Assertion convention:** SPICE has no native assert. A testbench asserts a
+measured quantity with a control-flow sentinel the engine greps for:
+```
+meas ac fc when vdb(out)=-3
+if (fc < 950) | (fc > 1050)
+  echo "ASSERT_FAIL cutoff $&fc Hz outside band"
+else
+  echo "ASSERT_PASS cutoff $&fc Hz within +/-5%"
+end
+```
+
+**Dependencies:** device-model libraries (`.lib`/`.include` of external
+models) are declared in widget.json and must be supplied by the consumer -
+Cartograph does not fetch them (same policy as OpenSCAD's BOSL2). Absolute and
+machine-specific include paths are blocked; relative includes into the
+widget's own `src/` (and a blueprint's `../cg/<dep>/`) are allowed.
+
+**Scanner:** Python, netlist-line oriented (SPICE has no general-purpose
+runtime to host a native scanner). Comment-aware: full-line `*` cards and
+inline `;` comments are stripped before scanning. Blocks in src/: missing
+`.subckt`, analysis cards, `.control` blocks, absolute-path includes,
+undeclared external model libraries, credentials. Warnings: hardcoded
+component values inside a `.subckt` (every R/L/C/source value should be a
+`{param}` so consumers can retune), hardcoded URLs.
+
+**Blueprints:** SPICE composition is `.include ../cg/<dep-widget>/src/...`
+of the dependency's `.subckt`, instantiated with `X` cards. ngspice resolves
+nested includes relative to the including file, so the same relative path
+works in the validator sandbox.
+
 ## Contamination Scanning
 
 Each language has a native scanner written in that language (not regex from Python).
