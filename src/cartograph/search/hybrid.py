@@ -75,7 +75,10 @@ class HybridBackend:
         ngram_norm = _normalise(ngram_raw)
 
         query_lower = query.lower()
-        scored = []
+        # Score everything that clears the query + language bar, ignoring
+        # domain for now - we apply domain separately so we can tell an
+        # empty domain result apart from a weak query.
+        scored_all = []
         for idx, widget in enumerate(self._widgets):
             combined = _ALPHA * tfidf_norm[idx] + _BETA * ngram_norm[idx]
 
@@ -95,10 +98,36 @@ class HybridBackend:
             if combined < _MIN_SCORE:
                 continue
 
-            if not apply_filters(widget, domain_filter, language_filter):
+            if not apply_filters(widget, None, language_filter):
                 continue
 
-            scored.append({**widget, "relevance_score": round(combined, 4)})
+            scored_all.append({**widget, "relevance_score": round(combined, 4)})
+
+        if domain_filter and domain_filter != "all":
+            scored = [w for w in scored_all
+                      if apply_filters(w, domain_filter, None)]
+        else:
+            scored = scored_all
 
         scored.sort(key=lambda x: x["relevance_score"], reverse=True)
-        return format_results(scored[:top_k], corpus_size=len(self._widgets))
+        corpus_size = len(self._widgets)
+        result = format_results(scored[:top_k], corpus_size=corpus_size)
+
+        # Domain-scoped miss: universal is no longer folded into every
+        # domain filter, so point the agent at it explicitly - but only
+        # when universal widgets actually match the query.
+        if (domain_filter and domain_filter not in ("all", "universal")
+                and not result.get("results")):
+            universal = sorted(
+                (w for w in scored_all
+                 if w.get("domain") == "universal"
+                 or "universal" in (w.get("domains") or [])),
+                key=lambda x: x["relevance_score"], reverse=True,
+            )
+            if format_results(universal[:top_k], corpus_size=corpus_size).get("results"):
+                result["message"] = (
+                    f"No '{domain_filter}' widgets matched. Universal widgets "
+                    f"match this query - retry with --domain universal."
+                )
+
+        return result

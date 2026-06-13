@@ -14,13 +14,12 @@ def apply_filters(widget: dict, domain_filter: str | None,
         # Blueprints carry a multi-valued `domains` list (union of dep
         # widget domains). Widgets carry single-valued `domain`. Either
         # form satisfies the filter as long as the requested domain is
-        # listed (or the artifact is universal).
+        # listed. Universal is NOT folded in automatically - a domain
+        # filter means that domain only. Callers that come up empty are
+        # nudged toward `--domain universal` (see HybridBackend.query).
         domains = widget.get("domains") or []
         single = widget.get("domain", "")
-        if (domain_filter not in domains
-                and single != domain_filter
-                and single != "universal"
-                and "universal" not in domains):
+        if domain_filter not in domains and single != domain_filter:
             return False
 
     if language_filter:

@@ -40,6 +40,24 @@ def test_search_domain_filter(carto):
     assert "auth-middleware" not in ids
 
 
+def test_search_domain_filter_excludes_universal(carto):
+    # universal widgets no longer pass every domain filter - a domain
+    # search means that domain only.
+    result = carto.search("math", domain_filter="data")
+    ids = [w["id"] for w in result["results"]]
+    assert "data-sum-javascript" in ids
+    assert "universal-add-nim" not in ids
+
+
+def test_search_domain_miss_nudges_to_universal(carto):
+    # "add" matches universal-add-nim, but there's no backend match -
+    # surface a hint to retry under universal rather than silently
+    # folding universal in.
+    result = carto.search("add", domain_filter="backend")
+    assert result["results"] == []
+    assert "universal" in result.get("message", "").lower()
+
+
 def test_search_language_filter(carto):
     result = carto.search("parser", language_filter="python")
     ids = [w["id"] for w in result["results"]]
