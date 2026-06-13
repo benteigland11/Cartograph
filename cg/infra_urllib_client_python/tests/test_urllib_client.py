@@ -1,10 +1,13 @@
 import json
+import ssl
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 from src import HTTPClient
+from src import urllib_client
+from src.urllib_client import build_ssl_context, default_ssl_context
 
 
 # ---- Test server ---------------------------------------------------------
@@ -276,3 +279,86 @@ def test_multipart_file_without_filename_raises(server):
     c = HTTPClient(base_url=base)
     with pytest.raises(ValueError):
         c.post_multipart("/v1/upload", fields={}, file_data=b"x", filename=None)
+
+
+# ---- TLS trust store -----------------------------------------------------
+
+def test_build_ssl_context_verifies_and_has_roots():
+    ctx = build_ssl_context()
+    assert isinstance(ctx, ssl.SSLContext)
+    # Verification must never be relaxed.
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
+    assert ctx.check_hostname is True
+    # Roots must actually be loaded - the whole point of the helper.
+    assert len(ctx.get_ca_certs()) > 0
+
+
+def test_default_ssl_context_is_cached():
+    assert default_ssl_context() is default_ssl_context()
+
+
+def test_macos_keychain_pem_concatenates_stdout(monkeypatch):
+    class _Result:
+        returncode = 0
+        stdout = "PEM-CHUNK"
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _Result()
+
+    monkeypatch.setattr(urllib_client.subprocess, "run", fake_run)
+    pem = urllib_client._macos_keychain_pem(keychains=[None, "/some/keychain"])
+    assert pem.count("PEM-CHUNK") == 2
+    assert len(calls) == 2
+    # SystemRoot keychain path is appended as a positional arg.
+    assert calls[1][-1] == "/some/keychain"
+
+
+def test_macos_keychain_pem_survives_failure(monkeypatch):
+    def boom(cmd, **kwargs):
+        raise OSError("security not found")
+
+    monkeypatch.setattr(urllib_client.subprocess, "run", boom)
+    assert urllib_client._macos_keychain_pem() == ""
+
+
+def test_macos_keychain_pem_ignores_nonzero_exit(monkeypatch):
+    class _Result:
+        returncode = 1
+        stdout = "ignored"
+
+    monkeypatch.setattr(urllib_client.subprocess, "run", lambda cmd, **kw: _Result())
+    assert urllib_client._macos_keychain_pem() == ""
+
+
+def test_build_ssl_context_darwin_loads_keychain(monkeypatch):
+    monkeypatch.setattr(urllib_client.sys, "platform", "darwin")
+    # Unparseable PEM must be swallowed, not raised - context still returned.
+    monkeypatch.setattr(urllib_client, "_macos_keychain_pem", lambda: "not-a-cert")
+    ctx = build_ssl_context()
+    assert isinstance(ctx, ssl.SSLContext)
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_build_ssl_context_darwin_empty_keychain(monkeypatch):
+    monkeypatch.setattr(urllib_client.sys, "platform", "darwin")
+    monkeypatch.setattr(urllib_client, "_macos_keychain_pem", lambda: "")
+    ctx = build_ssl_context()
+    assert isinstance(ctx, ssl.SSLContext)
+
+
+def test_injected_ssl_context_is_used():
+    sentinel = ssl.create_default_context()
+    c = HTTPClient(base_url="https://api.example.com", ssl_context=sentinel)
+    assert c._get_ssl_context() is sentinel
+
+
+def test_https_request_resolves_context_then_fails_cleanly():
+    # Unreachable https endpoint: exercises the https context-resolution path
+    # and confirms network failures still come back as an error dict.
+    c = HTTPClient(base_url="https://127.0.0.1:1", default_timeout=1.0)
+    r = c.get("/anything")
+    assert "error" in r
+    assert r["status_code"] is None

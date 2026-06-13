@@ -22,10 +22,85 @@ setups where the URL is part of the dispatch decision).
 
 import json
 import os
+import ssl
+import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Callable
+
+
+# ---------------------------------------------------------------------------
+# TLS trust store
+# ---------------------------------------------------------------------------
+#
+# stdlib `ssl` verifies against OpenSSL's default cert path. On some platforms
+# that path is empty or stale, so verification fails with
+# "unable to get local issuer certificate" even though the OS itself trusts
+# the certificate. The clearest example is the python.org macOS build: it
+# ships an empty cert directory, so every HTTPS call fails until the user runs
+# `Install Certificates.command` by hand.
+#
+# Rather than push that chore onto users (or take a hard dependency on a
+# bundled cert package), we build the verification context from the trust
+# store the OS already maintains. On macOS that means reading the system
+# keychains via the built-in `security` tool, which also picks up any root a
+# corporate proxy / MDM has installed - the certifi route would still fail
+# behind such a proxy. We never disable verification.
+
+
+def _macos_keychain_pem(keychains: list | None = None) -> str:
+    """Export trusted root certs from the macOS keychains as concatenated PEM.
+
+    Passing no keychain searches the user's default keychain search list
+    (login + System); SystemRootCertificates is added explicitly since Apple's
+    bundled roots live there. Returns "" if the `security` tool is unavailable.
+    """
+    if keychains is None:
+        keychains = [None, "/System/Library/Keychains/SystemRootCertificates.keychain"]
+    chunks: list[str] = []
+    for keychain in keychains:
+        cmd = ["/usr/bin/security", "find-certificate", "-a", "-p"]
+        if keychain:
+            cmd.append(keychain)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        except Exception:
+            continue
+        if result.returncode == 0 and result.stdout:
+            chunks.append(result.stdout)
+    return "\n".join(chunks)
+
+
+def build_ssl_context() -> ssl.SSLContext:
+    """Return a verifying SSL context backed by the OS trust store.
+
+    Starts from the stdlib default (hostname checking + CERT_REQUIRED, never
+    relaxed) and augments it with roots the OS trusts but OpenSSL's default
+    path may miss. On macOS that's the system keychains, read with the
+    built-in `security` tool - no bundled cert package required.
+    """
+    context = ssl.create_default_context()
+    if sys.platform == "darwin":
+        try:
+            pem = _macos_keychain_pem()
+            if pem.strip():
+                context.load_verify_locations(cadata=pem)
+        except Exception:
+            pass
+    return context
+
+
+_DEFAULT_CONTEXT: ssl.SSLContext | None = None
+
+
+def default_ssl_context() -> ssl.SSLContext:
+    """Process-wide cached context from build_ssl_context() (built once)."""
+    global _DEFAULT_CONTEXT
+    if _DEFAULT_CONTEXT is None:
+        _DEFAULT_CONTEXT = build_ssl_context()
+    return _DEFAULT_CONTEXT
 
 
 class HTTPClient:
@@ -38,6 +113,7 @@ class HTTPClient:
         default_timeout: float = 10.0,
         multipart_timeout: float = 30.0,
         user_agent: str | None = None,
+        ssl_context: ssl.SSLContext | None = None,
     ):
         if not isinstance(base_url, str) or not base_url:
             raise ValueError("base_url is required")
@@ -46,6 +122,15 @@ class HTTPClient:
         self.default_timeout = default_timeout
         self.multipart_timeout = multipart_timeout
         self.user_agent = user_agent
+        # Caller may inject a context; otherwise fall back to the shared
+        # OS-trust-store-backed default, resolved lazily on first request so
+        # constructing a client never triggers the keychain export.
+        self._ssl_context = ssl_context
+
+    def _get_ssl_context(self) -> ssl.SSLContext:
+        if self._ssl_context is None:
+            self._ssl_context = default_ssl_context()
+        return self._ssl_context
 
     def _resolve_base(self, base_url_override: str | None) -> str:
         if base_url_override:
@@ -83,8 +168,11 @@ class HTTPClient:
         url = resolved_base + path
         request_headers = self._build_headers(resolved_base, headers, content_type)
         req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
+        # context is used only for https targets; urlopen ignores it for http.
+        context = self._get_ssl_context() if url.lower().startswith("https") else None
         try:
-            with urllib.request.urlopen(req, timeout=timeout or self.default_timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout or self.default_timeout,
+                                        context=context) as resp:
                 raw = resp.read()
                 if not raw:
                     return {}
