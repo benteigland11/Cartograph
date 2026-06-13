@@ -59,6 +59,8 @@ jobs:
             go:
               - 'src/cartograph/languages/go.py'
               - 'src/cartograph/languages/scanners/go_scanner.go'
+            spice:
+              - 'src/cartograph/languages/spice.py'
 
       - uses: actions/setup-python@v6
         with:
@@ -101,6 +103,18 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: 'stable'
+
+      - name: Install ngspice (Linux)
+        if: matrix.os == 'ubuntu-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
+        run: sudo apt-get update && sudo apt-get install -y ngspice
+
+      - name: Install ngspice (macOS)
+        if: matrix.os == 'macos-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
+        run: brew install ngspice
+
+      - name: Install ngspice (Windows)
+        if: matrix.os == 'windows-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
+        run: choco install ngspice -y || (sleep 15 && choco install ngspice -y)
 
       - name: Install dependencies
         run: pip install -e . && pip install pytest pytest-cov
