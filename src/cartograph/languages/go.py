@@ -164,22 +164,24 @@ class GoEngine(LanguageEngine):
 
     def scaffold(self, target_dir, module_name, display_name, **_):
         pkg = _go_package_name(module_name)
-        with open(os.path.join(target_dir, "go.mod"), "w") as f:
-            f.write(_GO_MOD.format(module=module_name,
-                                   go_directive=_GO_DIRECTIVE))
+        # Go source is canonically LF; gofmt treats CRLF as unformatted, so
+        # always write LF (newline="\n") regardless of platform - otherwise
+        # the scaffold's own files would fail the gofmt gate on Windows,
+        # where text-mode writes translate \n to \r\n.
+        def _w(path, content):
+            with open(path, "w", newline="\n") as f:
+                f.write(content)
+        _w(os.path.join(target_dir, "go.mod"),
+           _GO_MOD.format(module=module_name, go_directive=_GO_DIRECTIVE))
         for d in ("src", "tests", "examples"):
             os.makedirs(os.path.join(target_dir, d), exist_ok=True)
-        with open(os.path.join(target_dir, "src", f"{pkg}.go"), "w") as f:
-            f.write(_GO_SRC.format(pkg=pkg, name=display_name))
-        with open(os.path.join(target_dir, "tests",
-                               f"{pkg}_test.go"), "w") as f:
-            f.write(_GO_TEST.format(pkg=pkg, module=module_name,
-                                    name=display_name,
-                                    threshold=_COVERAGE_THRESHOLD))
-        with open(os.path.join(target_dir, "examples",
-                               "example_usage.go"), "w") as f:
-            f.write(_GO_EXAMPLE.format(pkg=pkg, module=module_name,
-                                       name=display_name))
+        _w(os.path.join(target_dir, "src", f"{pkg}.go"),
+           _GO_SRC.format(pkg=pkg, name=display_name))
+        _w(os.path.join(target_dir, "tests", f"{pkg}_test.go"),
+           _GO_TEST.format(pkg=pkg, module=module_name, name=display_name,
+                           threshold=_COVERAGE_THRESHOLD))
+        _w(os.path.join(target_dir, "examples", "example_usage.go"),
+           _GO_EXAMPLE.format(pkg=pkg, module=module_name, name=display_name))
 
     def find_test_files(self, path: str) -> list[str]:
         return _glob.glob(os.path.join(path, "tests", "**", "*_test.go"),

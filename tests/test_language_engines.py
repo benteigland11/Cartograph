@@ -381,8 +381,13 @@ def _write_go_widget(root, src_body):
     import os
     for sub in ("src", "tests", "examples"):
         os.makedirs(os.path.join(root, sub), exist_ok=True)
-    open(os.path.join(root, "go.mod"), "w").write("module probe\n\ngo 1.24\n")
-    open(os.path.join(root, "src", "probe.go"), "w").write(src_body)
+    # newline="\n": Go source is canonically LF and gofmt flags CRLF, so on
+    # Windows (where text mode would write \r\n) we must pin LF or the
+    # "formatted" fixture would spuriously fail the gofmt gate.
+    with open(os.path.join(root, "go.mod"), "w", newline="\n") as f:
+        f.write("module probe\n\ngo 1.24\n")
+    with open(os.path.join(root, "src", "probe.go"), "w", newline="\n") as f:
+        f.write(src_body)
 
 
 def test_go_gofmt_blocks_unformatted_source(tmp_path):
