@@ -50,6 +50,7 @@ _LANGUAGE_RULES = {
     "css":           ("rules.css.js",        ["node"]),
     "terraform":     ("rules.terraform.py",  [sys.executable]),
     "go":            ("rules.go.py",         [sys.executable]),
+    "spice":         ("rules.spice.py",      [sys.executable]),
 }
 
 
@@ -1255,6 +1256,86 @@ if __name__ == "__main__":
     main()
 """
 
+_TEMPLATE_SPICE = """\
+\"\"\"
+Custom validation rules for SPICE widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+SPICE-SPECIFIC CHECKS TO CONSIDER
+---------------------------------
+SPICE circuit blocks have their own quality concerns beyond the built-in
+validation (which already enforces .subckt-only src/, a measured + asserted
+testbench, and convergence):
+
+  - Tolerance bands too loose: an assertion that passes for any plausible
+    value isn't really testing the circuit. Tight the band where the math
+    allows.
+  - Missing operating-point sanity: a filter block might also want a .op
+    check that bias nodes sit where intended.
+  - Undocumented ports/params: every .subckt port and param should have a
+    comment explaining its role and unit.
+  - Temperature/corner coverage: a block claimed to work across temperature
+    should sweep .temp in the testbench.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      widget.json       metadata (id, name, domain, version, dependencies)
+      src/              .cir netlist (.subckt definitions)
+      tests/            test_*.cir testbenches
+      examples/         example_usage.cir
+
+You can read any of these with normal file operations.
+This is a Python script - use any stdlib module you want.
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def validate(widget_path):
+    blocks = []
+    warnings = []
+
+    src_dir = os.path.join(widget_path, "src")
+
+    # --- Your checks go here ---
+    #
+    # Examples (uncomment to use):
+
+    # Warning: a .subckt port or param with no explaining comment
+    # if os.path.isdir(src_dir):
+    #     for fname in os.listdir(src_dir):
+    #         if not fname.endswith(".cir"): continue
+    #         content = open(os.path.join(src_dir, fname)).read()
+    #         if re.search(r'(?mi)^\\s*\\.subckt\\b', content) and ";" not in content:
+    #             warnings.append(f"{fname}: no inline comments - document ports and params")
+
+    return {"blocks": blocks, "warnings": warnings}
+
+
+if __name__ == "__main__":
+    print(json.dumps(validate(sys.argv[1])))
+"""
+
 _TEMPLATES = {
     "python":        _TEMPLATE_PYTHON,
     "javascript":    _TEMPLATE_JAVASCRIPT,
@@ -1267,6 +1348,7 @@ _TEMPLATES = {
     "css":           _TEMPLATE_CSS,
     "terraform":     _TEMPLATE_TERRAFORM,
     "go":            _TEMPLATE_GO,
+    "spice":         _TEMPLATE_SPICE,
 }
 
 

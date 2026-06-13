@@ -158,6 +158,7 @@ LANGUAGE_ALIASES = {
     "sv": "systemverilog", "verilog": "systemverilog",
     "ang": "angular", "ng": "angular",
     "tf": "terraform", "hcl": "terraform",
+    "ngspice": "spice", "cir": "spice",
 }
 
 def normalize_language(lang):
