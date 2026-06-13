@@ -148,7 +148,10 @@ func main() {
 		if filepath.Base(path) == "go_scanner.go" {
 			continue
 		}
-		f, err := parser.ParseFile(fset, path, nil, 0)
+		// ParseComments so Doc fields populate for the missing-doc check.
+		// Comment groups attach to nodes but expression/statement parsing
+		// is unchanged, so string/comment awareness is unaffected.
+		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if err != nil {
 			// Syntax errors are go vet/build's job; skip quietly here.
 			continue
@@ -163,10 +166,21 @@ func main() {
 			sev = "block"
 		}
 
-		// Imports: unlisted external modules (all files - tests and
-		// examples install the same deps as src).
+		// Imports: deprecated/legacy stdlib (modern-standards), then
+		// unlisted external modules (all files - tests and examples
+		// install the same deps as src).
 		for _, imp := range f.Imports {
 			p := strings.Trim(imp.Path.Value, `"`)
+			switch p {
+			case "io/ioutil":
+				// Deprecated since Go 1.16; every ioutil function has a
+				// named replacement in io or os. Block in src/.
+				add("deprecated_import", path, line(imp), p, sev)
+			case "math/rand":
+				// math/rand/v2 (Go 1.22+) is the modern API: better
+				// algorithm, cleaner surface, no global-seed footguns.
+				add("legacy_rand", path, line(imp), p, "warning")
+			}
 			if isStdlib(p) {
 				continue
 			}
@@ -235,6 +249,44 @@ func main() {
 			}
 		}
 
+		// Missing doc comments on exported top-level identifiers. For a
+		// widget library the exported surface IS the product, so every
+		// exported func/type/var/const should be documented. A group doc
+		// (on the GenDecl) covers all its specs - matches Go convention
+		// and keeps enum blocks from being noisy.
+		if src {
+			for _, decl := range f.Decls {
+				switch d := decl.(type) {
+				case *ast.FuncDecl:
+					if d.Name.IsExported() && d.Doc == nil &&
+						(d.Recv == nil || receiverExported(d.Recv)) {
+						add("missing_doc", path,
+							fset.Position(d.Name.Pos()).Line,
+							"func "+d.Name.Name, "warning")
+					}
+				case *ast.GenDecl:
+					for _, spec := range d.Specs {
+						switch s := spec.(type) {
+						case *ast.TypeSpec:
+							if s.Name.IsExported() && d.Doc == nil && s.Doc == nil {
+								add("missing_doc", path,
+									fset.Position(s.Name.Pos()).Line,
+									"type "+s.Name.Name, "warning")
+							}
+						case *ast.ValueSpec:
+							for _, nm := range s.Names {
+								if nm.IsExported() && d.Doc == nil && s.Doc == nil {
+									add("missing_doc", path,
+										fset.Position(nm.Pos()).Line,
+										nm.Name, "warning")
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		ast.Inspect(f, func(n ast.Node) bool {
 			switch node := n.(type) {
 
@@ -271,6 +323,41 @@ func main() {
 						}
 						return true
 					})
+				}
+
+			case *ast.InterfaceType:
+				// interface{} -> any (Go 1.18+). The `any` spelling parses
+				// as an Ident, so only the literal empty-interface type
+				// trips this. Interfaces with methods are untouched.
+				if src && (node.Methods == nil || len(node.Methods.List) == 0) {
+					add("empty_interface", path, line(node),
+						"interface{} - use the 'any' alias", "warning")
+				}
+
+			case *ast.GoStmt:
+				// Anonymous `go func(){...}()` is the top source of leaked
+				// goroutines - flag it so the author confirms a WaitGroup
+				// or context governs its lifetime. Named `go worker()` is
+				// left alone (less leak-prone, noisier to flag).
+				if src {
+					if _, ok := node.Call.Fun.(*ast.FuncLit); ok {
+						add("bare_goroutine", path, line(node),
+							"go func() - ensure WaitGroup/context lifecycle",
+							"warning")
+					}
+				}
+
+			case *ast.BinaryExpr:
+				// Comparing errors with == / != breaks on wrapped errors
+				// (fmt.Errorf("%w")); use errors.Is. `err == nil` is exempt
+				// because neither side is a sentinel.
+				if src && (node.Op == token.EQL || node.Op == token.NEQ) {
+					if (isSentinelError(node.X) && !isNilIdent(node.Y)) ||
+						(isSentinelError(node.Y) && !isNilIdent(node.X)) {
+						add("error_equality", path, line(node),
+							"compare errors with errors.Is, not "+node.Op.String(),
+							"warning")
+					}
 				}
 
 			case *ast.BasicLit:
@@ -341,6 +428,54 @@ func main() {
 
 	out, _ := json.Marshal(findings)
 	fmt.Println(string(out))
+}
+
+// receiverExported reports whether a method receiver's base type is
+// exported, so we only require docs on methods that are part of the
+// public surface (a method on an unexported type is internal).
+func receiverExported(recv *ast.FieldList) bool {
+	if recv == nil || len(recv.List) == 0 {
+		return false
+	}
+	t := recv.List[0].Type
+	if star, ok := t.(*ast.StarExpr); ok {
+		t = star.X
+	}
+	// Generic receiver: Foo[T] -> base is the IndexExpr's X.
+	if idx, ok := t.(*ast.IndexExpr); ok {
+		t = idx.X
+	}
+	if idx, ok := t.(*ast.IndexListExpr); ok {
+		t = idx.X
+	}
+	if id, ok := t.(*ast.Ident); ok {
+		return id.IsExported()
+	}
+	return false
+}
+
+// isSentinelError reports whether e references an error sentinel: an
+// identifier or selector whose name starts with "Err", or the common
+// non-Err-prefixed sentinel io.EOF.
+func isSentinelError(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return strings.HasPrefix(x.Name, "Err")
+	case *ast.SelectorExpr:
+		if strings.HasPrefix(x.Sel.Name, "Err") {
+			return true
+		}
+		if id, ok := x.X.(*ast.Ident); ok && id.Name == "io" && x.Sel.Name == "EOF" {
+			return true
+		}
+	}
+	return false
+}
+
+// isNilIdent reports whether e is the bare identifier nil.
+func isNilIdent(e ast.Expr) bool {
+	id, ok := e.(*ast.Ident)
+	return ok && id.Name == "nil"
 }
 
 // sleepSeconds estimates a time.Sleep duration in seconds. Recognizes

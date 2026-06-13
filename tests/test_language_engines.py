@@ -375,3 +375,40 @@ def test_engines_survive_src_namespace_shadowing(tmp_path):
         env={**os.environ, "PYTHONPATH": "src" + os.pathsep + "."},
     )
     assert result.returncode == 0, result.stderr
+
+
+def _write_go_widget(root, src_body):
+    import os
+    for sub in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(root, sub), exist_ok=True)
+    open(os.path.join(root, "go.mod"), "w").write("module probe\n\ngo 1.24\n")
+    open(os.path.join(root, "src", "probe.go"), "w").write(src_body)
+
+
+def test_go_gofmt_blocks_unformatted_source(tmp_path):
+    """gofmt is a hard formatting floor - unformatted Go fails validation."""
+    import shutil
+    if shutil.which("go") is None or shutil.which("gofmt") is None:
+        import pytest
+        pytest.skip("go toolchain not installed")
+    engine = get_engine("go")
+    # Leading spaces instead of a tab - gofmt rewrites this.
+    _write_go_widget(str(tmp_path),
+        "// Package probe does things.\npackage probe\n\n"
+        "// Run returns input.\nfunc Run(v string) string {\n    return v\n}\n")
+    result = engine.validate_widget(str(tmp_path), [])
+    assert not result["passed"]
+    assert "gofmt" in result.get("error", "")
+
+
+def test_go_gofmt_passes_formatted_source(tmp_path):
+    import shutil
+    if shutil.which("go") is None or shutil.which("gofmt") is None:
+        import pytest
+        pytest.skip("go toolchain not installed")
+    engine = get_engine("go")
+    _write_go_widget(str(tmp_path),
+        "// Package probe does things.\npackage probe\n\n"
+        "// Run returns input.\nfunc Run(v string) string {\n\treturn v\n}\n")
+    result = engine.validate_widget(str(tmp_path), [])
+    assert result["passed"], result.get("error")

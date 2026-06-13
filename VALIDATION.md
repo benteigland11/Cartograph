@@ -153,6 +153,7 @@ Nim coverage would require compiling via `--debugger:native` and running `gcov`/
 |-------|----------|--------|
 | go.mod exists | missing | file check |
 | src/ has .go files | missing | file check |
+| gofmt formatting | any .go file differs from gofmt | `gofmt -l` over src/, tests/, examples/ |
 | go vet passes on ./... | analyzer/type errors | subprocess (includes tests/ and examples/) |
 | go build ./src/... passes | compile errors | subprocess (library only - no artifacts) |
 | Native Go scanner passes on src/ | issues found | go_scanner.go (go/ast) |
@@ -177,18 +178,40 @@ requirement (Go's minimal-version selection resolves exactly the floor
 unless a consumer raises it). No per-validation isolation: GOMODCACHE is
 version-addressed and checksummed (go.sum), so the shared cache is safe.
 
-**Scanner:** native `go_scanner.go`, stdlib-only (`go/ast` + `go/parser`),
+**Formatting (gofmt):** a hard block, run over every `.go` file in src/,
+tests/, and examples/. `gofmt -l` lists files whose formatting differs from
+canonical; a non-empty list fails validation with a `gofmt -w .` hint.
+gofmt ships with the toolchain (no extra dependency) and is the single
+strongest convention signal in the Go ecosystem - no widely-used Go project
+accepts unformatted code, so it is a floor guarantee, not a nudge.
+
+**Scanner:** native `go_scanner.go`, stdlib-only (`go/ast` + `go/parser`,
+parsed with `ParseComments` so doc-comment presence is checkable),
 string- and comment-aware by construction. Compiled once to a cached binary
 because `go run scanner.go <files...>` would consume the target files as
 additional sources rather than passing them as argv. Blocks in src/:
 `fmt.Print*/print/println`, `os.Exit`/`log.Fatal*`, `panic` inside
-`init()`, credentials, absolute paths, hardcoded IPs, `time.Sleep`.
-Warnings: hardcoded URLs, env var access (`os.Getenv`/`os.LookupEnv`),
-top-level mutable `var`s, hardcoded numeric tunables, unlisted module
-imports (resolved against go.mod's module path and widget.json deps;
-stdlib detected by the no-dot-in-first-path-element rule). Sleeps in
-tests warn only above 1s, with durations estimated statically from
-`N * time.Second`-shaped expressions.
+`init()`, credentials, absolute paths, hardcoded IPs, `time.Sleep`, and the
+deprecated `io/ioutil` import (named replacements live in `io`/`os` since
+Go 1.16). Warnings: hardcoded URLs, env var access
+(`os.Getenv`/`os.LookupEnv`), top-level mutable `var`s, hardcoded numeric
+tunables, unlisted module imports (resolved against go.mod's module path
+and widget.json deps; stdlib detected by the no-dot-in-first-path-element
+rule). Sleeps in tests warn only above 1s, with durations estimated
+statically from `N * time.Second`-shaped expressions.
+
+**Modern-standards warnings** (overridable at checkin, all src/-only):
+- `math/rand` -> prefer `math/rand/v2` (Go 1.22+); `math/rand/v2` is exempt
+- `interface{}` -> use the `any` alias (Go 1.18+); the `any` spelling parses
+  as an identifier, so only the literal empty-interface type trips it
+- exported func/type/var/const without a doc comment - the exported surface
+  is the widget's product; a group doc on a `GenDecl` covers its specs, so
+  enum blocks stay quiet. Methods on unexported receivers are exempt.
+- anonymous `go func(){...}()` goroutines - confirm a `WaitGroup`/context
+  governs the lifetime (named `go worker()` calls are left alone)
+- errors compared with `==`/`!=` against a sentinel (`Err*` ident/selector
+  or `io.EOF`) - use `errors.Is` so wrapped errors match. `err == nil` is
+  exempt because neither side is a sentinel.
 
 **Blueprints:** Go composition uses `require` + `replace` directives
 pointing at `./cg/<dep-widget>/` in the blueprint's go.mod.

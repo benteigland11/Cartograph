@@ -116,7 +116,7 @@ CLEAN = {
     "angular":    ("export class ItemComponent { getValue() { return 'world'; } }\n", "", None),
     "php":        ("<?php\nclass Item { public function getValue(): mixed { return 'world'; } }\n", "", None),
     "terraform":  ('resource "null_resource" "x" {\n  triggers = { name = var.name }\n}\n', "", None),
-    "go":         ('package module\n\nfunc Hello() string { return "world" }\n', "", None),
+    "go":         ('package module\n\n// Hello returns a greeting.\nfunc Hello() string { return "world" }\n', "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -2217,3 +2217,94 @@ class TestGoSpecific:
             'func V() string { return "1.2.3.4.5" }\n')
         assert not any("ip" in b.lower() for b in result["blocks"]), \
             f"version string must not block as IP: {result['blocks']}"
+
+    # -- Modern-standards checks --
+
+    def test_ioutil_import_blocks_in_src(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "io/ioutil"\n\n'
+            '// Read wraps ioutil.\nfunc Read(p string) ([]byte, error) '
+            '{ return ioutil.ReadFile(p) }\n')
+        assert any("io/ioutil" in b or "deprecated" in b.lower()
+                   for b in result["blocks"]), \
+            f"io/ioutil must block in src: {result}"
+
+    def test_math_rand_warns(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "math/rand"\n\n'
+            '// Roll returns a die roll.\nfunc Roll() int { return rand.Intn(6) }\n')
+        assert any("rand" in w.lower() for w in result["warnings"]), \
+            f"math/rand must warn: {result['warnings']}"
+
+    def test_math_rand_v2_not_flagged(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "math/rand/v2"\n\n'
+            '// Roll returns a die roll.\nfunc Roll() int { return rand.IntN(6) }\n')
+        assert not any("rand" in w.lower() for w in result["warnings"]), \
+            f"math/rand/v2 must not warn: {result['warnings']}"
+
+    def test_empty_interface_warns(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\n'
+            '// Box holds anything.\ntype Box struct{ V interface{} }\n')
+        assert any("interface{}" in w or "any" in w.lower()
+                   for w in result["warnings"]), \
+            f"interface{{}} must warn: {result['warnings']}"
+
+    def test_any_alias_not_flagged(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\n'
+            '// Box holds anything.\ntype Box struct{ V any }\n')
+        assert not any("interface" in w.lower() for w in result["warnings"]), \
+            f"any must not warn: {result['warnings']}"
+
+    def test_missing_doc_warns(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nfunc Exported() string { return "x" }\n')
+        assert any("doc" in w.lower() for w in result["warnings"]), \
+            f"undocumented exported func must warn: {result['warnings']}"
+
+    def test_documented_export_no_warning(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\n// Exported does a thing.\n'
+            'func Exported() string { return "x" }\n')
+        assert not any("doc" in w.lower() for w in result["warnings"]), \
+            f"documented export must not warn: {result['warnings']}"
+
+    def test_unexported_no_doc_warning(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nfunc internal() string { return "x" }\n')
+        assert not any("doc" in w.lower() for w in result["warnings"]), \
+            f"unexported func must not require doc: {result['warnings']}"
+
+    def test_bare_goroutine_warns(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\n// Spawn starts work.\n'
+            'func Spawn() { go func() { _ = 1 }() }\n')
+        assert any("goroutine" in w.lower() for w in result["warnings"]), \
+            f"anonymous goroutine must warn: {result['warnings']}"
+
+    def test_error_equality_warns(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "errors"\n\n'
+            '// ErrGone is a sentinel.\nvar ErrGone = errors.New("gone")\n\n'
+            '// Check compares an error.\n'
+            'func Check(err error) bool { return err == ErrGone }\n')
+        assert any("errors.is" in w.lower() for w in result["warnings"]), \
+            f"err == sentinel must warn: {result['warnings']}"
+
+    def test_err_nil_comparison_not_flagged(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\n// Ok reports success.\n'
+            'func Ok(err error) bool { return err == nil }\n')
+        assert not any("errors.is" in w.lower() for w in result["warnings"]), \
+            f"err == nil must not warn: {result['warnings']}"
+
+    def test_errors_is_not_flagged(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "errors"\n\n'
+            '// ErrGone is a sentinel.\nvar ErrGone = errors.New("gone")\n\n'
+            '// Check uses errors.Is.\n'
+            'func Check(err error) bool { return errors.Is(err, ErrGone) }\n')
+        assert not any("errors.is" in w.lower() for w in result["warnings"]), \
+            f"errors.Is is the correct form, must not warn: {result['warnings']}"

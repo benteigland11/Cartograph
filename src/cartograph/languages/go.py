@@ -123,16 +123,24 @@ class GoEngine(LanguageEngine):
         "print": "fmt.Print*/print/println found in src/ - widgets are libraries, remove console output:",
         "exit": "os.Exit/log.Fatal* found in src/ - widgets must not exit the caller's process:",
         "panic_toplevel": "panic in package initialization found in src/ - failing init takes down every consumer:",
+        "deprecated_import": "Deprecated stdlib import in src/ - io/ioutil has named replacements in io and os (deprecated since Go 1.16):",
     }
     scanner_warning_messages = {
         "credential": "Possible credentials found - remove before checkin:",
         "hardcoded_url": "Hardcoded URLs found - consider making these configurable:",
         "hardcoded_ip": "Hardcoded IPs found - consider making these configurable:",
+        "hardcoded_value": "Hardcoded numeric tunables found in src/ - prefer parameters:",
         "abs_path": "Absolute paths found - widgets must be portable:",
         "env_var": "Environment variable access found in src/ - verify it's not project-specific:",
         "sleep": "time.Sleep found in src/ - widgets must not block the caller:",
         "unlisted_import": "Unlisted module imports - add to widget.json dependencies or remove:",
         "top_level_var": "Top-level mutable state found in src/ - prefer local state or explicit parameters:",
+        # Modern-standards nudges (warnings, overridable at checkin)
+        "legacy_rand": "math/rand found in src/ - prefer math/rand/v2 (Go 1.22+):",
+        "empty_interface": "interface{} found in src/ - use the 'any' alias (Go 1.18+):",
+        "missing_doc": "Exported identifier without a doc comment - the exported surface is the widget's API, document it:",
+        "bare_goroutine": "Anonymous goroutine in src/ - confirm a WaitGroup or context governs its lifetime:",
+        "error_equality": "Error compared with ==/!= in src/ - use errors.Is so wrapped errors match:",
     }
     import_pattern = r'^import\s|^\t"'
     manifest_patterns = ["go.mod", "go.sum"]
@@ -223,6 +231,30 @@ class GoEngine(LanguageEngine):
                 except FileNotFoundError:
                     errors.append("Go not found - install the Go toolchain.")
                     break
+
+        # gofmt: non-negotiable formatting floor (modern-standards). Runs
+        # over every .go file, not just src/ - canonical formatting is the
+        # single strongest convention signal in the Go ecosystem and ships
+        # with the toolchain. `gofmt -l` lists files that differ; exit code
+        # is 0 unless gofmt itself errors, so a non-empty stdout = block.
+        all_go = []
+        for sub in ("src", "tests", "examples"):
+            all_go.extend(_glob.glob(
+                os.path.join(path, sub, "**", "*.go"), recursive=True))
+        if all_go:
+            try:
+                res = self._run(["gofmt", "-l"] + sorted(all_go), cwd=path,
+                                timeout=60, env=self._go_env())
+                unformatted = [ln.strip() for ln in
+                               (res.stdout or "").splitlines() if ln.strip()]
+                if unformatted:
+                    rels = ", ".join(os.path.relpath(u, path)
+                                     for u in unformatted)
+                    errors.append(
+                        "Unformatted Go source - run `gofmt -w .` (gofmt is "
+                        f"the ecosystem's canonical format): {rels}")
+            except FileNotFoundError:
+                errors.append("Go not found - install the Go toolchain.")
 
         scanner = os.path.join(os.path.dirname(__file__), "scanners",
                                "go_scanner.go")
