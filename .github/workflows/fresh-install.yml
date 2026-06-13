@@ -44,7 +44,7 @@ jobs:
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
           expected = {'angular', 'go', 'javascript', 'nim', 'openscad',
-                      'php', 'python', 'systemverilog', 'terraform',
+                      'php', 'python', 'spice', 'systemverilog', 'terraform',
                       'typescript'}
           missing = expected - langs
           assert not missing, f'engines missing from wheel install: {missing}'
@@ -142,6 +142,20 @@ jobs:
           WIDGET_DIR=$(find cg -maxdepth 2 -name "go.mod" -printf "%h" -quit)
           echo "Go widget at: $WIDGET_DIR"
           test -f "$WIDGET_DIR/go.mod"
+          test -d "$WIDGET_DIR/src"
+          test -d "$WIDGET_DIR/tests"
+          test -d "$WIDGET_DIR/examples"
+
+      - name: Install ngspice
+        run: sudo apt-get update && sudo apt-get install -y ngspice
+
+      - name: cartograph create (spice)
+        run: cartograph create analog-ci-test-spice --language spice --domain analog --name "CI SPICE Test"
+
+      - name: Verify spice widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "*.cir" -path "*/src/*" -printf "%h" -quit | xargs dirname)
+          echo "SPICE widget at: $WIDGET_DIR"
           test -d "$WIDGET_DIR/src"
           test -d "$WIDGET_DIR/tests"
           test -d "$WIDGET_DIR/examples"

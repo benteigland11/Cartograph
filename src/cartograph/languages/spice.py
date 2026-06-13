@@ -224,7 +224,7 @@ class SpiceEngine(LanguageEngine):
                    "(dnf install ngspice / brew install ngspice / "
                    "choco install ngspice)"
     }
-    supported = False  # WIP until stress-tested end-to-end
+    supported = True
 
     # Contamination is netlist-line oriented - Python handles it; no native
     # scanner. (SPICE has no general-purpose toolchain to host one anyway.)

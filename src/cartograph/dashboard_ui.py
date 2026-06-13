@@ -230,6 +230,7 @@ _HTML = r"""<!DOCTYPE html>
   .lang-text-systemverilog { color: #178600; }
   .lang-text-terraform  { color: #7b42bc; }
   .lang-text-go         { color: #00add8; }
+  .lang-text-spice      { color: #2e8b57; }
   .widget-owner { font-size: 13px; color: var(--muted); }
   .widget-version { font-size: 12px; color: var(--muted); background: var(--surface2); padding: 1px 6px; border-radius: 4px; }
   .widget-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; max-width: 700px; }
@@ -246,6 +247,7 @@ _HTML = r"""<!DOCTYPE html>
   .lang-systemverilog { background: #178600; }
   .lang-terraform  { background: #7b42bc; }
   .lang-go         { background: #00add8; }
+  .lang-spice      { background: #2e8b57; }
   .lang-unknown    { background: var(--muted); }
 
   .domain-tag {
@@ -577,6 +579,7 @@ function langClass(lang) {
   if (l === 'systemverilog' || l === 'sv') return 'lang-systemverilog';
   if (l === 'terraform' || l === 'tf') return 'lang-terraform';
   if (l === 'go' || l === 'golang') return 'lang-go';
+  if (l === 'spice' || l === 'ngspice' || l === 'cir') return 'lang-spice';
   return 'lang-unknown';
 }
 
