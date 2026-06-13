@@ -49,6 +49,7 @@ _LANGUAGE_RULES = {
     "systemverilog": ("rules.sv.py",         [sys.executable]),
     "css":           ("rules.css.js",        ["node"]),
     "terraform":     ("rules.terraform.py",  [sys.executable]),
+    "go":            ("rules.go.py",         [sys.executable]),
 }
 
 
@@ -1169,6 +1170,91 @@ if __name__ == "__main__":
     print(json.dumps(validate(sys.argv[1])))
 """
 
+_TEMPLATE_GO = """\
+\"\"\"
+Custom validation rules for Go widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+              Use for things that must never ship.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+GO-SPECIFIC CHECKS TO CONSIDER
+------------------------------
+Go widgets often need stricter conventions than the engine's defaults:
+
+  - Error handling: forbid `_ = err` / blank-identifier error discards in
+    src/ so failures always propagate.
+  - Context discipline: require ctx context.Context as the first parameter
+    on exported functions that do I/O.
+  - Forbidden imports: block reflect, unsafe, or cgo for teams that want
+    plain, portable Go.
+  - Naming: enforce a package-name convention or an exported-identifier
+    prefix so module-managed APIs are recognizable.
+  - Goroutine hygiene: flag `go func()` in src/ without a wait/cancel
+    mechanism in scope.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      go.mod
+      src/        the library package
+      tests/      black-box tests (*_test.go)
+      examples/   example_usage.go
+      widget.json
+
+EXAMPLE
+-------
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def main() -> None:
+    widget_path = sys.argv[1] if len(sys.argv) > 1 else "."
+    blocks: list[str] = []
+    warnings: list[str] = []
+
+    src_dir = os.path.join(widget_path, "src")
+    for root, _dirs, files in os.walk(src_dir):
+        for fname in files:
+            if not fname.endswith(".go"):
+                continue
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, widget_path)
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                for lineno, line in enumerate(f, 1):
+                    # [TODO] Replace with your team's checks. Example:
+                    # discarded errors hide failures from consumers.
+                    if re.search(r"^\\s*_\\s*=\\s*err\\b", line):
+                        warnings.append(
+                            f"{rel}:{lineno}: discarded error (`_ = err`) - "
+                            f"propagate or handle it"
+                        )
+
+    print(json.dumps({"blocks": blocks, "warnings": warnings}))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 _TEMPLATES = {
     "python":        _TEMPLATE_PYTHON,
     "javascript":    _TEMPLATE_JAVASCRIPT,
@@ -1180,6 +1266,7 @@ _TEMPLATES = {
     "systemverilog": _TEMPLATE_SYSTEMVERILOG,
     "css":           _TEMPLATE_CSS,
     "terraform":     _TEMPLATE_TERRAFORM,
+    "go":            _TEMPLATE_GO,
 }
 
 

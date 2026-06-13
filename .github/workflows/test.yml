@@ -56,6 +56,9 @@ jobs:
               - 'src/cartograph/languages/php.py'
             terraform:
               - 'src/cartograph/languages/terraform.py'
+            go:
+              - 'src/cartograph/languages/go.py'
+              - 'src/cartograph/languages/scanners/go_scanner.go'
 
       - uses: actions/setup-python@v6
         with:
@@ -91,6 +94,13 @@ jobs:
         with:
           terraform_version: '1.9.0'
           terraform_wrapper: false
+
+      # setup-go works identically on all three platforms - no per-OS steps.
+      - name: Install Go
+        if: inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.go == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
 
       - name: Install dependencies
         run: pip install -e . && pip install pytest pytest-cov
