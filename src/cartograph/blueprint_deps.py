@@ -38,7 +38,7 @@ def _load_blueprint(blueprint_path: str) -> tuple[dict | None, dict | None]:
             ),
         }
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             return json.load(f), None
     except Exception as e:
         return None, {"status": "error", "message": f"Invalid blueprint.json: {e}"}
@@ -79,14 +79,14 @@ def _read_installed_widget(project_root: str, widget_id: str) -> tuple[dict | No
         )
     manifest_path = os.path.join(widget_dir, "widget.json")
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             return json.load(f), None
     except Exception as e:
         return None, f"Could not read installed widget manifest at {manifest_path}: {e}"
 
 
 def _write_manifest(blueprint_path: str, data: dict) -> None:
-    with open(os.path.join(blueprint_path, "blueprint.json"), "w") as f:
+    with open(os.path.join(blueprint_path, "blueprint.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
 

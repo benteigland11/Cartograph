@@ -56,7 +56,7 @@ def _is_newer(latest: str, current: str) -> bool:
 def _read_cache(now: float | None = None) -> dict:
     now = time.time() if now is None else now
     try:
-        with open(_cache_path()) as f:
+        with open(_cache_path(), encoding="utf-8") as f:
             data = json.load(f)
         if now - float(data.get("checked_at", 0)) < _CACHE_SECONDS:
             return data
@@ -68,7 +68,7 @@ def _read_cache(now: float | None = None) -> dict:
 def _write_cache(data: dict) -> None:
     path = _cache_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, sort_keys=True)
 
 

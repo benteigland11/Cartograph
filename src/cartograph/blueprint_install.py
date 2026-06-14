@@ -168,7 +168,7 @@ def _resolve_blueprint(carto, blueprint_id, version):
             )}
         # Read the historical manifest to get its declared deps.
         try:
-            with open(os.path.join(hist, "blueprint.json")) as f:
+            with open(os.path.join(hist, "blueprint.json"), encoding="utf-8") as f:
                 raw = json.load(f)
         except OSError as e:
             return {"error": f"Could not read historical blueprint: {e}"}
@@ -272,7 +272,7 @@ def _scan_blueprint_pins(cg_root):
         if not os.path.isfile(bpath):
             continue
         try:
-            with open(bpath) as f:
+            with open(bpath, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
             continue
@@ -289,7 +289,7 @@ def _read_widget_version(widget_dir):
     if not os.path.isfile(wpath):
         return None
     try:
-        with open(wpath) as f:
+        with open(wpath, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None

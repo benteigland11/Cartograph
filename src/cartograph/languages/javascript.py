@@ -189,20 +189,20 @@ class JavaScriptEngine(LanguageEngine):
             "dependencies": {},
             "devDependencies": dev_deps,
         }
-        with open(os.path.join(target_dir, "package.json"), "w") as f:
+        with open(os.path.join(target_dir, "package.json"), "w", encoding="utf-8") as f:
             json.dump(pkg, f, indent=2)
 
-        with open(os.path.join(target_dir, "src", f"{module_name}.js"), "w") as f:
+        with open(os.path.join(target_dir, "src", f"{module_name}.js"), "w", encoding="utf-8") as f:
             f.write(_JS_PLAIN_SRC.format(name=display_name, module=module_name))
-        with open(os.path.join(target_dir, "tests", f"test_{module_name}.js"), "w") as f:
+        with open(os.path.join(target_dir, "tests", f"test_{module_name}.js"), "w", encoding="utf-8") as f:
             f.write(_JS_PLAIN_TEST.format(module=module_name))
-        with open(os.path.join(target_dir, "examples", "example_usage.js"), "w") as f:
+        with open(os.path.join(target_dir, "examples", "example_usage.js"), "w", encoding="utf-8") as f:
             f.write(_JS_PLAIN_EXAMPLE.format(name=display_name, module=module_name))
 
         # Always ship a vitest config so the widget runs standalone under
         # `vitest run` with no Cartograph injection. Frontend gets happy-dom.
         config = _VITEST_FRONTEND if is_frontend else _VITEST_FALLBACK
-        with open(os.path.join(target_dir, "vitest.config.js"), "w") as f:
+        with open(os.path.join(target_dir, "vitest.config.js"), "w", encoding="utf-8") as f:
             f.write(config)
 
     # ------------------------------------------------------------------ helpers
@@ -313,10 +313,10 @@ class JavaScriptEngine(LanguageEngine):
                 ver_part = dep[len(bare):].strip() or "*"
                 if bare:
                     pkg["dependencies"][bare] = ver_part
-            with open(package_json_path, "w") as f:
+            with open(package_json_path, "w", encoding="utf-8") as f:
                 json.dump(pkg, f, indent=2)
         else:
-            with open(package_json_path) as f:
+            with open(package_json_path, encoding="utf-8") as f:
                 pkg = json.load(f)
             dev = pkg.setdefault("devDependencies", {})
             changed = False
@@ -324,7 +324,7 @@ class JavaScriptEngine(LanguageEngine):
                 dev["vitest"] = "^1.0.0"
                 changed = True
             if changed:
-                with open(package_json_path, "w") as f:
+                with open(package_json_path, "w", encoding="utf-8") as f:
                     json.dump(pkg, f, indent=2)
 
         # Shared npm cache under cartograph's data dir. Stays warm across
@@ -433,11 +433,11 @@ class TypeScriptEngine(JavaScriptEngine):
         os.remove(os.path.join(target_dir, "src", f"{module_name}.js"))
         os.remove(os.path.join(target_dir, "tests", f"test_{module_name}.js"))
         os.remove(os.path.join(target_dir, "examples", "example_usage.js"))
-        with open(os.path.join(target_dir, "src", f"{module_name}.ts"), "w") as f:
+        with open(os.path.join(target_dir, "src", f"{module_name}.ts"), "w", encoding="utf-8") as f:
             f.write(_TS_SRC.format(name=display_name, module=module_name))
-        with open(os.path.join(target_dir, "tests", f"test_{module_name}.ts"), "w") as f:
+        with open(os.path.join(target_dir, "tests", f"test_{module_name}.ts"), "w", encoding="utf-8") as f:
             f.write(_TS_TEST.format(module=module_name))
-        with open(os.path.join(target_dir, "examples", "example_usage.ts"), "w") as f:
+        with open(os.path.join(target_dir, "examples", "example_usage.ts"), "w", encoding="utf-8") as f:
             f.write(_TS_EXAMPLE.format(name=display_name, module=module_name))
 
     def example_filename(self, path: str = "") -> str:

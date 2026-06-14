@@ -130,7 +130,7 @@ def _install_from_cloud(widget_id, dest_path, registry_url=None, owner_hint=None
         }
         if governance:
             source_meta["governance"] = governance
-        with open(os.path.join(dest_path, ".cartograph_source"), "w") as f:
+        with open(os.path.join(dest_path, ".cartograph_source"), "w", encoding="utf-8") as f:
             json.dump(source_meta, f)
 
         return {
@@ -203,7 +203,7 @@ def install(carto, widget_id, target_dir, version=None,
         local_widget = next((w for w in carto.widgets if w["id"] == bare_id), None)
         if local_widget:
             try:
-                with open(os.path.join(local_widget["path"], ".cartograph_source")) as f:
+                with open(os.path.join(local_widget["path"], ".cartograph_source"), encoding="utf-8") as f:
                     sidecar = json.load(f)
                 sidecar_reg = (sidecar.get("registry_url") or _PUBLIC_REGISTRY_URL).rstrip("/")
                 target_reg = (registry_url or _PUBLIC_REGISTRY_URL).rstrip("/")
@@ -279,14 +279,14 @@ def upgrade(carto, widget_id, target_dir, version=None):
     # Read current version and sidecar before removing
     old_version = "unknown"
     try:
-        with open(os.path.join(dest_path, "widget.json")) as f:
+        with open(os.path.join(dest_path, "widget.json"), encoding="utf-8") as f:
             old_version = json.load(f).get("meta", {}).get("version", "unknown")
     except Exception:
         pass
 
     source_meta = {}
     try:
-        with open(os.path.join(dest_path, ".cartograph_source")) as f:
+        with open(os.path.join(dest_path, ".cartograph_source"), encoding="utf-8") as f:
             source_meta = json.load(f)
     except Exception:
         pass
@@ -440,7 +440,7 @@ def rename_widget(carto, old_id: str, new_name: str | None,
 
     manifest_path = os.path.join(old_dir, "widget.json")
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
         return {"status": "error", "message": f"Could not read widget.json: {e}"}
@@ -503,12 +503,12 @@ def _rewrite_widget_dir(path: str, new_id: str, new_domain: str,
                         old_module: str, new_module: str) -> None:
     """Update widget.json and rename Python module files + imports in-place."""
     manifest_path = os.path.join(path, "widget.json")
-    with open(manifest_path) as f:
+    with open(manifest_path, encoding="utf-8") as f:
         data = json.load(f)
     meta = data.setdefault("meta", {})
     meta["id"] = new_id
     meta["domain"] = new_domain
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
     # Invalidate validation stamp — contents have changed.
@@ -550,11 +550,11 @@ def _rename_python_module(path: str, old_module: str, new_module: str) -> None:
     ):
         if not os.path.isfile(fpath):
             continue
-        with open(fpath) as f:
+        with open(fpath, encoding="utf-8") as f:
             text = f.read()
         new_text = from_rel.sub(rf"\1{new_module}\2", text)
         new_text = from_abs.sub(rf"\1{new_module}\2", new_text)
         new_text = import_abs.sub(rf"\1{new_module}\2", new_text)
         if new_text != text:
-            with open(fpath, "w") as f:
+            with open(fpath, "w", encoding="utf-8") as f:
                 f.write(new_text)

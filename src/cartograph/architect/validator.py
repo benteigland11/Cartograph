@@ -44,7 +44,7 @@ def _load_valid_domains() -> frozenset:
         os.path.dirname(__file__), os.pardir, "library_config.json"
     )
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             return frozenset(json.load(f)["domains"].keys())
     except Exception:
         return frozenset()

@@ -114,7 +114,7 @@ def _ensure_global_rules() -> None:
                 continue
             filepath = os.path.join(rules_dir, filename)
             if not os.path.exists(filepath):
-                with open(filepath, "w") as f:
+                with open(filepath, "w", encoding="utf-8") as f:
                     f.write(template)
     except Exception as e:
         log.debug("Could not create global rules templates: %s", e)
@@ -221,7 +221,7 @@ def find_installed_widget_dir(cg_root: str, canonical_id: str) -> str | None:
         if not os.path.isfile(wjson):
             continue
         try:
-            with open(wjson) as f:
+            with open(wjson, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
             continue
@@ -336,15 +336,15 @@ class Cartograph:
 
             if in_lib and not in_local:
                 files_removed.append(rel)
-                lib_lines = open(lib_files[rel]).readlines()
+                lib_lines = open(lib_files[rel], encoding="utf-8").readlines()
                 diff_parts.extend(difflib.unified_diff(lib_lines, [], fromfile=f"a/{rel}", tofile=f"b/{rel}"))
             elif in_local and not in_lib:
                 files_added.append(rel)
-                local_lines = open(local_files[rel]).readlines()
+                local_lines = open(local_files[rel], encoding="utf-8").readlines()
                 diff_parts.extend(difflib.unified_diff([], local_lines, fromfile=f"a/{rel}", tofile=f"b/{rel}"))
             else:
-                lib_lines = open(lib_files[rel]).readlines()
-                local_lines = open(local_files[rel]).readlines()
+                lib_lines = open(lib_files[rel], encoding="utf-8").readlines()
+                local_lines = open(local_files[rel], encoding="utf-8").readlines()
                 file_diff = list(difflib.unified_diff(lib_lines, local_lines, fromfile=f"a/{rel}", tofile=f"b/{rel}"))
                 if file_diff:
                     files_changed.append(rel)
@@ -378,7 +378,7 @@ class Cartograph:
             return {"rating": 0, "count": 0, "trend": None, "reviews": [], "version_averages": {}}
         
         try:
-            with open(review_path, 'r') as f:
+            with open(review_path, 'r', encoding="utf-8") as f:
                 data = json.load(f)
                 reviews = data.get("reviews", [])
                 if not reviews:
@@ -454,7 +454,7 @@ class Cartograph:
         if not os.path.exists(INSTALL_STATS_PATH):
             return {}
         try:
-            with open(INSTALL_STATS_PATH, 'r') as f:
+            with open(INSTALL_STATS_PATH, 'r', encoding="utf-8") as f:
                 data = json.load(f)
                 return data.get("installs", {})
         except (OSError, json.JSONDecodeError):
@@ -464,7 +464,7 @@ class Cartograph:
         os.makedirs(CARTOGRAPH_DIR, exist_ok=True)
         temp_path = INSTALL_STATS_PATH + ".tmp"
         try:
-            with open(temp_path, 'w') as f:
+            with open(temp_path, 'w', encoding="utf-8") as f:
                 json.dump({"installs": self.install_stats}, f, indent=2)
             os.replace(temp_path, INSTALL_STATS_PATH)
         except Exception as e:
@@ -493,7 +493,7 @@ class Cartograph:
         if not os.path.exists(LIBRARY_CACHE_PATH):
             return {}
         try:
-            with open(LIBRARY_CACHE_PATH, 'r') as f:
+            with open(LIBRARY_CACHE_PATH, 'r', encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError):
             return {}
@@ -503,7 +503,7 @@ class Cartograph:
         os.makedirs(CARTOGRAPH_DIR, exist_ok=True)
         temp_path = LIBRARY_CACHE_PATH + ".tmp"
         try:
-            with open(temp_path, 'w') as f:
+            with open(temp_path, 'w', encoding="utf-8") as f:
                 json.dump(cache, f)
             os.replace(temp_path, LIBRARY_CACHE_PATH)
         except OSError as e:
@@ -539,7 +539,7 @@ class Cartograph:
         found = [p for p in glob.glob(search_pattern, recursive=True) if "history" not in p]
         for manifest_path in found:
             try:
-                with open(manifest_path, 'r') as f:
+                with open(manifest_path, 'r', encoding="utf-8") as f:
                     data = json.load(f)
                 meta = data.get('meta', data)
 
@@ -609,7 +609,7 @@ class Cartograph:
                     if os.path.exists(src_dir):
                         for src_file in glob.glob(os.path.join(src_dir, "*.*")):
                             try:
-                                total_lines += len(open(src_file).read().splitlines())
+                                total_lines += len(open(src_file, encoding="utf-8").read().splitlines())
                             except (OSError, UnicodeDecodeError):
                                 pass
 
@@ -681,7 +681,7 @@ class Cartograph:
                  if "history" not in p]
         for manifest_path in found:
             try:
-                with open(manifest_path, 'r') as f:
+                with open(manifest_path, 'r', encoding="utf-8") as f:
                     data = json.load(f)
                 bp_path = os.path.dirname(manifest_path)
                 bp_id = data.get('id', os.path.basename(bp_path))

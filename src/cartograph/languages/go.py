@@ -169,7 +169,7 @@ class GoEngine(LanguageEngine):
         # the scaffold's own files would fail the gofmt gate on Windows,
         # where text-mode writes translate \n to \r\n.
         def _w(path, content):
-            with open(path, "w", newline="\n") as f:
+            with open(path, "w", newline="\n", encoding="utf-8") as f:
                 f.write(content)
         _w(os.path.join(target_dir, "go.mod"),
            _GO_MOD.format(module=module_name, go_directive=_GO_DIRECTIVE))
@@ -390,7 +390,7 @@ class GoEngine(LanguageEngine):
         work_path = os.path.join(sandbox, "go.work")
         had_work = os.path.isfile(work_path)
         if not had_work:
-            with open(work_path, "w") as f:
+            with open(work_path, "w", encoding="utf-8") as f:
                 f.write(f"go {_GO_DIRECTIVE}\n\nuse (\n")
                 for d in work_dirs:
                     f.write(f"\t{d}\n")

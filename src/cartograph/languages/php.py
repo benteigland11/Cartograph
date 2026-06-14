@@ -216,19 +216,19 @@ class PhpEngine(LanguageEngine):
                     .replace("__DISPLAY__", display_name)
                     .replace("__SLUG__", slug))
 
-        with open(os.path.join(target_dir, "src", f"{class_name}.php"), "w") as f:
+        with open(os.path.join(target_dir, "src", f"{class_name}.php"), "w", encoding="utf-8") as f:
             f.write(sub(_SRC_TEMPLATE))
 
-        with open(os.path.join(target_dir, "tests", f"{class_name}Test.php"), "w") as f:
+        with open(os.path.join(target_dir, "tests", f"{class_name}Test.php"), "w", encoding="utf-8") as f:
             f.write(sub(_TEST_TEMPLATE))
 
-        with open(os.path.join(target_dir, "examples", "example_usage.php"), "w") as f:
+        with open(os.path.join(target_dir, "examples", "example_usage.php"), "w", encoding="utf-8") as f:
             f.write(sub(_EXAMPLE_TEMPLATE))
 
-        with open(os.path.join(target_dir, "composer.json"), "w") as f:
+        with open(os.path.join(target_dir, "composer.json"), "w", encoding="utf-8") as f:
             f.write(sub(_COMPOSER_JSON))
 
-        with open(os.path.join(target_dir, "phpunit.xml"), "w") as f:
+        with open(os.path.join(target_dir, "phpunit.xml"), "w", encoding="utf-8") as f:
             f.write(_PHPUNIT_XML)
 
     # ── Contamination ─────────────────────────────────────────────────────────
@@ -274,7 +274,7 @@ class PhpEngine(LanguageEngine):
             if not os.path.exists(p):
                 continue
             try:
-                content = open(p).read()
+                content = open(p, encoding="utf-8").read()
             except Exception:
                 continue
             for m in psr_re.finditer(content):
@@ -286,7 +286,7 @@ class PhpEngine(LanguageEngine):
         cm = os.path.join(autoload_dir, "autoload_classmap.php")
         if os.path.exists(cm):
             try:
-                content = open(cm).read()
+                content = open(cm, encoding="utf-8").read()
                 fq_re = re.compile(r"'([A-Za-z_][A-Za-z0-9_]*(?:\\\\[A-Za-z_][A-Za-z0-9_]*)+)'\s*=>")
                 for m in fq_re.finditer(content):
                     key = m.group(1).replace("\\\\", "\\")
@@ -351,7 +351,7 @@ class PhpEngine(LanguageEngine):
         for fpath, is_src, is_example in all_files:
             rel = os.path.relpath(fpath, path)
             try:
-                code = open(fpath).read()
+                code = open(fpath, encoding="utf-8").read()
             except Exception as e:
                 blocks.append(f"Could not read {rel}: {e}")
                 continue
@@ -465,7 +465,7 @@ class PhpEngine(LanguageEngine):
     def install_deps(self, path: str, dependencies: list) -> None:
         composer_path = os.path.join(path, "composer.json")
         if os.path.exists(composer_path) and dependencies:
-            with open(composer_path) as f:
+            with open(composer_path, encoding="utf-8") as f:
                 pkg = json.load(f)
             changed = False
             for dep in dependencies:
@@ -479,7 +479,7 @@ class PhpEngine(LanguageEngine):
                     pkg.setdefault("require", {})[bare] = ver_part
                     changed = True
             if changed:
-                with open(composer_path, "w") as f:
+                with open(composer_path, "w", encoding="utf-8") as f:
                     json.dump(pkg, f, indent=4)
                     f.write("\n")
 

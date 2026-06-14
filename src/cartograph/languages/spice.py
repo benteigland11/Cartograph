@@ -271,13 +271,13 @@ class SpiceEngine(LanguageEngine):
         for d in ("src", "tests", "examples"):
             os.makedirs(os.path.join(target_dir, d), exist_ok=True)
         with open(os.path.join(target_dir, "src", f"{module_name}.cir"),
-                  "w") as f:
+                  "w", encoding="utf-8") as f:
             f.write(_SPICE_SRC.format(module=module_name, name=display_name))
         with open(os.path.join(target_dir, "tests",
-                               f"test_{module_name}.cir"), "w") as f:
+                               f"test_{module_name}.cir"), "w", encoding="utf-8") as f:
             f.write(_SPICE_TEST.format(module=module_name, name=display_name))
         with open(os.path.join(target_dir, "examples", "example_usage.cir"),
-                  "w") as f:
+                  "w", encoding="utf-8") as f:
             f.write(_SPICE_EXAMPLE.format(module=module_name,
                                           name=display_name))
 
