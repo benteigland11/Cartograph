@@ -29,7 +29,7 @@ def _is_urlopen(call: ast.Call) -> bool:
 def test_every_urlopen_passes_a_tls_context():
     offenders = []
     for path in SRC.rglob("*.py"):
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and _is_urlopen(node):
                 if "context" not in {kw.arg for kw in node.keywords}:
