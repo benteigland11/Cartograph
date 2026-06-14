@@ -77,7 +77,8 @@ def _fetch_latest_version() -> str | None:
         _PYPI_URL,
         headers={"Accept": "application/json", "User-Agent": f"cartograph/{_current_version()}"},
     )
-    with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
+    from .net_tls import registry_ssl_context
+    with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT, context=registry_ssl_context()) as resp:
         data = json.loads(resp.read())
     latest = data.get("info", {}).get("version")
     return latest if isinstance(latest, str) and latest else None
