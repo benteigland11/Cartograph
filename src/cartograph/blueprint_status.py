@@ -32,7 +32,7 @@ def blueprint_status(carto, blueprint_id, target_dir):
         return {"error": f"'{blueprint_id}' not found at {bp_path}."}
 
     try:
-        with open(manifest) as f:
+        with open(manifest, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         return {"error": f"Failed to read blueprint manifest: {e}"}
@@ -100,7 +100,7 @@ def orphan_leaves(target_dir):
         if os.path.isfile(bjson):
             has_blueprint = True
             try:
-                with open(bjson) as f:
+                with open(bjson, encoding="utf-8") as f:
                     data = json.load(f)
                 for d in data.get("dependencies", []) or []:
                     if isinstance(d, dict) and d.get("id"):
@@ -109,7 +109,7 @@ def orphan_leaves(target_dir):
                 continue
         elif os.path.isfile(wjson):
             try:
-                with open(wjson) as f:
+                with open(wjson, encoding="utf-8") as f:
                     data = json.load(f)
                 wid = (data.get("meta") or data).get("id")
                 if wid:
@@ -144,7 +144,7 @@ def all_blueprint_status(carto, target_dir):
         if not os.path.isfile(bjson):
             continue
         try:
-            with open(bjson) as f:
+            with open(bjson, encoding="utf-8") as f:
                 bp_id = json.load(f).get("id")
         except (OSError, json.JSONDecodeError):
             continue
@@ -165,7 +165,7 @@ def _read_widget_version(widget_dir):
     if not os.path.isfile(wjson):
         return None
     try:
-        with open(wjson) as f:
+        with open(wjson, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None

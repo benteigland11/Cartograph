@@ -266,7 +266,7 @@ class LanguageEngine:
             rel = os.path.relpath(fpath, path)
             is_src = fpath in src_files
             try:
-                code = open(fpath).read()
+                code = open(fpath, encoding="utf-8").read()
             except Exception as e:
                 blocks.append(f"Could not read source file {rel}: {e}")
                 continue
@@ -441,11 +441,11 @@ class LanguageEngine:
             f"# consume only what src/ exposes - no direct cg/ imports past\n"
             f"# this sealed surface.\n"
         )
-        with open(os.path.join(src, f"{module_name}.{ext}"), "w") as f:
+        with open(os.path.join(src, f"{module_name}.{ext}"), "w", encoding="utf-8") as f:
             f.write(marker)
-        with open(os.path.join(tests, f"test_{module_name}.{ext}"), "w") as f:
+        with open(os.path.join(tests, f"test_{module_name}.{ext}"), "w", encoding="utf-8") as f:
             f.write(f"# [TODO] Test the {display_name} blueprint surface.\n")
-        with open(os.path.join(examples, f"example_{module_name}.{ext}"), "w") as f:
+        with open(os.path.join(examples, f"example_{module_name}.{ext}"), "w", encoding="utf-8") as f:
             f.write(f"# [TODO] Exercise the {display_name} blueprint.\n")
         return None
 

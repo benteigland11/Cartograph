@@ -311,7 +311,7 @@ def _write_toml(path: str, config: dict):
             elif isinstance(v, (int, float)):
                 lines.append(f"{k} = {v}")
         lines.append("")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
 
@@ -327,7 +327,7 @@ def _registries_path() -> str:
 def get_registries() -> list[dict]:
     """Return user-configured registries (excludes the public Cartograph registry)."""
     try:
-        with open(_registries_path()) as f:
+        with open(_registries_path(), encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return []
@@ -336,7 +336,7 @@ def get_registries() -> list[dict]:
 def _save_registries(registries: list[dict]) -> None:
     path = _registries_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(registries, f, indent=2)
 
 

@@ -120,13 +120,13 @@ class NimEngine(LanguageEngine):
         # to guarantee no collision with any stdlib module.
         src_module = f"{module_name}_lib"
 
-        with open(os.path.join(target_dir, f"{module_name}.nimble"), "w") as f:
+        with open(os.path.join(target_dir, f"{module_name}.nimble"), "w", encoding="utf-8") as f:
             f.write(_NIMBLE_TEMPLATE.format(name=display_name))
-        with open(os.path.join(target_dir, "src", f"{src_module}.nim"), "w") as f:
+        with open(os.path.join(target_dir, "src", f"{src_module}.nim"), "w", encoding="utf-8") as f:
             f.write(_SRC_TEMPLATE.format(name=display_name, module=module_name))
-        with open(os.path.join(target_dir, "tests", f"test_{module_name}.nim"), "w") as f:
+        with open(os.path.join(target_dir, "tests", f"test_{module_name}.nim"), "w", encoding="utf-8") as f:
             f.write(_TEST_TEMPLATE.format(name=display_name, src_module=src_module))
-        with open(os.path.join(target_dir, "examples", "example_usage.nim"), "w") as f:
+        with open(os.path.join(target_dir, "examples", "example_usage.nim"), "w", encoding="utf-8") as f:
             f.write(_EXAMPLE_TEMPLATE.format(name=display_name, module=module_name, src_module=src_module))
 
     # -- Custom validation (nim check + compile check on top of base scanner) --
@@ -366,7 +366,7 @@ class NimEngine(LanguageEngine):
         if not os.path.exists(nimble_path):
             return
         try:
-            with open(nimble_path) as f:
+            with open(nimble_path, encoding="utf-8") as f:
                 content = f.read()
 
             wanted: dict[str, str] = {}
@@ -399,7 +399,7 @@ class NimEngine(LanguageEngine):
 
             new_content = "".join(new_lines)
             if new_content != content:
-                with open(nimble_path, "w") as f:
+                with open(nimble_path, "w", encoding="utf-8") as f:
                     f.write(new_content)
                 log.debug("Synced %d dep(s) to %s", len(additions),
                           os.path.basename(nimble_path))

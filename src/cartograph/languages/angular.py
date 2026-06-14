@@ -207,7 +207,7 @@ def _sub(template: str, module: str = "", class_name: str = "", display: str = "
 
 def _write(path: str, content: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
 
@@ -395,7 +395,7 @@ class AngularEngine(LanguageEngine):
             ("tsconfig.spec.json", tsconfig_spec_json),
             ("ng-package.json", ng_package_json),
         ]:
-            with open(os.path.join(target_dir, filename), "w") as f:
+            with open(os.path.join(target_dir, filename), "w", encoding="utf-8") as f:
                 json.dump(obj, f, indent=2)
                 f.write("\n")
 
@@ -473,7 +473,7 @@ class AngularEngine(LanguageEngine):
     def install_deps(self, path: str, dependencies: list) -> None:
         package_json_path = os.path.join(path, "package.json")
         if os.path.exists(package_json_path) and dependencies:
-            with open(package_json_path) as f:
+            with open(package_json_path, encoding="utf-8") as f:
                 pkg = json.load(f)
             changed = False
             for dep in dependencies:
@@ -488,7 +488,7 @@ class AngularEngine(LanguageEngine):
                     pkg.setdefault("dependencies", {})[bare] = ver_part
                     changed = True
             if changed:
-                with open(package_json_path, "w") as f:
+                with open(package_json_path, "w", encoding="utf-8") as f:
                     json.dump(pkg, f, indent=2)
                     f.write("\n")
 
@@ -605,7 +605,7 @@ class AngularEngine(LanguageEngine):
         """Read the first project name from angular.json."""
         angular_json = os.path.join(path, "angular.json")
         try:
-            with open(angular_json) as f:
+            with open(angular_json, encoding="utf-8") as f:
                 config = json.load(f)
             return next(iter(config.get("projects", {})), None)
         except Exception:

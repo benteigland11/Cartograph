@@ -555,19 +555,19 @@ class OpenSCADEngine(LanguageEngine):
                     os.unlink(p)
 
     def scaffold(self, target_dir, module_name, display_name, **kwargs):
-        with open(os.path.join(target_dir, "src", f"{module_name}.scad"), "w") as f:
+        with open(os.path.join(target_dir, "src", f"{module_name}.scad"), "w", encoding="utf-8") as f:
             f.write(_SCAD_SRC.format(module=module_name, name=display_name))
-        with open(os.path.join(target_dir, "tests", f"test_{module_name}.scad"), "w") as f:
+        with open(os.path.join(target_dir, "tests", f"test_{module_name}.scad"), "w", encoding="utf-8") as f:
             f.write(_SCAD_TEST.format(module=module_name, name=display_name))
-        with open(os.path.join(target_dir, "examples", "example_usage.scad"), "w") as f:
+        with open(os.path.join(target_dir, "examples", "example_usage.scad"), "w", encoding="utf-8") as f:
             f.write(_SCAD_EXAMPLE.format(module=module_name, name=display_name))
         # Optional Python sidecar - calc helpers that mirror the .scad module.
         # Always scaffolded so users can opt in by editing; delete the dir to opt out.
         py_dir = os.path.join(target_dir, "python")
         os.makedirs(py_dir, exist_ok=True)
-        with open(os.path.join(py_dir, f"{module_name}.py"), "w") as f:
+        with open(os.path.join(py_dir, f"{module_name}.py"), "w", encoding="utf-8") as f:
             f.write(_PY_SIDECAR_SRC.format(module=module_name, name=display_name))
-        with open(os.path.join(py_dir, f"test_{module_name}.py"), "w") as f:
+        with open(os.path.join(py_dir, f"test_{module_name}.py"), "w", encoding="utf-8") as f:
             f.write(_PY_SIDECAR_TEST.format(module=module_name, name=display_name))
 
     def example_filename(self, path: str = "") -> str:

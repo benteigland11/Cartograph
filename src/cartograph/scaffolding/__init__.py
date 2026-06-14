@@ -21,7 +21,7 @@ _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "library_config.jso
 def _library_notes(language: str, domain: str = "") -> dict:
     """Load general + language-specific + domain-specific notes from library_config.json."""
     try:
-        with open(_CONFIG_PATH) as f:
+        with open(_CONFIG_PATH, encoding="utf-8") as f:
             cfg = json.load(f)
     except Exception:
         return {}
@@ -108,7 +108,7 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
         "custom_notes": "",
         "library_notes": _library_notes(normalized_lang, domain),
     }
-    with open(os.path.join(target_dir, "widget.json"), "w") as f:
+    with open(os.path.join(target_dir, "widget.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
     # Write language-specific files from engine scaffold
@@ -194,7 +194,7 @@ def create_blueprint(carto, name, language, target_dir=None, description=None, t
         "dependencies": [],
         "domains": [],
     }
-    with open(os.path.join(target_dir, "blueprint.json"), "w") as f:
+    with open(os.path.join(target_dir, "blueprint.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
     # Derive a module name from the slug for placeholder files.

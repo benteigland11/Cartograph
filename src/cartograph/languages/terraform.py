@@ -282,17 +282,17 @@ class TerraformEngine(LanguageEngine):
         os.makedirs(tests_dir, exist_ok=True)
         os.makedirs(ex_dir, exist_ok=True)
 
-        with open(os.path.join(src_dir, f"{module_name}.tf"), "w") as f:
+        with open(os.path.join(src_dir, f"{module_name}.tf"), "w", encoding="utf-8") as f:
             f.write(_TF_MAIN.format(module=module_name, name=display_name))
-        with open(os.path.join(src_dir, "variables.tf"), "w") as f:
+        with open(os.path.join(src_dir, "variables.tf"), "w", encoding="utf-8") as f:
             f.write(_TF_VARIABLES.format(module=module_name))
-        with open(os.path.join(src_dir, "outputs.tf"), "w") as f:
+        with open(os.path.join(src_dir, "outputs.tf"), "w", encoding="utf-8") as f:
             f.write(_TF_OUTPUTS.format(module=module_name))
-        with open(os.path.join(src_dir, "versions.tf"), "w") as f:
+        with open(os.path.join(src_dir, "versions.tf"), "w", encoding="utf-8") as f:
             f.write(_TF_VERSIONS)
-        with open(os.path.join(tests_dir, f"test_{module_name}.tf"), "w") as f:
+        with open(os.path.join(tests_dir, f"test_{module_name}.tf"), "w", encoding="utf-8") as f:
             f.write(_TF_TEST.format(module=module_name))
-        with open(os.path.join(ex_dir, "example_usage.tf"), "w") as f:
+        with open(os.path.join(ex_dir, "example_usage.tf"), "w", encoding="utf-8") as f:
             f.write(_TF_EXAMPLE.format(module=module_name, name=display_name))
 
     def find_test_files(self, path: str) -> list[str]:

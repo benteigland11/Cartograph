@@ -110,7 +110,7 @@ class PythonEngine(LanguageEngine):
     def _find_print_calls(self, fpath: str) -> list:
         """Return line numbers of print() calls in actual code, skipping docstrings."""
         try:
-            with open(fpath) as f:
+            with open(fpath, encoding="utf-8") as f:
                 source = f.read()
             tree = ast.parse(source)
         except Exception:
@@ -177,7 +177,7 @@ class PythonEngine(LanguageEngine):
             is_src = fpath in src_files
             is_example = fpath in example_files
             try:
-                code = open(fpath).read()
+                code = open(fpath, encoding="utf-8").read()
             except Exception as e:
                 blocks.append(f"Could not read source file {rel}: {e}")
                 continue
@@ -329,13 +329,13 @@ class PythonEngine(LanguageEngine):
         return results
 
     def scaffold(self, target_dir, module_name, display_name, **_):
-        with open(os.path.join(target_dir, "src", "__init__.py"), "w") as f:
+        with open(os.path.join(target_dir, "src", "__init__.py"), "w", encoding="utf-8") as f:
             f.write(_SRC_INIT)
-        with open(os.path.join(target_dir, "src", f"{module_name}.py"), "w") as f:
+        with open(os.path.join(target_dir, "src", f"{module_name}.py"), "w", encoding="utf-8") as f:
             f.write(_SRC_TEMPLATE.format(module=module_name, name=display_name))
-        with open(os.path.join(target_dir, "tests", f"test_{module_name}.py"), "w") as f:
+        with open(os.path.join(target_dir, "tests", f"test_{module_name}.py"), "w", encoding="utf-8") as f:
             f.write(_TEST_TEMPLATE)
-        with open(os.path.join(target_dir, "examples", "example_usage.py"), "w") as f:
+        with open(os.path.join(target_dir, "examples", "example_usage.py"), "w", encoding="utf-8") as f:
             f.write(_EXAMPLE_TEMPLATE.format(module=module_name, name=display_name))
 
     def src_import_pattern(self) -> str | None:
@@ -551,7 +551,7 @@ class PythonEngine(LanguageEngine):
             rel = os.path.relpath(fpath, widget_path)
             is_src = fpath in src_files
             try:
-                code = open(fpath).read()
+                code = open(fpath, encoding="utf-8").read()
             except Exception as e:
                 blocks.append(f"Could not read {rel}: {e}")
                 continue

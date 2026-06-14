@@ -35,7 +35,7 @@ def checkin_blueprint(carto, path: str, reason: str = "", version_bump: str = "m
         return {"status": "error", "message": "No blueprint.json found."}
 
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
         return {"status": "error", "message": f"Invalid blueprint.json: {e}"}
@@ -94,7 +94,7 @@ def checkin_blueprint(carto, path: str, reason: str = "", version_bump: str = "m
         baseline_manifest = os.path.join(dest_path, "blueprint.json")
         if os.path.isfile(baseline_manifest):
             try:
-                with open(baseline_manifest) as f:
+                with open(baseline_manifest, encoding="utf-8") as f:
                     baseline_data = json.load(f)
                 baseline_version = baseline_data.get("version")
             except Exception:
@@ -205,7 +205,7 @@ def checkin_blueprint(carto, path: str, reason: str = "", version_bump: str = "m
             validation_block["runtime"] = rv
     data["validation"] = validation_block
 
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
     # --- Archive current library version to history/ ---
@@ -265,12 +265,12 @@ def checkin_blueprint(carto, path: str, reason: str = "", version_bump: str = "m
     changelog = []
     if os.path.exists(changelog_path):
         try:
-            with open(changelog_path) as f:
+            with open(changelog_path, encoding="utf-8") as f:
                 changelog = json.load(f)
         except Exception:
             pass
     changelog.insert(0, changelog_entry)
-    with open(changelog_path, "w") as f:
+    with open(changelog_path, "w", encoding="utf-8") as f:
         json.dump(changelog, f, indent=2)
 
     # --- Write fresh stamp at library path ---

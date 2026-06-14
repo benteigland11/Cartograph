@@ -41,7 +41,7 @@ def _read_dir(dirpath, prefix_filter=None):
             if prefix_filter and not name.startswith(prefix_filter):
                 continue
             try:
-                with open(fpath) as f:
+                with open(fpath, encoding="utf-8") as f:
                     out[name] = f.read()
             except Exception as e:
                 out[name] = f"Error reading: {e}"
@@ -89,7 +89,7 @@ def inspect(carto, widget_id, show_source=False, show_all_versions=False,
     review_data = carto._load_reviews(widget_path)
 
     try:
-        with open(os.path.join(read_path, "widget.json")) as f:
+        with open(os.path.join(read_path, "widget.json"), encoding="utf-8") as f:
             manifest = json.load(f)
     except (OSError, json.JSONDecodeError):
         manifest = {}
@@ -145,7 +145,7 @@ def inspect_blueprint(carto, blueprint_id, show_source=False,
         read_path = bp_path
 
     try:
-        with open(os.path.join(read_path, "blueprint.json")) as f:
+        with open(os.path.join(read_path, "blueprint.json"), encoding="utf-8") as f:
             manifest = json.load(f)
     except (OSError, json.JSONDecodeError):
         manifest = {}

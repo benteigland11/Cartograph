@@ -58,7 +58,7 @@ def _restore_library_notes(manifest_path: str) -> None:
     Called just before copying to the library so agents cannot drift or
     remove the library-wide standards even if they edited widget.json.
     """
-    with open(manifest_path) as f:
+    with open(manifest_path, encoding="utf-8") as f:
         data = json.load(f)
     language = data.get("tech_stack", {}).get("language", "")
     if isinstance(language, list):
@@ -67,7 +67,7 @@ def _restore_library_notes(manifest_path: str) -> None:
     canonical = _canonical_library_notes(language, domain)
     if canonical:
         data["library_notes"] = canonical
-        with open(manifest_path, "w") as f:
+        with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
 
@@ -109,7 +109,7 @@ def _lookup_cloud_baseline(path: str, item_id: str,
         if not os.path.isfile(sidecar_path):
             return None
     try:
-        with open(sidecar_path) as f:
+        with open(sidecar_path, encoding="utf-8") as f:
             source = json.load(f)
     except Exception:
         return None
@@ -176,7 +176,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         return {"status": "error", "message": "No widget.json found."}
 
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
         return {"status": "error", "message": f"Invalid widget.json: {e}"}
@@ -250,7 +250,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
                 elif widget_record is not None:
                     lib_manifest = os.path.join(widget_record["path"], "widget.json")
                     try:
-                        with open(lib_manifest) as f:
+                        with open(lib_manifest, encoding="utf-8") as f:
                             baseline_manifest = json.load(f)
                     except Exception:
                         baseline_manifest = None
@@ -328,7 +328,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
             validation_block["runtime"] = rv
     data["validation"] = validation_block
 
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
     # --- Determine destination ---
@@ -406,12 +406,12 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     changelog = []
     if os.path.exists(changelog_path):
         try:
-            with open(changelog_path) as f:
+            with open(changelog_path, encoding="utf-8") as f:
                 changelog = json.load(f)
         except Exception:
             pass
     changelog.insert(0, changelog_entry)
-    with open(changelog_path, "w") as f:
+    with open(changelog_path, "w", encoding="utf-8") as f:
         json.dump(changelog, f, indent=2)
 
     # --- Diff for AI review ---
@@ -478,10 +478,10 @@ def restore(carto, item_id, version, reason):
     # passes, then checkin() bumps it normally (patch).
     current_version = item.get("version", "1.0.0")
     manifest_path = os.path.join(temp_dir, "widget.json")
-    with open(manifest_path) as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
     manifest["meta"]["version"] = current_version
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
     result = checkin(carto, temp_dir, reason=f"RESTORE from v{version}: {reason}",
@@ -521,13 +521,13 @@ def write_review(widget_path: str, score: float, version: str,
     reviews_data = {"reviews": []}
     if os.path.exists(review_path):
         try:
-            with open(review_path) as f:
+            with open(review_path, encoding="utf-8") as f:
                 reviews_data = json.load(f)
         except Exception:
             pass
 
     reviews_data["reviews"].append(entry)
-    with open(review_path, "w") as f:
+    with open(review_path, "w", encoding="utf-8") as f:
         json.dump(reviews_data, f, indent=2)
 
     avg = sum(r["rating"] for r in reviews_data["reviews"]) / len(reviews_data["reviews"])
@@ -614,7 +614,7 @@ def widget_status(carto, widget_id, target_dir, check_cloud=True):
         return {"error": f"'{library_id}' not found in library."}
 
     try:
-        with open(os.path.join(installed_path, "widget.json")) as f:
+        with open(os.path.join(installed_path, "widget.json"), encoding="utf-8") as f:
             installed_version = json.load(f).get("meta", {}).get("version", "unknown")
     except Exception as e:
         return {"error": f"Failed to read installed manifest: {e}"}
