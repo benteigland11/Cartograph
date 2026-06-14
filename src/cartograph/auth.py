@@ -160,7 +160,8 @@ def _refresh_id_token(refresh_token: str) -> str | None:
 
     req = urllib.request.Request(token_url, data=data, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        from .net_tls import registry_ssl_context
+        with urllib.request.urlopen(req, timeout=10, context=registry_ssl_context()) as resp:
             result = json.loads(resp.read())
         new_id_token = result.get("id_token")
         if new_id_token:

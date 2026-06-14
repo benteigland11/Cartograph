@@ -17,6 +17,8 @@ import os
 import urllib.error
 import urllib.request
 
+from .net_tls import registry_ssl_context
+
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -345,7 +347,7 @@ def _fetch_registry_info(url: str) -> dict:
             url.rstrip("/") + "/info",
             headers={"Accept": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5, context=registry_ssl_context()) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         return {"error": f"Registry /info returned HTTP {e.code}"}

@@ -180,21 +180,58 @@ class HTTPClient:
                     return json.loads(raw)
                 except ValueError:
                     return {"error": "Non-JSON response body", "status_code": resp.status}
-        except urllib.error.HTTPError as e:
+        except Exception as e:
+            return self._error_dict(e)
+
+    @staticmethod
+    def _error_dict(e: Exception) -> dict:
+        """Map a request exception to the shared {error, status_code} shape."""
+        if isinstance(e, urllib.error.HTTPError):
             err_body = {}
             try:
                 err_body = json.loads(e.read())
             except Exception:
                 pass
-            # Prefer the server-provided detail, fall back to the generic HTTP error.
-            return {
-                "error": err_body.get("detail", str(e)),
-                "status_code": e.code,
-            }
-        except urllib.error.URLError as e:
+            detail = err_body.get("detail", str(e)) if isinstance(err_body, dict) else str(e)
+            return {"error": detail, "status_code": e.code}
+        if isinstance(e, urllib.error.URLError):
             return {"error": f"Network error: {e.reason}", "status_code": None}
+        return {"error": str(e), "status_code": None}
+
+    def request_raw(
+        self,
+        method: str,
+        path: str,
+        data: bytes | None = None,
+        base_url: str | None = None,
+        headers: dict | None = None,
+        timeout: float | None = None,
+        content_type: str | None = None,
+    ) -> dict:
+        """Make a request and return the unparsed response.
+
+        Returns {"status": int, "headers": dict, "body": bytes} on success,
+        or the same {"error", "status_code"} shape as the JSON methods on
+        failure. Use this for binary payloads (zip/tar downloads), endpoints
+        whose metadata rides in response headers, or health checks where only
+        the status code matters. The TLS context and auth headers are applied
+        exactly as for the JSON methods, so callers never touch raw urllib.
+        """
+        resolved_base = self._resolve_base(base_url)
+        url = resolved_base + path
+        request_headers = self._build_headers(resolved_base, headers, content_type)
+        req = urllib.request.Request(url, data=data, headers=request_headers, method=method)
+        context = self._get_ssl_context() if url.lower().startswith("https") else None
+        try:
+            with urllib.request.urlopen(req, timeout=timeout or self.default_timeout,
+                                        context=context) as resp:
+                return {
+                    "status": resp.status,
+                    "headers": dict(resp.headers.items()),
+                    "body": resp.read(),
+                }
         except Exception as e:
-            return {"error": str(e), "status_code": None}
+            return self._error_dict(e)
 
     def get(self, path: str, base_url: str | None = None,
             headers: dict | None = None, timeout: float | None = None) -> dict:

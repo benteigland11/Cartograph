@@ -1,8 +1,10 @@
 """
 Cartograph cloud registry client.
 
-All network activity is in this module.  Everything uses urllib.request so
-there are no extra dependencies.  If the user is not authenticated or the
+All network activity is in this module. Every request is routed through the
+dogfooded `infra-urllib-client-python` widget (stdlib-only, so no extra
+dependencies), which applies the OS-trust-store TLS context uniformly - there
+is no raw urllib here to bypass it. If the user is not authenticated or the
 registry is unreachable, functions degrade gracefully and return structured
 error dicts rather than raising.
 
@@ -18,9 +20,7 @@ Install paths remain cg/<widget-id>/ regardless of source.
 import json
 import logging
 import os
-import urllib.error
 import urllib.parse
-import urllib.request
 import zipfile
 from io import BytesIO
 
@@ -59,26 +59,12 @@ endpoint, get_endpoints = _load_endpoint_decorator()
 # Low-level helpers
 # ---------------------------------------------------------------------------
 # HTTP plumbing is delegated to the dogfooded `infra-urllib-client-python`
-# widget. The five module-level helpers below (_get/_post/_patch/_delete/
-# _post_multipart) keep their names and signatures so every existing caller
-# works unchanged, but their bodies are thin wrappers around a shared
-# HTTPClient instance. Two functions stay on raw urllib and are
-# intentionally not routed through the client:
-#   * download_widget() — needs response-header access (X-Widget-Version,
-#     X-Widget-Governance) which the widget's client doesn't expose.
-#   * login_with_credentials() — distinct auth path, different endpoint
-#     surface, not worth routing through the shared client.
-# is_available() also uses raw urllib so it can skip auth entirely.
-
-def _headers(registry_url: str | None = None) -> dict:
-    """Header dict including auth, used by the raw-urllib paths above."""
-    from .auth import get_token
-    token = get_token(registry_url)
-    h = {"Content-Type": "application/json", "Accept": "application/json"}
-    if token:
-        h["Authorization"] = f"Bearer {token}"
-    return h
-
+# widget. The module-level helpers below (_get/_post/_patch/_delete/
+# _post_multipart for JSON, request_raw via _http_client() for binary and
+# header-bearing responses) keep their names and signatures so every existing
+# caller works unchanged, but their bodies are thin wrappers around a shared
+# HTTPClient instance. Nothing here uses raw urllib, so the widget's
+# OS-trust-store TLS context applies to every call uniformly.
 
 def _registry_url() -> str:
     from .auth import get_registry_url
@@ -164,10 +150,8 @@ def _post_multipart(path: str, fields: dict, file_data: bytes, filename: str,
 def is_available() -> bool:
     """Return True if the registry responds to a health check."""
     try:
-        url = _registry_url() + "/health"
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status == 200
+        r = _http_client().request_raw("GET", "/health", base_url=_registry_url(), timeout=5)
+        return r.get("status") == 200
     except Exception:
         return False
 
@@ -408,29 +392,24 @@ def download_widget(owner_handle: str, widget_id: str,
     Returns {"zip_bytes": bytes, "version": str} on success,
     or {"error": ...} on failure.
     """
-    base = registry_url.rstrip("/") if registry_url else _registry_url()
-    url = (
-        base
-        + f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+    path = (
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
         f"/{urllib.parse.quote(widget_id)}/download"
     )
-    headers = _headers(registry_url)
-    headers["Accept"] = "application/zip"
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            version = resp.headers.get("X-Widget-Version", "0.0.0")
-            governance = resp.headers.get("X-Widget-Governance")
-            return {"zip_bytes": resp.read(), "version": version, "governance": governance}
-    except urllib.error.HTTPError as e:
-        body = {}
-        try:
-            body = json.loads(e.read())
-        except Exception:
-            pass
-        return {"error": body.get("detail", str(e)), "status_code": e.code}
-    except Exception as e:
-        return {"error": f"Download failed: {e}"}
+    r = _http_client().request_raw(
+        "GET", path,
+        base_url=_resolve_base(registry_url),
+        headers={"Accept": "application/zip"},
+        timeout=30,
+    )
+    if "error" in r:
+        return r
+    headers = r["headers"]
+    return {
+        "zip_bytes": r["body"],
+        "version": headers.get("X-Widget-Version", "0.0.0"),
+        "governance": headers.get("X-Widget-Governance"),
+    }
 
 
 @endpoint("GET", "/v1/registry/info",
@@ -592,22 +571,22 @@ def login_with_credentials(id_token: str, refresh_token: str,
 
     Returns {"status": "success", "owner": ...} or {"error": ...}.
     """
-    from .auth import save_credentials, get_registry_url
+    from .auth import save_credentials
 
-    url = get_registry_url().rstrip("/") + "/v1/auth/me"
-    req = urllib.request.Request(
-        url,
-        headers={"Authorization": f"Bearer {id_token}", "Accept": "application/json"},
+    # Validate the *candidate* id_token (not the stored one), so override the
+    # Authorization header the client's auth callback would otherwise inject.
+    data = _http_client().get(
+        "/v1/auth/me",
+        base_url=_registry_url(),
+        headers={"Authorization": f"Bearer {id_token}"},
     )
-    try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            data = json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
+    if "error" in data:
+        code = data.get("status_code")
+        if code == 401:
             return {"error": "Invalid token."}
-        return {"error": f"Registry error: {e.code}"}
-    except Exception as e:
-        return {"error": str(e)}
+        if code is not None:
+            return {"error": f"Registry error: {code}"}
+        return {"error": data["error"]}
 
     save_credentials(id_token, refresh_token, signing_key)
     return {"status": "success", "owner": data.get("owner") or data.get("username", "unknown")}
@@ -862,28 +841,20 @@ def proposal_diff(owner_handle: str, widget_id: str,
 
     Returns {"diff": str} on success, or {"error": ...} on failure.
     """
-    base = registry_url.rstrip("/") if registry_url else _registry_url()
-    url = (
-        base
-        + f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
+    path = (
+        f"/v1/widgets/{urllib.parse.quote(owner_handle)}"
         f"/{urllib.parse.quote(widget_id)}"
         f"/proposals/{urllib.parse.quote(proposal_id)}/diff"
     )
-    headers = _headers(registry_url)
-    headers["Accept"] = "text/plain"
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return {"diff": resp.read().decode("utf-8", errors="replace")}
-    except urllib.error.HTTPError as e:
-        body = {}
-        try:
-            body = json.loads(e.read())
-        except Exception:
-            pass
-        return {"error": body.get("detail", str(e)), "status_code": e.code}
-    except Exception as e:
-        return {"error": f"Diff fetch failed: {e}"}
+    r = _http_client().request_raw(
+        "GET", path,
+        base_url=_resolve_base(registry_url),
+        headers={"Accept": "text/plain"},
+        timeout=30,
+    )
+    if "error" in r:
+        return r
+    return {"diff": r["body"].decode("utf-8", errors="replace")}
 
 
 @endpoint("POST", "/v1/widgets/{owner_handle}/{widget_id}/proposals/{proposal_id}/accept",
@@ -970,27 +941,21 @@ def download_blueprint(owner_handle: str, blueprint_id: str,
     Returns {"tar_bytes": bytes, "version": str} on success,
     or {"error": ...} on failure.
     """
-    base = registry_url.rstrip("/") if registry_url else _registry_url()
     path = (
         f"/v1/blueprints/{urllib.parse.quote(owner_handle)}"
         f"/{urllib.parse.quote(blueprint_id)}/download"
     )
     if version:
         path += f"?version={urllib.parse.quote(version)}"
-    url = base + path
-    headers = _headers(registry_url)
-    headers["Accept"] = "application/gzip"
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            ver = resp.headers.get("X-Blueprint-Version", version or "0.0.0")
-            return {"tar_bytes": resp.read(), "version": ver}
-    except urllib.error.HTTPError as e:
-        body = {}
-        try:
-            body = json.loads(e.read())
-        except Exception:
-            pass
-        return {"error": body.get("detail", f"HTTP {e.code}")}
-    except urllib.error.URLError as e:
-        return {"error": f"Network error: {e.reason}"}
+    r = _http_client().request_raw(
+        "GET", path,
+        base_url=_resolve_base(registry_url),
+        headers={"Accept": "application/gzip"},
+        timeout=30,
+    )
+    if "error" in r:
+        return r
+    return {
+        "tar_bytes": r["body"],
+        "version": r["headers"].get("X-Blueprint-Version", version or "0.0.0"),
+    }

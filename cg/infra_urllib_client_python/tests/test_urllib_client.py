@@ -232,6 +232,46 @@ def test_empty_body_returns_empty_dict(server):
     assert r == {}
 
 
+# ---- request_raw ---------------------------------------------------------
+
+def test_request_raw_returns_status_headers_body(server):
+    _, base, H = server
+    H.responses[("GET", "/v1/raw")] = (200, b"plain text not json")
+    c = HTTPClient(base_url=base)
+    r = c.request_raw("GET", "/v1/raw")
+    assert r["status"] == 200
+    assert r["body"] == b"plain text not json"
+    # headers come back as a plain dict, never JSON-parsed
+    assert r["headers"]["Content-Type"] == "application/json"
+
+
+def test_request_raw_binary_body_unparsed(server):
+    _, base, H = server
+    blob = bytes(range(256))
+    H.responses[("GET", "/v1/zip")] = (200, blob)
+    c = HTTPClient(base_url=base)
+    r = c.request_raw("GET", "/v1/zip")
+    assert r["body"] == blob  # raw bytes, no decode/parse
+
+
+def test_request_raw_http_error_returns_error_dict(server):
+    _, base, H = server
+    H.responses[("GET", "/v1/missing")] = (404, {"detail": "nope"})
+    c = HTTPClient(base_url=base)
+    r = c.request_raw("GET", "/v1/missing")
+    assert r["error"] == "nope"
+    assert r["status_code"] == 404
+    assert "body" not in r
+
+
+def test_request_raw_applies_auth_headers(server):
+    _, base, H = server
+    H.responses[("GET", "/v1/raw")] = (200, b"ok")
+    c = HTTPClient(base_url=base, auth_headers=lambda url: {"Authorization": "Bearer t"})
+    c.request_raw("GET", "/v1/raw")
+    assert H.received[-1]["headers"]["authorization"] == "Bearer t"
+
+
 # ---- Multipart -----------------------------------------------------------
 
 def test_multipart_fields_only(server):

@@ -38,9 +38,14 @@ def cli_env(tmp_library, tmp_path):
     # would break site-packages resolution when cartograph is --user-installed).
     env["XDG_DATA_HOME"] = str(tmp_path / "xdg-data")
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
-    # Ensure src/ is importable regardless of how cartograph was installed
-    repo_src = os.path.join(os.path.dirname(os.path.dirname(__file__)), "src")
-    env["PYTHONPATH"] = repo_src + os.pathsep + env.get("PYTHONPATH", "")
+    # Ensure src/ (cartograph) and the repo root (the cg/ widget tree) are
+    # importable regardless of how cartograph was installed. Without the repo
+    # root, `import cg` falls through to any stale --user-installed copy.
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    repo_src = os.path.join(repo_root, "src")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [repo_src, repo_root, env.get("PYTHONPATH", "")]
+    )
     return env
 
 
