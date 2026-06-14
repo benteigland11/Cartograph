@@ -190,6 +190,16 @@ def _search_registries(query, domain_filter, language_filter, top_k,
     allowlist = set(registry_filter) if registry_filter else None
     owner_bare = owner_filter.lstrip("@") if owner_filter else None
 
+    # When show-unavailable is off, scope cloud results to the languages this
+    # machine actually has. The set is sent to the server so it filters BEFORE
+    # ranking/truncating (so top_k fills with installable widgets), and is
+    # reused below as a client-side backstop for servers that ignore the param.
+    from .config import load_config
+    avail = None
+    if not load_config().get("library", {}).get("show_unavailable", True):
+        from .languages import available_languages
+        avail = available_languages()
+
     all_widgets = []
     errors = {}
     scoped_prefixes = []
@@ -199,7 +209,8 @@ def _search_registries(query, domain_filter, language_filter, top_k,
             return []
         scoped_prefixes.append(prefix)
         result = cloud_search(query, domain_filter, language_filter,
-                              top_k=top_k, registry_url=registry_url)
+                              top_k=top_k, registry_url=registry_url,
+                              languages=avail)
         if result.get("error"):
             errors[prefix] = result["error"]
         widgets = []
@@ -237,6 +248,16 @@ def _search_registries(query, domain_filter, language_filter, top_k,
         unknown = allowlist - set(scoped_prefixes)
         for prefix in unknown:
             errors[prefix] = f"Unknown registry prefix {prefix!r}. Run `cartograph registry` to list."
+
+    # Client-side backstop: the server is asked to filter to `avail` (see
+    # above), but a registry that doesn't honor the `languages` param would
+    # still return unavailable-language rows. Re-filter here so show-unavailable
+    # is enforced regardless of server behavior. Local results get the
+    # equivalent filter at library-load time (engine._load_library).
+    if avail is not None:
+        from .engine import normalize_language
+        all_widgets = [w for w in all_widgets
+                       if normalize_language(w.get("language", "")) in avail]
 
     return all_widgets, errors, scoped_prefixes
 

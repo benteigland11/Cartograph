@@ -64,7 +64,8 @@ class HybridBackend:
         self._ngram.build(widgets)
 
     def query(self, query: str, domain_filter: str | None = None,
-              language_filter: str | None = None, top_k: int = 10) -> dict:
+              language_filter: str | None = None, top_k: int = 10,
+              languages: set[str] | None = None) -> dict:
         if not self._widgets:
             return {"results": []}
 
@@ -98,7 +99,7 @@ class HybridBackend:
             if combined < _MIN_SCORE:
                 continue
 
-            if not apply_filters(widget, None, language_filter):
+            if not apply_filters(widget, None, language_filter, languages):
                 continue
 
             scored_all.append({**widget, "relevance_score": round(combined, 4)})
