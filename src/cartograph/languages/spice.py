@@ -306,19 +306,42 @@ class SpiceEngine(LanguageEngine):
     # ---- simulation runner -------------------------------------------------
 
     def _simulate(self, netlist: str, cwd: str, timeout: int = 60):
-        """Run `ngspice -b <netlist>` and return (ok, combined_output).
+        """Run `ngspice -b -o <log> <netlist>` and return (ok, combined_output).
 
         ok is False when the output carries any hard-error marker. The exit
         code is deliberately ignored - ngspice returns 0 even on failure.
+
+        The `-o <log>` flag mirrors ngspice's batch output to a file. On
+        Windows the `.control` block's `echo` lines (our ASSERT_PASS/FAIL
+        sentinels) do not reliably reach the captured stdout/stderr pipes,
+        but they always land in the `-o` log. We union the log with the
+        captured streams so assertion detection is platform-independent.
         """
         binary = self._binary()
         if not binary:
             return False, "ngspice not found - install ngspice 40+"
+        fd, logpath = tempfile.mkstemp(prefix="cg_ngspice_", suffix=".log")
+        os.close(fd)
         try:
-            res = self._run([binary, "-b", netlist], cwd=cwd, timeout=timeout)
+            res = self._run([binary, "-b", "-o", logpath, netlist],
+                            cwd=cwd, timeout=timeout)
         except FileNotFoundError:
+            os.unlink(logpath)
             return False, "ngspice not found - install ngspice 40+"
-        combined = (res.stdout or "") + "\n" + (res.stderr or "")
+        log_text = ""
+        try:
+            with open(logpath, encoding="utf-8", errors="replace") as f:
+                log_text = f.read()
+        except OSError:
+            pass
+        finally:
+            try:
+                os.unlink(logpath)
+            except OSError:
+                pass
+        combined = "\n".join(
+            part for part in (res.stdout, res.stderr, log_text) if part
+        )
         if _ERROR_MARKERS.search(combined):
             return False, combined.strip()
         return True, combined.strip()

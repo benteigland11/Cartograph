@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 
 import pytest
 
@@ -1359,6 +1360,45 @@ def _write_spice_blueprint(project_dir: str) -> str:
     with open(os.path.join(bp, "examples", "example_usage.cir"), "w") as f:
         f.write(_SPICE_CASCADE_EXAMPLE)
     return bp
+
+
+@pytest.mark.slow
+def test_spice_simulate_captures_control_echo():
+    """Windows probe: ngspice's `.control` echo must reach captured output.
+
+    This is the exact failure mode that kept SPICE dormant on Windows - an
+    `echo` inside `.control` (how testbenches emit ASSERT_PASS/FAIL) did not
+    surface in the captured stdout/stderr pipes there, so the engine never saw
+    a sentinel. `_simulate` now also reads ngspice's `-o` log and unions it in,
+    which should make sentinel capture platform-independent. Deliberately NOT
+    skipped on win32 - this is the guard that tells us Windows is fixed before
+    we flip the engine to supported=True.
+    """
+    if not shutil.which("ngspice"):
+        pytest.skip("ngspice not available")
+    engine = get_engine("spice")
+    if engine is None:
+        pytest.skip("spice engine not available")
+    netlist = (
+        "* echo capture probe\n"
+        "V1 in 0 DC 1\n"
+        "R1 in 0 1k\n"
+        ".control\n"
+        "op\n"
+        'echo "ASSERT_PASS probe echo captured"\n'
+        ".endc\n"
+        ".end\n"
+    )
+    with tempfile.TemporaryDirectory() as d:
+        nl = os.path.join(d, "probe.cir")
+        with open(nl, "w", encoding="utf-8") as f:
+            f.write(netlist)
+        ok, output = engine._simulate(nl, cwd=d)
+    assert ok, output
+    assert "ASSERT_PASS" in output, (
+        "ngspice .control echo was not captured - the -o log union should make "
+        "this platform-independent. Output:\n" + output
+    )
 
 
 @pytest.mark.slow
