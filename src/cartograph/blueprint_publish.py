@@ -55,7 +55,7 @@ def publish_blueprint(carto, path: str, *, dry_run: bool = False) -> dict:
         return {"status": "error", "message": "No blueprint.json found."}
 
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         return {"status": "error", "message": f"Invalid blueprint.json: {e}"}

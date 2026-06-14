@@ -194,9 +194,17 @@ def _validate_widgets(widgets: list, context: str = "") -> list:
           summary="Search the widget registry")
 def search(query: str, domain_filter: str | None = None,
            language_filter: str | None = None, top_k: int = 10,
-           registry_url: str | None = None) -> dict:
+           registry_url: str | None = None,
+           languages: "set[str] | None" = None) -> dict:
     """
     Search the cloud registry (public — no auth required).
+
+    `language_filter` is the single-language `--language` narrowing.
+    `languages`, if given, is the set of languages available on this
+    machine (from `doctor`/`available_languages()`); the server filters
+    results to that set BEFORE ranking and truncating to top_k, so the
+    page fills with installable widgets. The caller still re-filters
+    client-side as a backstop for servers that don't honor the param.
 
     Returns {"widgets": [...], "source": "cloud"} on success,
     or {"error": ..., "widgets": []} on failure so the caller can still
@@ -207,6 +215,9 @@ def search(query: str, domain_filter: str | None = None,
         params += f"&domain={urllib.parse.quote(domain_filter)}"
     if language_filter:
         params += f"&language={urllib.parse.quote(language_filter)}"
+    if languages:
+        # Sorted for stable URLs (cache-friendly); server treats it as a set.
+        params += f"&languages={urllib.parse.quote(','.join(sorted(languages)))}"
 
     result = _get(f"/v1/widgets/search{params}", registry_url=registry_url)
     if "error" in result:

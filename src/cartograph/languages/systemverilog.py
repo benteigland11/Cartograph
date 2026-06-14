@@ -589,7 +589,7 @@ class SystemVerilogEngine(LanguageEngine):
             os.makedirs(d, exist_ok=True)
 
         def _write(path, content):
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
 
         _write(

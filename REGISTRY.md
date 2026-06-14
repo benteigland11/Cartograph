@@ -72,11 +72,17 @@ A read-only registry needs four endpoints:
 
 ### Search
 
-`GET /v1/widgets/search?q=<query>&top_k=<n>[&domain=<d>][&language=<l>]`
+`GET /v1/widgets/search?q=<query>&top_k=<n>[&domain=<d>][&language=<l>][&languages=<l1,l2,...>]`
 
 - Return at most `top_k` results as `{"widgets": [<row>, ...]}` in ranked
   order (rule 1 above).
 - `domain` and `language` are hard filters when present.
+- `languages` (comma-separated) is a hard filter to the set of languages
+  the client can use locally (`show-unavailable false`). Apply it BEFORE
+  ranking and truncating to `top_k` so the page fills with installable
+  widgets. A registry that ignores it stays correct: the client re-filters
+  client-side as a backstop, it just wastes payload. `language` (singular,
+  the user's `--language`) and `languages` may both be present; honor both.
 - How you rank is entirely yours: lexical, embeddings, popularity-weighted,
   hand-curated. The client-side budget decides how many of your rows are
   shown next to local and other-registry results, but never their order.

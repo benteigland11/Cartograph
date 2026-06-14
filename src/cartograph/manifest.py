@@ -104,7 +104,7 @@ def load_manifest(path: str) -> Manifest:
 
     manifest_path = os.path.join(path, manifest_filename(kind))
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             raw = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         raise ManifestError(f"Could not read {manifest_path}: {e}") from e

@@ -8,8 +8,16 @@ from ..engine import normalize_language
 
 
 def apply_filters(widget: dict, domain_filter: str | None,
-                  language_filter: str | None) -> bool:
-    """Return True if the widget passes all active filters."""
+                  language_filter: str | None,
+                  languages: set[str] | None = None) -> bool:
+    """Return True if the widget passes all active filters.
+
+    `language_filter` is the single-language `--language` narrowing.
+    `languages`, if given, is a set of canonical languages the widget's
+    language must intersect (machine-availability scoping for the
+    show-unavailable config). Both may be active at once; the widget must
+    satisfy each.
+    """
     if domain_filter and domain_filter != "all":
         # Blueprints carry a multi-valued `domains` list (union of dep
         # widget domains). Widgets carry single-valued `domain`. Either
@@ -22,16 +30,21 @@ def apply_filters(widget: dict, domain_filter: str | None,
         if domain_filter not in domains and single != domain_filter:
             return False
 
-    if language_filter:
-        filter_val = normalize_language(language_filter)
+    if language_filter or languages:
         w_lang = widget.get("language", "")
         if isinstance(w_lang, list):
             w_langs = {normalize_language(l) for l in w_lang}
         else:
             w_langs = {normalize_language(l)
                        for l in str(w_lang).replace(",", " ").replace("/", " ").split()}
-        if filter_val not in w_langs:
+        if language_filter and normalize_language(language_filter) not in w_langs:
             return False
+        if languages:
+            # Normalize set members so callers can pass raw aliases (e.g. the
+            # server receives "py"/"ts" straight off the query string).
+            allowed = {normalize_language(l) for l in languages}
+            if w_langs.isdisjoint(allowed):
+                return False
 
     return True
 

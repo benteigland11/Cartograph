@@ -117,7 +117,7 @@ def validate_blueprint(carto, path: str) -> dict:
                 "message": f"examples/ contains no .{ext} files"}
     example_file = examples_in_lang[0]
     example_path = os.path.join(example_dir, example_file)
-    example_content = open(example_path).read()
+    example_content = open(example_path, encoding="utf-8").read()
     if "[TODO]" in example_content:
         return {
             "status": "error",
@@ -272,7 +272,7 @@ def _read_widget_meta(widget_dir: str | None) -> dict | None:
     if not os.path.isfile(wjson):
         return None
     try:
-        with open(wjson) as f:
+        with open(wjson, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None
@@ -300,7 +300,7 @@ def _scan_project_cg(blueprint_path: str) -> dict:
         if not os.path.isfile(wjson):
             continue
         try:
-            with open(wjson) as f:
+            with open(wjson, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             continue
@@ -361,7 +361,7 @@ def _collect_runtime_deps(dep_sources: dict[str, str]) -> list[str]:
         if not os.path.isfile(widget_json):
             continue
         try:
-            with open(widget_json) as f:
+            with open(widget_json, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception as e:
             log.debug("Could not read %s for pip deps: %s", widget_json, e)

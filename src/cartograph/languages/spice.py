@@ -271,13 +271,13 @@ class SpiceEngine(LanguageEngine):
         for d in ("src", "tests", "examples"):
             os.makedirs(os.path.join(target_dir, d), exist_ok=True)
         with open(os.path.join(target_dir, "src", f"{module_name}.cir"),
-                  "w") as f:
+                  "w", encoding="utf-8") as f:
             f.write(_SPICE_SRC.format(module=module_name, name=display_name))
         with open(os.path.join(target_dir, "tests",
-                               f"test_{module_name}.cir"), "w") as f:
+                               f"test_{module_name}.cir"), "w", encoding="utf-8") as f:
             f.write(_SPICE_TEST.format(module=module_name, name=display_name))
         with open(os.path.join(target_dir, "examples", "example_usage.cir"),
-                  "w") as f:
+                  "w", encoding="utf-8") as f:
             f.write(_SPICE_EXAMPLE.format(module=module_name,
                                           name=display_name))
 
@@ -306,19 +306,42 @@ class SpiceEngine(LanguageEngine):
     # ---- simulation runner -------------------------------------------------
 
     def _simulate(self, netlist: str, cwd: str, timeout: int = 60):
-        """Run `ngspice -b <netlist>` and return (ok, combined_output).
+        """Run `ngspice -b -o <log> <netlist>` and return (ok, combined_output).
 
         ok is False when the output carries any hard-error marker. The exit
         code is deliberately ignored - ngspice returns 0 even on failure.
+
+        The `-o <log>` flag mirrors ngspice's batch output to a file. On
+        Windows the `.control` block's `echo` lines (our ASSERT_PASS/FAIL
+        sentinels) do not reliably reach the captured stdout/stderr pipes,
+        but they always land in the `-o` log. We union the log with the
+        captured streams so assertion detection is platform-independent.
         """
         binary = self._binary()
         if not binary:
             return False, "ngspice not found - install ngspice 40+"
+        fd, logpath = tempfile.mkstemp(prefix="cg_ngspice_", suffix=".log")
+        os.close(fd)
         try:
-            res = self._run([binary, "-b", netlist], cwd=cwd, timeout=timeout)
+            res = self._run([binary, "-b", "-o", logpath, netlist],
+                            cwd=cwd, timeout=timeout)
         except FileNotFoundError:
+            os.unlink(logpath)
             return False, "ngspice not found - install ngspice 40+"
-        combined = (res.stdout or "") + "\n" + (res.stderr or "")
+        log_text = ""
+        try:
+            with open(logpath, encoding="utf-8", errors="replace") as f:
+                log_text = f.read()
+        except OSError:
+            pass
+        finally:
+            try:
+                os.unlink(logpath)
+            except OSError:
+                pass
+        combined = "\n".join(
+            part for part in (res.stdout, res.stderr, log_text) if part
+        )
         if _ERROR_MARKERS.search(combined):
             return False, combined.strip()
         return True, combined.strip()

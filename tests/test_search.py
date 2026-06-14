@@ -133,3 +133,83 @@ def test_search_row_does_not_mutate_input():
     _search_row(original)
     assert original["trend"] == "up"
     assert len(original["description"]) == 999
+
+
+# ---------------------------------------------------------------------------
+# show-unavailable: language-set scoping (cloud search parity with local).
+#
+# Local search filters unavailable languages out of the corpus at library-load
+# time, so the index never contains them. Cloud rows bypass that path, so the
+# CLI sends the client's available-language SET to the registry and the shared
+# backend filters on it BEFORE ranking/truncation. These tests pin that the
+# filter is pre-rank (fills top_k with installable widgets) and alias-tolerant.
+# ---------------------------------------------------------------------------
+
+def _retry_corpus(langs):
+    """One identically-relevant 'retry' widget per language."""
+    return [
+        {"id": f"universal-retry-{l}", "name": "retry", "domain": "universal",
+         "description": "retry backoff", "language": l, "weighted_rating": 0}
+        for l in langs
+    ]
+
+
+def test_languages_filter_scopes_results():
+    from cartograph.search import HybridBackend
+    b = HybridBackend()
+    b.build(_retry_corpus(["python", "go", "nim", "php", "typescript"]))
+    res = b.query("retry", top_k=10, languages={"python", "go"})
+    langs = {w["language"] for w in res["results"]}
+    assert langs == {"python", "go"}
+
+
+def test_languages_filter_is_pre_rank_fills_top_k():
+    """The discriminator: with the cut smaller than the corpus and unavailable
+    widgets interleaved through the ranking, a post-rank-after-truncation filter
+    would under-fill. Pre-rank must return a full top_k of available widgets."""
+    from cartograph.search import HybridBackend
+    widgets = []
+    for i in range(8):  # interleaved go, python, go, python, ...
+        widgets.append({"id": f"universal-retry-go-{i}", "name": "retry",
+                        "domain": "universal", "description": "retry",
+                        "language": "go", "weighted_rating": 0})
+        widgets.append({"id": f"universal-retry-py-{i}", "name": "retry",
+                        "domain": "universal", "description": "retry",
+                        "language": "python", "weighted_rating": 0})
+    b = HybridBackend()
+    b.build(widgets)
+    res = b.query("retry", top_k=5, languages={"python"})
+    assert [w["language"] for w in res["results"]] == ["python"] * 5
+
+
+def test_languages_filter_normalizes_aliases():
+    from cartograph.search import HybridBackend
+    b = HybridBackend()
+    b.build(_retry_corpus(["python", "typescript", "go"]))
+    res = b.query("retry", top_k=10, languages={"py", "ts"})  # raw aliases
+    assert {w["language"] for w in res["results"]} == {"python", "typescript"}
+
+
+def test_languages_none_is_noop():
+    from cartograph.search import HybridBackend
+    corpus = _retry_corpus(["python", "go", "nim"])
+    b = HybridBackend()
+    b.build(corpus)
+    assert len(b.query("retry", top_k=10)["results"]) == len(corpus)
+
+
+def test_languages_filter_combines_with_single_language():
+    from cartograph.search import HybridBackend
+    b = HybridBackend()
+    b.build(_retry_corpus(["python", "go"]))
+    res = b.query("retry", top_k=10, language_filter="go", languages={"python", "go"})
+    assert [w["language"] for w in res["results"]] == ["go"]
+
+
+def test_apply_filters_languages_set():
+    from cartograph.search.filters import apply_filters
+    w = {"language": "python", "domain": "universal"}
+    assert apply_filters(w, None, None, {"python", "go"}) is True
+    assert apply_filters(w, None, None, {"go", "nim"}) is False
+    # alias members are normalized
+    assert apply_filters(w, None, None, {"py"}) is True

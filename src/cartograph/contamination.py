@@ -49,7 +49,7 @@ def _scan_widget_contamination(path: str) -> dict:
     """Widget pipeline (unchanged): delegate to language engine."""
     manifest_path = os.path.join(path, "widget.json")
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
         return {

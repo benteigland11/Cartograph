@@ -60,7 +60,7 @@ def _registry_tokens_path() -> str:
 
 def _read_registry_tokens() -> dict:
     try:
-        with open(_registry_tokens_path()) as f:
+        with open(_registry_tokens_path(), encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}
@@ -72,7 +72,7 @@ def store_registry_token(registry_url: str, token: str) -> None:
     tokens[registry_url.rstrip("/")] = token
     path = _registry_tokens_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(tokens, f, indent=2)
     try:
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
@@ -87,7 +87,7 @@ def remove_registry_token(registry_url: str) -> bool:
     if key not in tokens:
         return False
     del tokens[key]
-    with open(_registry_tokens_path(), "w") as f:
+    with open(_registry_tokens_path(), "w", encoding="utf-8") as f:
         json.dump(tokens, f, indent=2)
     return True
 
@@ -95,7 +95,7 @@ def remove_registry_token(registry_url: str) -> bool:
 def _read_credentials() -> dict:
     """Read the credentials file, or return empty dict."""
     try:
-        with open(_CREDENTIALS_FILE) as f:
+        with open(_CREDENTIALS_FILE, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}
@@ -227,7 +227,7 @@ def is_authenticated() -> bool:
 def _write_credentials(creds: dict) -> None:
     """Write credentials dict to disk with restricted permissions."""
     os.makedirs(os.path.dirname(_CREDENTIALS_FILE), exist_ok=True)
-    with open(_CREDENTIALS_FILE, "w") as f:
+    with open(_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
         json.dump(creds, f)
     try:
         os.chmod(_CREDENTIALS_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0o600

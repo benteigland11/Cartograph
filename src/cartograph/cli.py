@@ -127,7 +127,7 @@ def _preflight_from_path(path: str) -> None:
     if not os.path.isfile(manifest):
         return  # command itself will report the missing file
     try:
-        with open(manifest) as f:
+        with open(manifest, encoding="utf-8") as f:
             language = json.load(f).get("tech_stack", {}).get("language", "python")
         _preflight_language(language)
     except json.JSONDecodeError:
@@ -190,6 +190,16 @@ def _search_registries(query, domain_filter, language_filter, top_k,
     allowlist = set(registry_filter) if registry_filter else None
     owner_bare = owner_filter.lstrip("@") if owner_filter else None
 
+    # When show-unavailable is off, scope cloud results to the languages this
+    # machine actually has. The set is sent to the server so it filters BEFORE
+    # ranking/truncating (so top_k fills with installable widgets), and is
+    # reused below as a client-side backstop for servers that ignore the param.
+    from .config import load_config
+    avail = None
+    if not load_config().get("library", {}).get("show_unavailable", True):
+        from .languages import available_languages
+        avail = available_languages()
+
     all_widgets = []
     errors = {}
     scoped_prefixes = []
@@ -199,7 +209,8 @@ def _search_registries(query, domain_filter, language_filter, top_k,
             return []
         scoped_prefixes.append(prefix)
         result = cloud_search(query, domain_filter, language_filter,
-                              top_k=top_k, registry_url=registry_url)
+                              top_k=top_k, registry_url=registry_url,
+                              languages=avail)
         if result.get("error"):
             errors[prefix] = result["error"]
         widgets = []
@@ -237,6 +248,16 @@ def _search_registries(query, domain_filter, language_filter, top_k,
         unknown = allowlist - set(scoped_prefixes)
         for prefix in unknown:
             errors[prefix] = f"Unknown registry prefix {prefix!r}. Run `cartograph registry` to list."
+
+    # Client-side backstop: the server is asked to filter to `avail` (see
+    # above), but a registry that doesn't honor the `languages` param would
+    # still return unavailable-language rows. Re-filter here so show-unavailable
+    # is enforced regardless of server behavior. Local results get the
+    # equivalent filter at library-load time (engine._load_library).
+    if avail is not None:
+        from .engine import normalize_language
+        all_widgets = [w for w in all_widgets
+                       if normalize_language(w.get("language", "")) in avail]
 
     return all_widgets, errors, scoped_prefixes
 
@@ -492,7 +513,7 @@ def _resolve_installed_widget(widget_dir: str, default_target: str):
     if os.path.isfile(bp_manifest):
         manifest = bp_manifest
         try:
-            with open(manifest) as f:
+            with open(manifest, encoding="utf-8") as f:
                 canonical_id = json.load(f).get("id", "")
             if not canonical_id:
                 err({"error": f"blueprint.json at {manifest} is missing id"})
@@ -501,7 +522,7 @@ def _resolve_installed_widget(widget_dir: str, default_target: str):
     else:
         manifest = w_manifest
         try:
-            with open(manifest) as f:
+            with open(manifest, encoding="utf-8") as f:
                 canonical_id = json.load(f).get("meta", {}).get("id", "")
             if not canonical_id:
                 err({"error": f"widget.json at {manifest} is missing meta.id"})
@@ -749,7 +770,7 @@ def _read_source_meta(install_path: str) -> dict | None:
     if not os.path.isfile(sidecar):
         return None
     try:
-        with open(sidecar) as f:
+        with open(sidecar, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None
@@ -854,7 +875,7 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
             published_governance = push_result.get("governance")
             if published_governance:
                 sidecar["governance"] = published_governance
-            with open(os.path.join(widget_path, ".cartograph_source"), "w") as _f:
+            with open(os.path.join(widget_path, ".cartograph_source"), "w", encoding="utf-8") as _f:
                 json.dump(sidecar, _f)
             # One-line governance reminder on every cloud write. Keeps the
             # author aware of which model their widget ships under without
@@ -1454,7 +1475,7 @@ def cmd_cloud_publish(args):
                     path = lib_widget["path"]
         if not widget_id:
             try:
-                with open(os.path.join(path, "widget.json")) as f:
+                with open(os.path.join(path, "widget.json"), encoding="utf-8") as f:
                     data = json.load(f)
                 widget_id = data.get("meta", {}).get("id") or data.get("id")
             except Exception:
@@ -1466,7 +1487,7 @@ def cmd_cloud_publish(args):
 
     # Read widget.json once for stamp check + contamination scan
     try:
-        with open(os.path.join(path, "widget.json")) as f:
+        with open(os.path.join(path, "widget.json"), encoding="utf-8") as f:
             widget_data = json.load(f)
     except Exception:
         widget_data = {}
@@ -1655,7 +1676,7 @@ def cmd_cloud_adopt(args):
     sidecar_path = os.path.join(widget["path"], ".cartograph_source")
     if os.path.exists(sidecar_path) and not args.force:
         try:
-            with open(sidecar_path) as f:
+            with open(sidecar_path, encoding="utf-8") as f:
                 existing = json.load(f)
             err({
                 "error": (
@@ -1666,7 +1687,7 @@ def cmd_cloud_adopt(args):
             })
         except Exception:
             pass  # unreadable sidecar - overwrite it
-    with open(sidecar_path, "w") as f:
+    with open(sidecar_path, "w", encoding="utf-8") as f:
         json.dump(sidecar, f)
 
     cloud_ver = cloud_widget.get("version", "?")
@@ -1785,7 +1806,7 @@ def cmd_rollback(args):
         local_w = next((w for w in carto.widgets if w["id"] == base_id), None)
         if local_w:
             try:
-                with open(os.path.join(local_w["path"], ".cartograph_source")) as f:
+                with open(os.path.join(local_w["path"], ".cartograph_source"), encoding="utf-8") as f:
                     local_sidecar = json.load(f)
             except Exception:
                 pass
@@ -1968,7 +1989,7 @@ def cmd_rules(args):
         filepath = os.path.join(_rules_dir_for_scope(scope), filename)
         if not os.path.exists(filepath):
             err({"error": f"No rules file at {filepath}. Run 'cartograph rules init --language {language}" + (" --global" if scope == "global" else "") + "' to create one."})
-        with open(filepath) as f:
+        with open(filepath, encoding="utf-8") as f:
             content = f.read()
         if as_json:
             out({"status": "success", "language": language, "scope": scope, "path": filepath, "content": content})
@@ -1991,7 +2012,7 @@ def cmd_rules(args):
             err({"error": f"No rules support for language '{language}'"})
         if from_file:
             try:
-                with open(from_file) as f:
+                with open(from_file, encoding="utf-8") as f:
                     content = f.read()
             except OSError as e:
                 err({"error": f"Could not read {from_file}: {e}"})
@@ -2008,7 +2029,7 @@ def cmd_rules(args):
         if os.path.exists(filepath) and not confirm:
             err({"error": f"Rules file already exists at {filepath}. Re-run with --confirm to overwrite."})
         os.makedirs(rules_dir, exist_ok=True)
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
         if as_json:
             out({"status": "success", "language": language, "scope": scope, "path": filepath, "bytes": len(content)})
@@ -2038,7 +2059,7 @@ def cmd_rules(args):
             err({"error": f"This would overwrite your custom rules at {filepath}. Re-run with --confirm to proceed."})
 
         template = get_template(language)
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(template)
 
         if as_json:
@@ -2069,7 +2090,7 @@ def cmd_rules(args):
 
         already_existed = os.path.exists(filepath)
         if not already_existed:
-            with open(filepath, "w") as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 f.write(template)
 
         if as_json:
@@ -2163,7 +2184,7 @@ def cmd_workflow(args):
     path = os.path.join(workflows_dir, f"{name}.md")
     if not os.path.isfile(path):
         err({"error": f"Workflow '{name}' not found. Run 'cartograph workflow' to list."})
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         print(f"\n{f.read()}")
 
 
@@ -2308,7 +2329,7 @@ def _build_setup_instructions() -> str:
     import json as _json
     _cfg_path = os.path.join(os.path.dirname(__file__), "library_config.json")
     try:
-        with open(_cfg_path) as _f:
+        with open(_cfg_path, encoding="utf-8") as _f:
             cfg = _json.load(_f)
     except Exception:
         cfg = {}
@@ -2630,7 +2651,7 @@ def cmd_import(args):
         if not os.path.isfile(manifest_path):
             continue
         try:
-            with open(manifest_path) as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 data = json.load(f)
             language = data.get("tech_stack", {}).get("language", "unknown")
             if isinstance(language, list):
@@ -2705,7 +2726,7 @@ def _quarantine_widget(widget_path: str, quarantine_dir: str, reason: str) -> No
         # will still flag it.
         return
     try:
-        with open(os.path.join(dest, ".quarantine_reason"), "w") as f:
+        with open(os.path.join(dest, ".quarantine_reason"), "w", encoding="utf-8") as f:
             f.write(reason + "\n")
     except OSError:
         pass
@@ -2909,7 +2930,7 @@ def _resolve_workflow(workflow_arg):
         else:
             msg += f" Create it at: {workflows_dir}/{workflow_arg}.md"
         err({"error": msg})
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return "\n" + f.read()
 
 
@@ -2973,7 +2994,7 @@ def cmd_setup(args):
     marker = "## Cartograph"
     workflow_marker = "### Workflow"
     if os.path.exists(filepath):
-        with open(filepath) as f:
+        with open(filepath, encoding="utf-8") as f:
             existing = f.read()
         if marker in existing:
             if getattr(args, "overwrite", False):
@@ -2993,14 +3014,14 @@ def cmd_setup(args):
                     overwrite_content = content
                     workflow_note = ""
                 new_file = _replace_cartograph_section(existing, overwrite_content)
-                with open(filepath, "w") as f:
+                with open(filepath, "w", encoding="utf-8") as f:
                     f.write(new_file)
                 print(f"\n  Replaced ## Cartograph section in {filepath}{workflow_note}")
                 return
             # Section exists - check if user is just adding workflow
             workflow_content = _resolve_workflow(getattr(args, "workflow", None))
             if workflow_content and workflow_marker not in existing:
-                with open(filepath, "a") as f:
+                with open(filepath, "a", encoding="utf-8") as f:
                     f.write("\n" + workflow_content)
                 print(f"\n  Added workflow to existing Cartograph section in {filepath}")
                 return
@@ -3010,7 +3031,7 @@ def cmd_setup(args):
             print(f"  Pass --overwrite to replace the existing section with a fresh one.\n")
             return
 
-    with open(filepath, "a") as f:
+    with open(filepath, "a", encoding="utf-8") as f:
         f.write("\n" + content)
 
     if detected_reason:

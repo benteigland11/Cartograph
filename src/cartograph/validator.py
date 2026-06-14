@@ -20,7 +20,7 @@ def _load_domains() -> frozenset:
     """Load valid domains from library_config.json - single source of truth."""
     config_path = os.path.join(os.path.dirname(__file__), "library_config.json")
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             return frozenset(json.load(f)["domains"].keys())
     except Exception:
         # Fallback if config is missing/broken - should never happen in production
@@ -56,7 +56,7 @@ def validate_item(carto, path):
 
     # 3. Valid JSON, no TODOs
     try:
-        content = open(manifest_path).read()
+        content = open(manifest_path, encoding="utf-8").read()
         data = json.loads(content)
         check("widget.json is valid JSON", True)
     except (OSError, json.JSONDecodeError) as e:
@@ -154,7 +154,7 @@ def validate_item(carto, path):
         current_notes = data.get("library_notes")
         if current_notes != canonical_notes:
             data["library_notes"] = canonical_notes
-            with open(manifest_path, "w") as f:
+            with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
             contam_warnings.append(
                 "library_notes drifted from canonical and was restored. "
@@ -188,7 +188,7 @@ def validate_item(carto, path):
             _print_checklist(checklist, errors, failed=True)
             return {"status": "error", "message": f"Missing examples/{example_file}"}
 
-        example_content = open(example_path).read()
+        example_content = open(example_path, encoding="utf-8").read()
         example_todos = example_content.count("[TODO]")
         if not check(f"No [TODO] in {example_file}", example_todos == 0,
                      f"Found {example_todos} [TODO] placeholder(s) in examples/{example_file} — write real example code"):

@@ -23,7 +23,7 @@ import re
 _SYNONYMS_PATH = os.path.join(os.path.dirname(__file__), "synonyms.json")
 
 try:
-    with open(_SYNONYMS_PATH) as f:
+    with open(_SYNONYMS_PATH, encoding="utf-8") as f:
         _SYNONYMS: dict[str, list[str]] = json.load(f)
 except Exception:
     _SYNONYMS = {}

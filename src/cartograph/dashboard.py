@@ -30,7 +30,7 @@ def _load_config():
     cf = _config_file()
     if os.path.exists(cf):
         try:
-            with open(cf) as f:
+            with open(cf, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
@@ -39,7 +39,7 @@ def _load_config():
 
 def _save_config(cfg):
     os.makedirs(_state_dir(), exist_ok=True)
-    with open(_config_file(), "w") as f:
+    with open(_config_file(), "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
 
 
@@ -145,14 +145,14 @@ def _make_handler(engine):
             if not os.path.exists(review_path):
                 return {"error": "No reviews file"}
             try:
-                with open(review_path) as f:
+                with open(review_path, encoding="utf-8") as f:
                     reviews_data = json.load(f)
                 reviews = reviews_data.get("reviews", [])
                 if index >= len(reviews):
                     return {"error": "Invalid review index"}
                 reviews.pop(index)
                 reviews_data["reviews"] = reviews
-                with open(review_path, "w") as f:
+                with open(review_path, "w", encoding="utf-8") as f:
                     json.dump(reviews_data, f, indent=2)
                 avg = round(sum(r["rating"] for r in reviews) / len(reviews), 1) if reviews else 0
                 return {"status": "success", "avg_rating": avg}
@@ -298,7 +298,7 @@ def _make_handler(engine):
             changelog_path = os.path.join(widget["path"], "changelog.json")
             if os.path.isfile(changelog_path):
                 try:
-                    with open(changelog_path) as f:
+                    with open(changelog_path, encoding="utf-8") as f:
                         changelog = _json.load(f)
                 except Exception:
                     pass
@@ -345,7 +345,7 @@ def _make_handler(engine):
                         if size > max_size:
                             files[relpath] = f"[File too large: {size} bytes]"
                             continue
-                        with open(fpath, "r", errors="replace") as f:
+                        with open(fpath, "r", errors="replace", encoding="utf-8") as f:
                             files[relpath] = f.read()
                     except Exception:
                         files[relpath] = "[Could not read file]"
@@ -382,7 +382,7 @@ def _make_handler(engine):
 
 def _write_pid(pid, port):
     os.makedirs(_state_dir(), exist_ok=True)
-    with open(_pid_file(), "w") as f:
+    with open(_pid_file(), "w", encoding="utf-8") as f:
         f.write(f"{pid}\n{port}\n")
 
 
@@ -423,7 +423,7 @@ def _read_pid():
     if not os.path.exists(pf):
         return None, None
     try:
-        lines = open(pf).read().strip().splitlines()
+        lines = open(pf, encoding="utf-8").read().strip().splitlines()
         pid = int(lines[0])
         port = int(lines[1]) if len(lines) > 1 else 0
         if not _is_pid_alive(pid):
