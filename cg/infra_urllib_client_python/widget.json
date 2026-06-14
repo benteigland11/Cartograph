@@ -2,7 +2,7 @@
   "meta": {
     "id": "infra-urllib-client-python",
     "name": "Urllib Client",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "domain": "infra",
     "tags": [
       "http",
@@ -25,7 +25,7 @@
   },
   "validation": {
     "engine_version": 1,
-    "validated_at": "2026-06-13T17:34:35.184069+00:00",
+    "validated_at": "2026-06-14T05:28:55.615700+00:00",
     "runtime": "python 3.14.5"
   }
 }
