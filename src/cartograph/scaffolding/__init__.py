@@ -37,6 +37,55 @@ def _library_notes(language: str, domain: str = "") -> dict:
 from cartograph.validator import VALID_DOMAINS as _VALID_DOMAINS
 
 
+# A widget/blueprint slug becomes a code identifier (Python module, SystemVerilog
+# module, JS export, etc.). Across every supported language an identifier must
+# start with a letter or underscore and contain only letters, digits, and
+# underscores - so the slug, with hyphens mapping to underscores, must follow the
+# same rule. Reject bad names loudly at create time rather than silently mangling
+# them into something the author never chose (e.g. "8b10b-encoder" would become
+# the illegal identifier "8b10b_encoder" and only blow up later at compile time).
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _suggest_name(name_base):
+    """Best-effort legal alternative: move digit-leading segments to the end
+    (8b10b-encoder -> encoder-8b10b). Returns None if no clean reorder exists."""
+    parts = [p for p in name_base.split("-") if p]
+    head = [p for p in parts if not p[0].isdigit()]
+    tail = [p for p in parts if p[0].isdigit()]
+    reordered = head + tail
+    if reordered and not reordered[0][0].isdigit():
+        return "-".join(reordered)
+    return None
+
+
+def validate_name_identifier(name_base, kind="widget"):
+    """Return an error message if name_base can't become a legal cross-language
+    identifier, else None. name_base is the slug minus domain/language affixes."""
+    ident = name_base.replace("-", "_")
+    label = kind.capitalize()
+    if not ident:
+        return f"{label} name is empty - provide a name like 'retry-backoff'."
+    if ident[0].isdigit():
+        msg = (
+            f"{label} name '{name_base}' can't start with a digit: it becomes the "
+            f"code identifier '{ident}', which is illegal in every supported "
+            f"language (identifiers must start with a letter)."
+        )
+        suggestion = _suggest_name(name_base)
+        if suggestion:
+            msg += f" Try '{suggestion}' instead."
+        return msg
+    if not _IDENT_RE.match(ident):
+        bad = sorted({c for c in name_base if not (c.isalnum() or c in "-_")})
+        return (
+            f"{label} name '{name_base}' has characters that aren't allowed in a "
+            f"code identifier ({', '.join(repr(c) for c in bad)}). Use only "
+            f"letters, digits, and hyphens."
+        )
+    return None
+
+
 def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
                   target_dir=None, gpu_targets=None, widget_type=None):
     """Scaffold a new widget directory. Returns a status dict."""
@@ -63,6 +112,12 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
     # Strip domain prefix if already present (avoid backend-backend-...)
     if name_base.startswith(f"{domain}-"):
         name_base = name_base[len(domain) + 1:]
+
+    # Reject names that can't become a legal identifier (e.g. leading digit)
+    # before creating anything on disk.
+    name_error = validate_name_identifier(name_base, kind="widget")
+    if name_error:
+        return {"status": "error", "message": name_error}
 
     # Strip domain prefix from display name if it matches
     if not name:
@@ -164,6 +219,11 @@ def create_blueprint(carto, name, language, target_dir=None, description=None, t
     # Strip trailing language if user typed the full id by accident.
     if slug.endswith(f"-{normalized_lang}"):
         slug = slug[: -len(normalized_lang) - 1]
+
+    # Reject names that can't become a legal identifier (e.g. leading digit).
+    name_error = validate_name_identifier(slug, kind="blueprint")
+    if name_error:
+        return {"status": "error", "message": name_error}
 
     try:
         item_id = compose_blueprint_id(slug, normalized_lang)
