@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.safe_archive_extract import (
     safe_extractall,
     safe_extract_zip,
+    assert_members_safe,
     UnsafeArchiveError,
 )
 
@@ -74,6 +75,16 @@ def test_safe_extract_zip_rejects_traversal_from_path(tmp_path):
     zpath.write_bytes(_zip_bytes({"../evil.py": "x"}).getvalue())
     with pytest.raises(UnsafeArchiveError):
         safe_extract_zip(str(zpath), str(tmp_path / "out"))
+
+
+def test_assert_members_safe_passes_clean_names(tmp_path):
+    assert_members_safe(["src/a.py", "widget.json", "tests/t.py"], str(tmp_path))
+
+
+@pytest.mark.parametrize("evil", ["../x", "/abs/x", "a/../../x"])
+def test_assert_members_safe_rejects_escape(tmp_path, evil):
+    with pytest.raises(UnsafeArchiveError):
+        assert_members_safe(["ok.py", evil], str(tmp_path))
 
 
 def test_unsafe_archive_error_is_valueerror():

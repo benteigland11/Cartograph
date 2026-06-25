@@ -27,12 +27,14 @@ from cg.universal_atomic_dir_swap_python.src.atomic_dir_swap import (
 from cg.universal_safe_archive_extract_python.src.safe_archive_extract import (
     safe_extractall,
     safe_extract_zip,
+    assert_members_safe,
     UnsafeArchiveError,
 )
 
 __all__ = [
     "safe_extractall",
     "safe_extract_zip",
+    "assert_members_safe",
     "UnsafeArchiveError",
     "staged_dir",
     "atomic_swap_dir",

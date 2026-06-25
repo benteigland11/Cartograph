@@ -20,14 +20,26 @@ there is no symlink-escape vector to guard here.
 import os
 import zipfile
 
-__all__ = ["safe_extractall", "safe_extract_zip", "UnsafeArchiveError"]
+__all__ = [
+    "safe_extractall",
+    "safe_extract_zip",
+    "assert_members_safe",
+    "UnsafeArchiveError",
+]
 
 
 class UnsafeArchiveError(ValueError):
     """Raised when an archive member would be written outside the destination."""
 
 
-def _assert_members_safe(names, dest_abs: str) -> None:
+def assert_members_safe(names, dest: str) -> None:
+    """Raise :class:`UnsafeArchiveError` if any of ``names`` would escape ``dest``.
+
+    Use this when extracting members selectively (skipping some, renaming
+    others) rather than via :func:`safe_extractall` - validate the whole name
+    list up front, then do the selective writes knowing every target is safe.
+    """
+    dest_abs = os.path.abspath(dest)
     for name in names:
         target = os.path.abspath(os.path.join(dest_abs, name))
         if target != dest_abs and not target.startswith(dest_abs + os.sep):
@@ -45,7 +57,7 @@ def safe_extractall(zf: zipfile.ZipFile, dest: str) -> None:
     whole extraction before anything is written.
     """
     dest_abs = os.path.abspath(dest)
-    _assert_members_safe(zf.namelist(), dest_abs)
+    assert_members_safe(zf.namelist(), dest_abs)
     os.makedirs(dest_abs, exist_ok=True)
     zf.extractall(dest_abs)
 

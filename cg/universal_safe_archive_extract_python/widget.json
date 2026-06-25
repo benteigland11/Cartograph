@@ -2,7 +2,7 @@
   "meta": {
     "id": "universal-safe-archive-extract-python",
     "name": "Safe Archive Extract",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "domain": "universal",
     "tags": [
       "zip",
@@ -25,7 +25,7 @@
   },
   "validation": {
     "engine_version": 1,
-    "validated_at": "2026-06-25T18:46:10.871025+00:00",
+    "validated_at": "2026-06-25T21:42:08.283336+00:00",
     "runtime": "python 3.14.5"
   }
 }

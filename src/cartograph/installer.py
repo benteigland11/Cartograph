@@ -118,9 +118,10 @@ def _install_from_cloud(widget_id, dest_path, registry_url=None, owner_hint=None
     version = result.get("version", "0.0.0")
     governance = result.get("governance")  # from X-Widget-Governance header, None if server doesn't send it
     try:
+        from .safefs import safe_extractall
         os.makedirs(dest_path, exist_ok=True)
         with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
-            zf.extractall(dest_path)
+            safe_extractall(zf, dest_path)
 
         # Write sidecar: provenance (where/who/terms) for checkin routing
         from .auth import get_registry_url as _public_url
@@ -350,8 +351,12 @@ def delete_from_library(carto, widget_id, confirm=False):
         }
 
     widget_path = widget["path"]
+    from .safefs import library_lock, LockTimeout
     try:
-        shutil.rmtree(widget_path)
+        with library_lock(carto.library_path):
+            shutil.rmtree(widget_path)
+    except LockTimeout as e:
+        return {"error": str(e)}
     except Exception as e:
         return {"error": f"Failed to delete: {e}"}
 

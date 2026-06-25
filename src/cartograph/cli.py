@@ -1687,8 +1687,14 @@ def cmd_cloud_adopt(args):
             })
         except Exception:
             pass  # unreadable sidecar - overwrite it
-    with open(sidecar_path, "w", encoding="utf-8") as f:
-        json.dump(sidecar, f)
+    from .engine import LIBRARY_PATH
+    from .safefs import library_lock, LockTimeout
+    try:
+        with library_lock(LIBRARY_PATH):
+            with open(sidecar_path, "w", encoding="utf-8") as f:
+                json.dump(sidecar, f)
+    except LockTimeout as e:
+        err({"error": str(e)})
 
     cloud_ver = cloud_widget.get("version", "?")
     print(f"\n  Adopted: {local_id} linked to {cloud_ref} v{cloud_ver}")
@@ -2597,6 +2603,7 @@ def cmd_import(args):
     """
     import zipfile
     from .engine import LIBRARY_PATH
+    from .safefs import assert_members_safe, UnsafeArchiveError, library_lock, LockTimeout
 
     path = args.path
     if not os.path.isfile(path):
@@ -2605,44 +2612,67 @@ def cmd_import(args):
     if not zipfile.is_zipfile(path):
         err({"error": f"Not a valid zip file: {path}"})
 
-    with zipfile.ZipFile(path, "r") as zf:
-        names = zf.namelist()
-        manifests = [n for n in names if n.endswith("widget.json") and n.count("/") == 1]
-        if not manifests:
-            err({"error": "Zip does not appear to contain a widget library (no widget.json files found)."})
-
-        os.makedirs(LIBRARY_PATH, exist_ok=True)
-
-        imported_widget_ids = set()
-        imported = 0
-        skipped = 0
-        for name in names:
-            dest = os.path.join(LIBRARY_PATH, name)
-            if name.endswith("/"):
-                os.makedirs(dest, exist_ok=True)
-                continue
-            if os.path.exists(dest) and not getattr(args, "force", False):
-                skipped += 1
-                continue
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with zf.open(name) as src, open(dest, "wb") as dst:
-                dst.write(src.read())
-            imported += 1
-            # Track which top-level widget dirs we touched, so we know
-            # what to gate after extraction.
-            head = name.split("/", 1)[0]
-            if head and "/" in name:
-                imported_widget_ids.add(head)
-
-    # Integrity gate: walk each freshly-imported widget. Accept stamped
-    # ones, validate-and-stamp unstamped ones, quarantine failures.
     from .validation_stamp import has_valid_stamp, write_stamp
     from .languages import get_engine
     from .validator import validate_item
     import shutil
 
     quarantine_dir = os.path.join(LIBRARY_PATH, ".quarantine")
-    carto = _carto()
+
+    try:
+        # The import zip can come from anywhere; serialize the whole extract +
+        # gate under the library lock so a concurrent checkin/sync can't
+        # interleave, and refuse zip-slip members before writing anything.
+        with library_lock(LIBRARY_PATH):
+            with zipfile.ZipFile(path, "r") as zf:
+                names = zf.namelist()
+                manifests = [n for n in names if n.endswith("widget.json") and n.count("/") == 1]
+                if not manifests:
+                    err({"error": "Zip does not appear to contain a widget library (no widget.json files found)."})
+                # Zip-slip guard: validate every member up front, before any write.
+                assert_members_safe(names, LIBRARY_PATH)
+
+                os.makedirs(LIBRARY_PATH, exist_ok=True)
+
+                imported_widget_ids = set()
+                imported = 0
+                skipped = 0
+                for name in names:
+                    dest = os.path.join(LIBRARY_PATH, name)
+                    if name.endswith("/"):
+                        os.makedirs(dest, exist_ok=True)
+                        continue
+                    if os.path.exists(dest) and not getattr(args, "force", False):
+                        skipped += 1
+                        continue
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with zf.open(name) as src, open(dest, "wb") as dst:
+                        dst.write(src.read())
+                    imported += 1
+                    # Track which top-level widget dirs we touched, so we know
+                    # what to gate after extraction.
+                    head = name.split("/", 1)[0]
+                    if head and "/" in name:
+                        imported_widget_ids.add(head)
+
+            # Integrity gate: walk each freshly-imported widget. Accept stamped
+            # ones, validate-and-stamp unstamped ones, quarantine failures.
+            carto = _carto()
+            gate_results = _import_integrity_gate(
+                carto, imported_widget_ids, LIBRARY_PATH, quarantine_dir,
+                has_valid_stamp, write_stamp, get_engine, validate_item)
+    except UnsafeArchiveError as e:
+        err({"error": str(e)})
+    except LockTimeout as e:
+        err({"error": str(e)})
+
+    return _import_summary(
+        imported, imported_widget_ids, quarantine_dir, skipped, gate_results)
+
+
+def _import_integrity_gate(carto, imported_widget_ids, LIBRARY_PATH,
+                           quarantine_dir, has_valid_stamp, write_stamp,
+                           get_engine, validate_item):
     accepted_stamped = []
     accepted_revalidated = []
     quarantined = []
@@ -2688,6 +2718,12 @@ def cmd_import(args):
 
     # Reload so any new widgets show up.
     _carto()
+    return accepted_stamped, accepted_revalidated, quarantined
+
+
+def _import_summary(imported, imported_widget_ids, quarantine_dir, skipped,
+                    gate_results):
+    accepted_stamped, accepted_revalidated, quarantined = gate_results
     print(f"\n  Imported {imported} files from {len(imported_widget_ids)} widget(s).")
     if accepted_stamped:
         print(f"    accepted (stamp valid): {len(accepted_stamped)}")
@@ -2874,6 +2910,10 @@ def cmd_sync(args):
             print(f"ok → v{result.get('version', '?')}")
 
     # Execute pulls — download and extract into library
+    from .safefs import (
+        safe_extractall, staged_dir, library_lock, LockTimeout,
+        UnsafeArchiveError,
+    )
     for wid, detail in pulls:
         remote = cloud_by_id[wid]
         owner = remote.get("owner", handle)
@@ -2882,15 +2922,18 @@ def cmd_sync(args):
         if "error" in result:
             print(f"FAILED: {result['error']}")
             continue
-        # Extract into library, overwriting existing
+        # Extract registry bytes zip-slip-safely into a staged dir, then swap it
+        # in atomically under the library lock - the old copy is never torn down
+        # before the new one is fully extracted, and a bad member writes nothing.
         dest = os.path.join(carto.library_path, wid)
         try:
-            if os.path.exists(dest):
-                shutil.rmtree(dest)
-            os.makedirs(dest, exist_ok=True)
-            with zipfile.ZipFile(BytesIO(result["zip_bytes"])) as zf:
-                zf.extractall(dest)
+            with library_lock(carto.library_path):
+                with staged_dir(dest) as staging:
+                    with zipfile.ZipFile(BytesIO(result["zip_bytes"])) as zf:
+                        safe_extractall(zf, staging)
             print(f"ok → v{result.get('version', '?')}")
+        except (UnsafeArchiveError, LockTimeout) as e:
+            print(f"FAILED: {e}")
         except Exception as e:
             print(f"FAILED: {e}")
 
