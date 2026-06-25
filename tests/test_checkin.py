@@ -375,8 +375,10 @@ def _plant_sidecar(install_path, owner="alice",
 
 
 def test_checkin_cloud_version_conflict(carto_tmp, modified_widget):
-    """Sidecar present + cloud says v1.5.0 + local manifest at v1.2.0 must
-    error with 'cloud is v1.5.0' — proves the cloud baseline was consulted."""
+    """Sidecar present + cloud says v1.5.0 + local manifest at v1.2.0 (local
+    BEHIND) must error with the cloud version and direction-aware guidance to
+    `cartograph upgrade` — proves the cloud baseline was consulted and the
+    message names the right rebase command, not `install`."""
     _plant_sidecar(modified_widget)
     with patch("cartograph.cloud.is_available", return_value=True), \
          patch("cartograph.cloud.inspect", return_value={
@@ -384,8 +386,57 @@ def test_checkin_cloud_version_conflict(carto_tmp, modified_widget):
          }):
         result = carto_tmp.checkin(modified_widget, reason="x")
     assert result["status"] == "error"
-    assert "version conflict" in result["message"].lower()
-    assert "cloud is v1.5.0" in result["message"]
+    assert "v1.5.0" in result["message"]
+    assert "v1.2.0" in result["message"]
+    assert "cartograph upgrade" in result["message"]
+    # Must not steer the agent to `install` on an already-installed widget.
+    assert "install" not in result["message"].lower()
+
+
+def _set_local_version(widget_dir, version):
+    manifest_path = os.path.join(widget_dir, "widget.json")
+    with open(manifest_path) as f:
+        data = json.load(f)
+    data["meta"]["version"] = version
+    with open(manifest_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def test_checkin_manual_bump_passes_when_it_matches(carto_tmp, modified_widget):
+    """Library baseline is v1.2.0. User hand-bumped meta.version to v1.3.0 AND
+    asked for --bump minor (1.2.0 -> 1.3.0). The manual edit lines up with the
+    intent, so checkin passes through and publishes v1.3.0 - not a double-bump
+    to v1.4.0."""
+    _set_local_version(modified_widget, "1.3.0")
+    result = carto_tmp.checkin(modified_widget, reason="x", version_bump="minor")
+    assert result["status"] == "success", result
+    assert result["version"] == "1.3.0"
+
+
+def test_checkin_manual_bump_mismatch_suggests_right_command(carto_tmp, modified_widget):
+    """Baseline v1.2.0, manual v1.3.0 (a minor bump) but the user ran --bump
+    patch (expects v1.2.1). Mismatch must reject AND tell them their edit is a
+    minor bump -> re-run with --bump minor."""
+    _set_local_version(modified_widget, "1.3.0")
+    result = carto_tmp.checkin(modified_widget, reason="x", version_bump="patch")
+    assert result["status"] == "error"
+    assert "1.3.0" in result["message"]
+    assert "1.2.0" in result["message"]
+    assert "--bump minor" in result["message"]
+    # Wrong-direction advice must not leak in from the behind/equal cases.
+    assert "install" not in result["message"].lower()
+    assert "upgrade" not in result["message"].lower()
+
+
+def test_checkin_manual_version_not_a_clean_bump(carto_tmp, modified_widget):
+    """Baseline v1.2.0, manual v1.9.0 is not a clean patch/minor/major bump of
+    the baseline under any --bump level. Reject with guidance to reset
+    meta.version and let --bump set it."""
+    _set_local_version(modified_widget, "1.9.0")
+    result = carto_tmp.checkin(modified_widget, reason="x")
+    assert result["status"] == "error"
+    assert "1.9.0" in result["message"]
+    assert "reset meta.version" in result["message"].lower()
 
 
 def test_checkin_cloud_baseline_overrides_library(carto_tmp, installed_widget):
