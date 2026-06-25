@@ -18,10 +18,49 @@ from cartograph.safefs import (
     safe_extractall,
     staged_dir,
     atomic_swap_dir,
+    widget_lock,
     library_lock,
     LockTimeout,
     UnsafeArchiveError,
 )
+
+
+def test_widget_lock_different_widgets_do_not_block(tmp_path):
+    """Two DIFFERENT widgets must be lockable concurrently - the whole point of
+    per-widget granularity. Acquire one and confirm the other is still free."""
+    lib = str(tmp_path)
+    with widget_lock(lib, "backend-a-python", timeout=2):
+        # A different widget's lock is independent and acquires immediately.
+        with widget_lock(lib, "backend-b-python", timeout=2):
+            pass
+
+
+def test_widget_lock_same_widget_serializes(tmp_path):
+    import threading
+    import time as _t
+    lib = str(tmp_path)
+    order = []
+
+    def worker(tag, hold):
+        with widget_lock(lib, "backend-same-python", timeout=5):
+            order.append(f"{tag}-in")
+            _t.sleep(hold)
+            order.append(f"{tag}-out")
+
+    t1 = threading.Thread(target=worker, args=("a", 0.3))
+    t1.start()
+    _t.sleep(0.05)
+    t2 = threading.Thread(target=worker, args=("b", 0.0))
+    t2.start()
+    t1.join()
+    t2.join()
+    assert order == ["a-in", "a-out", "b-in", "b-out"]
+
+
+def test_widget_lock_id_with_path_chars(tmp_path):
+    """A cloud-style id with @ and / must produce a usable lock file."""
+    with widget_lock(str(tmp_path), "@owner/cg-backend-x-python", timeout=2):
+        pass
 
 
 # --- re-exports are wired to the widgets ----------------------------------

@@ -351,9 +351,9 @@ def delete_from_library(carto, widget_id, confirm=False):
         }
 
     widget_path = widget["path"]
-    from .safefs import library_lock, LockTimeout
+    from .safefs import widget_lock, LockTimeout
     try:
-        with library_lock(carto.library_path):
+        with widget_lock(carto.library_path, widget_id):
             shutil.rmtree(widget_path)
     except LockTimeout as e:
         return {"error": str(e)}

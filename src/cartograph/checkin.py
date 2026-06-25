@@ -30,7 +30,7 @@ import shutil
 
 from .engine import semver_key as _semver_key
 from .languages import get_engine
-from .safefs import library_lock, staged_dir, LockTimeout
+from .safefs import widget_lock, staged_dir, LockTimeout
 from .scaffolding import _library_notes as _canonical_library_notes
 from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_FILE
 
@@ -425,13 +425,14 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
     )
 
-    # All shared-library mutation happens under the library lock, and the new
-    # widget directory is built in a staged sibling then swapped in atomically:
-    # the live library entry is never torn down before its replacement is ready,
-    # and a concurrent checkin/sync/delete can't interleave.
+    # Mutation is scoped to THIS widget's lock, and the new widget directory is
+    # built in a staged sibling then swapped in atomically: the live entry is
+    # never torn down before its replacement is ready, and a concurrent
+    # checkin/sync/delete of the SAME widget can't interleave - while checkins
+    # of OTHER widgets proceed in parallel.
     diff = None
     try:
-        with library_lock(carto.library_path):
+        with widget_lock(carto.library_path, item_id):
             diff = carto._diff_against_library(path, item_id) if is_update else None
             with staged_dir(dest_path) as staged:
                 # 1. working copy -> staged (history/changelog/stamp/sidecar excluded)

@@ -38,29 +38,31 @@ __all__ = [
     "UnsafeArchiveError",
     "staged_dir",
     "atomic_swap_dir",
+    "widget_lock",
     "library_lock",
     "LockTimeout",
 ]
 
 LOCK_FILENAME = ".cartograph.lock"
+LOCK_DIRNAME = ".locks"
 
 
 class LockTimeout(RuntimeError):
-    """Raised when the library lock can't be acquired within the timeout."""
+    """Raised when a lock can't be acquired within the timeout."""
+
+
+def _widget_lock_id(widget_id):
+    """Filesystem-safe lock-file stem for a widget id.
+
+    Widget ids can carry ``@owner/`` and registry prefixes, so map the path
+    separators to a flat name that still collides only for the same widget.
+    """
+    return widget_id.replace("/", "__").replace("\\", "__").replace("@", "_at_")
 
 
 @contextmanager
-def library_lock(lock_dir, timeout=30.0, poll=0.1):
-    """Exclusive cross-process lock over a library directory.
-
-    Serializes library-mutating operations (checkin / sync / delete / import)
-    against other cartograph processes. Reentrant within a single thread (the
-    underlying widget keys reentrancy by lock path). Raises ``LockTimeout`` if
-    another holder keeps it past ``timeout``.
-    """
-    os.makedirs(lock_dir, exist_ok=True)
-    lock_path = os.path.join(lock_dir, LOCK_FILENAME)
-
+def _path_lock(lock_path, timeout, poll, what):
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     # Acquire with a timed retry, kept separate from the body so an exception
     # raised inside the locked section is never mistaken for contention.
     deadline = time.monotonic() + timeout
@@ -73,12 +75,41 @@ def library_lock(lock_dir, timeout=30.0, poll=0.1):
         except _LockBusy:
             if time.monotonic() >= deadline:
                 raise LockTimeout(
-                    f"Could not acquire the library lock within {timeout:.0f}s "
-                    f"({lock_path}). Another cartograph process may be running; "
-                    f"retry once it finishes."
+                    f"Could not acquire the {what} lock within {timeout:.0f}s "
+                    f"({lock_path}). Another cartograph process may be holding "
+                    f"it; retry once it finishes."
                 )
             time.sleep(poll)
     try:
         yield
     finally:
         cm.__exit__(None, None, None)
+
+
+def widget_lock(library_path, widget_id, timeout=30.0, poll=0.1):
+    """Exclusive cross-process lock scoped to a SINGLE widget.
+
+    This is the right granularity for checkin / sync-pull / delete / adopt:
+    two agents operating on *different* widgets run concurrently, and only
+    operations on the *same* widget serialize (so their staged swaps can't
+    interleave). The lock file lives in ``<library>/.locks/`` - a stable
+    location outside the widget directory, so it survives the atomic dir swap
+    and exists even before a brand-new widget's directory does.
+
+    Reentrant within a single thread for the same widget.
+    """
+    lock_path = os.path.join(library_path, LOCK_DIRNAME,
+                             f"{_widget_lock_id(widget_id)}.lock")
+    return _path_lock(lock_path, timeout, poll, f"widget '{widget_id}'")
+
+
+def library_lock(lock_dir, timeout=30.0, poll=0.1):
+    """Exclusive cross-process lock over the WHOLE library.
+
+    Coarse - serializes against every other library mutation regardless of
+    widget. Prefer :func:`widget_lock` for per-widget operations; reserve this
+    for the rare op that needs a library-wide barrier (e.g. a consistent
+    full-library snapshot). Reentrant within a single thread.
+    """
+    lock_path = os.path.join(lock_dir, LOCK_FILENAME)
+    return _path_lock(lock_path, timeout, poll, "library")
