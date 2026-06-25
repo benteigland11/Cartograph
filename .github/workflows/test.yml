@@ -196,10 +196,24 @@ jobs:
         id: tagcheck
         env:
           TAG: v${{ steps.ver.outputs.version }}
+          version: ${{ steps.ver.outputs.version }}
         run: |
           if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG already exists - nothing to do."
+            # Loud, not silent: a green run that quietly shipped nothing is the
+            # exact trap that hid an unreleased SPICE flip. Surface it as a
+            # warning annotation + job summary so "did this publish?" is
+            # answerable at a glance. Warning, not failure, because a non-release
+            # commit on master legitimately leaves the version untouched.
+            echo "::warning title=No release published::pyproject.toml is at $version and tag $TAG already exists, so the auto-tag/publish chain was SKIPPED - nothing shipped from this push. If you intended to release, bump the version in pyproject.toml and push again. If this was a non-release commit, ignore."
+            {
+              echo "### :warning: No release published"
+              echo ""
+              echo "\`pyproject.toml\` is at **$version** and tag **$TAG** already exists, so the auto-tag/publish chain was **skipped - nothing shipped from this push.**"
+              echo ""
+              echo "- Meant to release? Bump the version in \`pyproject.toml\` and push again."
+              echo "- Intentional non-release commit? You can ignore this."
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "Tag $TAG does not exist - will create."
