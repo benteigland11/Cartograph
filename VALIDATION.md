@@ -218,6 +218,71 @@ pointing at `./cg/<dep-widget>/` in the blueprint's go.mod.
 `run_blueprint_example` additionally synthesizes a temporary `go.work`
 spanning the sandbox root and each dep widget module.
 
+### Rust
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| Cargo.toml exists | missing | file check |
+| src/ has .rs files | missing | file check |
+| cargo build --lib passes | compile/borrow-check errors | subprocess (library only) |
+| rustfmt formatting | any file differs from rustfmt | `cargo fmt --check` |
+| Native Rust scanner passes on src/ | issues found | rust_scanner.rs |
+| All declared dependencies are version-pinned | unpinned dep found | dep pinning check |
+| cargo test passes | any test fails | cargo-llvm-cov (runs the tests) |
+| Coverage meets threshold | below 80% | cargo-llvm-cov line coverage over src/ |
+| Example runs and exits cleanly | non-zero exit | cargo run --example example_usage |
+
+**Layout:** `Cargo.toml` at the widget root names the package `<widget-slug>`.
+The library crate lives in `src/lib.rs`; integration tests in `tests/` are
+each their own crate that imports the widget by its crate name (hyphens in the
+package name become underscores in the crate name); `examples/example_usage.rs`
+is run with `cargo run --example`.
+
+**Coverage:** 80% enforced via cargo-llvm-cov, which drives the LLVM
+source-based coverage rustc already emits and works on Linux, macOS, and
+Windows (unlike tarpaulin, which is effectively Linux-only). `cargo llvm-cov
+--summary-only --json` runs the tests and reports the total line percent;
+`--ignore-filename-regex (tests|examples|cg)/` keeps the denominator to the
+widget's own `src/` (and excludes composed dep widgets during blueprint
+validation). Requires the cargo-llvm-cov subcommand plus the
+`llvm-tools-preview` component - the one piece not bundled with cargo; doctor
+surfaces it via `check_optional`.
+
+**Dependencies:** declared in widget.json as `<crate>>=<version>` (e.g.
+`serde>=1.0.0`). The validator runs `cargo add <crate>@>=<floor>`, writing the
+floor into Cargo.toml; Cargo.lock pins the resolved versions. The crate cache
+under CARGO_HOME is content-addressed, so no per-validation isolation is
+needed.
+
+**Formatting (rustfmt):** a hard block via `cargo fmt --check`. rustfmt is the
+ecosystem's canonical format and ships with rustup's default profile; a missing
+subcommand is reported as a toolchain error (install rustfmt), not a formatting
+failure. Scaffolded files are always written with LF newlines so the format
+gate is stable on Windows.
+
+**Scanner:** native `rust_scanner.rs`, std-only, compiled once to a cached
+binary with a bare `rustc` (so the engine needs no extra crate). It is
+comment- and string-aware by construction - a hand-written lexer that blanks
+`//` line comments, nested `/* */` block comments, normal/byte strings, and
+raw strings (`r"..."`, `r#"..."#`) before applying checks, which regex cannot
+do reliably across raw strings. The scanner skips its own source file (the
+harness passes the scanner path as the first argv, exactly like go_scanner).
+Blocks in src/: `println!/print!/eprintln!/eprint!`, `process::exit`/`abort`,
+`unsafe`, credentials, absolute paths, hardcoded IPs, `thread::sleep`.
+Warnings: hardcoded URLs (localhost/127.0.0.1/example.* /.test exempted), env
+var access (`env::var`), `todo!`/`unimplemented!`, hardcoded numeric tunables
+(`const`/`static` bound to a literal other than 0/1), unlisted external crate
+imports (resolved against widget.json deps and the crate's own Cargo package
+name; `std`/`core`/`alloc`/`crate`/`self`/`super` exempt), and public items
+without a `///` doc comment. Sleeps in tests warn only above 1s, with durations
+estimated statically from `Duration::from_secs/millis/...` calls.
+
+**Blueprints:** Rust composition uses Cargo path dependencies
+(`<dep> = { path = "cg/<dep-widget>" }`) in the blueprint's Cargo.toml. Cargo
+path deps are declarative, so `run_blueprint_example` simply runs `cargo run
+--example` in the sandbox (no go.work-style synthesis needed - the sandbox
+layout already matches the declared paths).
+
 ### SPICE
 
 | Check | Fails if | Method |

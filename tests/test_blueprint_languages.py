@@ -1234,6 +1234,122 @@ def test_go_blueprint_validates_end_to_end(carto, project):
 
 
 # ---------------------------------------------------------------------------
+# Rust
+# ---------------------------------------------------------------------------
+
+_RUST_GREET_CARGO = (
+    '[package]\nname = "greet"\nversion = "0.1.0"\nedition = "2021"\n\n'
+    '[dependencies]\n'
+)
+_RUST_GREET_SRC = (
+    "/// Builds a greeting string.\n"
+    'pub fn greeting(name: &str) -> String {\n'
+    '    format!("hello, {}", name)\n}\n'
+)
+_RUST_GREET_TEST = (
+    "use greet::greeting;\n\n#[test]\nfn test_greeting() {\n"
+    '    assert_eq!(greeting("test"), "hello, test");\n}\n'
+)
+_RUST_GREET_EXAMPLE = (
+    'use greet::greeting;\n\nfn main() {\n'
+    '    println!("{}", greeting("world"));\n}\n'
+)
+
+# The blueprint declares a Cargo path dependency on the composed widget; the
+# sandbox copies it to cg/infra-greet-rust, matching this path.
+_RUST_SHOUTER_CARGO = (
+    '[package]\nname = "shouter"\nversion = "0.1.0"\nedition = "2021"\n\n'
+    '[dependencies]\ngreet = { path = "cg/infra-greet-rust" }\n'
+)
+_RUST_SHOUTER_SRC = (
+    "/// Uppercases a greeting via the greet widget.\n"
+    'pub fn shout(name: &str) -> String {\n'
+    '    greet::greeting(name).to_uppercase()\n}\n'
+)
+_RUST_SHOUTER_TEST = (
+    "use shouter::shout;\n\n#[test]\nfn test_shout() {\n"
+    '    assert_eq!(shout("test"), "HELLO, TEST");\n}\n'
+)
+_RUST_SHOUTER_EXAMPLE = (
+    'use shouter::shout;\n\nfn main() {\n'
+    '    println!("{}", shout("world"));\n}\n'
+)
+
+
+def _write_rust_widget(project_dir: str) -> str:
+    wdir = os.path.join(project_dir, "cg", "infra-greet-rust")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(wdir, d))
+    manifest = {
+        "meta": {
+            "id": "infra-greet-rust", "name": "greet", "version": "1.0.0",
+            "domain": "infra", "tags": ["greeting", "demo", "test"],
+        },
+        "tech_stack": {"language": "rust", "dependencies": []},
+        "description": "Builds a greeting string.",
+    }
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(wdir, "Cargo.toml"), "w") as f:
+        f.write(_RUST_GREET_CARGO)
+    with open(os.path.join(wdir, "src", "lib.rs"), "w") as f:
+        f.write(_RUST_GREET_SRC)
+    with open(os.path.join(wdir, "tests", "test_greet.rs"), "w") as f:
+        f.write(_RUST_GREET_TEST)
+    with open(os.path.join(wdir, "examples", "example_usage.rs"), "w") as f:
+        f.write(_RUST_GREET_EXAMPLE)
+    return wdir
+
+
+def _write_rust_blueprint(project_dir: str) -> str:
+    bp = os.path.join(project_dir, "cg", "bp-shouter-rust")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(bp, d))
+    manifest = {
+        "id": "bp-shouter-rust",
+        "name": "shouter",
+        "language": "rust",
+        "version": "0.1.0",
+        "description": "Uppercases a greeting via the greet widget.",
+        "tags": ["greeting", "demo", "blueprint"],
+        "dependencies": [
+            {"id": "infra-greet-rust", "version": "1.0.0"},
+        ],
+        "domains": [],
+    }
+    with open(os.path.join(bp, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(bp, "Cargo.toml"), "w") as f:
+        f.write(_RUST_SHOUTER_CARGO)
+    with open(os.path.join(bp, "src", "lib.rs"), "w") as f:
+        f.write(_RUST_SHOUTER_SRC)
+    with open(os.path.join(bp, "tests", "test_shouter.rs"), "w") as f:
+        f.write(_RUST_SHOUTER_TEST)
+    with open(os.path.join(bp, "examples", "example_usage.rs"), "w") as f:
+        f.write(_RUST_SHOUTER_EXAMPLE)
+    return bp
+
+
+@pytest.mark.slow
+def test_rust_blueprint_validates_end_to_end(carto, project):
+    if not shutil.which("cargo"):
+        pytest.skip("cargo not available")
+    engine = get_engine("rust")
+    if engine is None or not engine.supported:
+        pytest.skip("rust engine not available")
+    ok, msg = engine.check_available()
+    if not ok:
+        pytest.skip(f"rust engine not ready: {msg}")
+
+    _write_rust_widget(str(project))
+    bp = _write_rust_blueprint(str(project))
+
+    res = carto.validate_blueprint(bp)
+    assert res.get("status") == "success", res
+    assert res["id"] == "bp-shouter-rust"
+
+
+# ---------------------------------------------------------------------------
 # SPICE
 # ---------------------------------------------------------------------------
 

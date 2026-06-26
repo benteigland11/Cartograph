@@ -51,6 +51,7 @@ _LANGUAGE_RULES = {
     "terraform":     ("rules.terraform.py",  [sys.executable]),
     "go":            ("rules.go.py",         [sys.executable]),
     "spice":         ("rules.spice.py",      [sys.executable]),
+    "rust":          ("rules.rust.py",       [sys.executable]),
 }
 
 
@@ -1256,6 +1257,92 @@ if __name__ == "__main__":
     main()
 """
 
+_TEMPLATE_RUST = """\
+\"\"\"
+Custom validation rules for Rust widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+              Use for things that must never ship.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+RUST-SPECIFIC CHECKS TO CONSIDER
+--------------------------------
+The engine already blocks console output, process exit, and unsafe in src/,
+and enforces rustfmt + 80% coverage. Teams often want more on top:
+
+  - Error handling: forbid `.unwrap()` / `.expect(` in src/ so library code
+    returns Result instead of panicking in the caller's process.
+  - Forbidden crates: block a dependency your team bans (e.g. openssl-sys in
+    favour of rustls) by inspecting Cargo.toml.
+  - Clippy floor: shell out to `cargo clippy -- -D warnings` and surface any
+    lint as a block.
+  - Public API docs: require a `///` doc and at least one `# Examples` block
+    on every exported item.
+  - No blanket `#[allow(...)]`: flag crate-level allows that silence lints.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      Cargo.toml
+      src/        the library crate (lib.rs)
+      tests/      integration tests (test_*.rs)
+      examples/   example_usage.rs
+      widget.json
+
+This is a Python script - use any stdlib module you want.
+EXAMPLE
+-------
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def main() -> None:
+    widget_path = sys.argv[1] if len(sys.argv) > 1 else "."
+    blocks: list[str] = []
+    warnings: list[str] = []
+
+    src_dir = os.path.join(widget_path, "src")
+    for root, _dirs, files in os.walk(src_dir):
+        for fname in files:
+            if not fname.endswith(".rs"):
+                continue
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, widget_path)
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                for lineno, line in enumerate(f, 1):
+                    # [TODO] Replace with your team's checks. Example:
+                    # .unwrap() panics in the consumer's process.
+                    if re.search(r"\\.unwrap\\(\\)", line):
+                        warnings.append(
+                            f"{rel}:{lineno}: .unwrap() in src/ - return a "
+                            f"Result instead of panicking in the caller"
+                        )
+
+    print(json.dumps({"blocks": blocks, "warnings": warnings}))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 _TEMPLATE_SPICE = """\
 \"\"\"
 Custom validation rules for SPICE widgets.
@@ -1349,6 +1436,7 @@ _TEMPLATES = {
     "terraform":     _TEMPLATE_TERRAFORM,
     "go":            _TEMPLATE_GO,
     "spice":         _TEMPLATE_SPICE,
+    "rust":          _TEMPLATE_RUST,
 }
 
 

@@ -161,6 +161,34 @@ def test_create_go_widget(carto, tmp_path, monkeypatch):
         assert "module my_go_widget" in f.read()
 
 
+def test_create_rust_widget(carto, tmp_path, monkeypatch):
+    # Rust ships supported=False until its cross-platform CI proves the
+    # cargo-llvm-cov toolchain; the scaffold itself is testable regardless.
+    from cartograph.languages.rust import RustEngine
+    monkeypatch.setattr(RustEngine, "supported", True)
+    result = carto.create(
+        "my-widget",
+        language="rust",
+        name="My Widget",
+        domain="backend",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "Cargo.toml",
+        "src/lib.rs",
+        "tests/test_my_widget.rs",
+        "examples/example_usage.rs",
+    ])
+    # The Cargo package name must match the crate the test/example import.
+    with open(f"{result['path']}/Cargo.toml") as f:
+        assert 'name = "my_widget"' in f.read()
+    with open(f"{result['path']}/tests/test_my_widget.rs") as f:
+        assert "use my_widget::" in f.read()
+
+
 def test_create_spice_widget(carto, tmp_path, monkeypatch):
     # SPICE ships supported=False until its stress test passes; the scaffold
     # itself is testable regardless of the ship gate.
