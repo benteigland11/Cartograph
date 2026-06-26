@@ -30,6 +30,7 @@ import shutil
 
 from .engine import semver_key as _semver_key
 from .languages import get_engine
+from .safefs import widget_lock, staged_dir, LockTimeout
 from .scaffolding import _library_notes as _canonical_library_notes
 from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_FILE
 
@@ -56,6 +57,15 @@ def _bump_version(version: str, kind: str) -> str | None:
     elif kind == "patch":
         patch += 1
     return f"{major}.{minor}.{patch}"
+
+
+class _CheckinAbort(Exception):
+    """Internal: abort the staged library write and return a clean error.
+
+    Raised inside the staged build so the exception unwinds ``staged_dir``
+    (discarding the half-built directory, leaving the library untouched) and is
+    converted to an error result by the caller.
+    """
 
 
 def _artifact_skip_set(language: str | None) -> set[str]:
@@ -386,72 +396,15 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
             validation_block["runtime"] = rv
     data["validation"] = validation_block
 
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
     # --- Determine destination ---
     if is_update:
         dest_path = widget_record["path"]
     else:
-        folder_name = item_id
-        dest_path = os.path.join(carto.library_path, folder_name)
+        dest_path = os.path.join(carto.library_path, item_id)
         if os.path.exists(dest_path):
             return {"status": "error",
                     "message": f"Directory already exists but widget is not in index: {dest_path}"}
 
-    # --- Archive current library version to history/ ---
-    if is_update and os.path.exists(dest_path):
-        old_version = widget_record.get("version", "unknown")
-        history_path = os.path.join(dest_path, "history", old_version)
-        if os.path.exists(history_path):
-            shutil.rmtree(history_path)
-        os.makedirs(history_path, exist_ok=True)
-        artifact_skips = _artifact_skip_set(language)
-        ignore = shutil.ignore_patterns(
-            *artifact_skips, "*.pyc",
-            "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
-        )
-        per_item_skips = artifact_skips | {
-            "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
-        }
-        for item in os.listdir(dest_path):
-            if item in per_item_skips:
-                continue
-            src = os.path.join(dest_path, item)
-            dst = os.path.join(history_path, item)
-            if os.path.isdir(src):
-                shutil.copytree(src, dst, ignore=ignore)
-            else:
-                shutil.copy2(src, dst)
-
-    # --- Restore library_notes before copying (agent edits ignored) ---
-    try:
-        _restore_library_notes(manifest_path)
-    except Exception as e:
-        return {"status": "error", "message": f"Could not restore canonical library_notes: {e}"}
-
-    # --- Copy working copy → library (never move — leave source intact) ---
-    artifact_skips = _artifact_skip_set(language)
-    ignore = shutil.ignore_patterns(
-        *artifact_skips, "*.pyc", ".cartograph_source",
-    )
-    per_item_skips = artifact_skips | {
-        "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
-    }
-    os.makedirs(dest_path, exist_ok=True)
-    for item in os.listdir(path):
-        if item in per_item_skips:
-            continue
-        src = os.path.join(path, item)
-        dst = os.path.join(dest_path, item)
-        if os.path.isdir(src):
-            if os.path.exists(dst):
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst, ignore=ignore)
-        else:
-            shutil.copy2(src, dst)
-
-    # --- Changelog ---
     changelog_entry = {
         "version": new_version,
         "reason": reason or ("No reason provided" if is_update else "Initial release"),
@@ -460,27 +413,120 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     if override_warnings and override_reason:
         changelog_entry["override_reason"] = override_reason
 
-    changelog_path = os.path.join(dest_path, "changelog.json")
-    changelog = []
-    if os.path.exists(changelog_path):
-        try:
-            with open(changelog_path, encoding="utf-8") as f:
-                changelog = json.load(f)
-        except Exception:
-            pass
-    changelog.insert(0, changelog_entry)
-    with open(changelog_path, "w", encoding="utf-8") as f:
-        json.dump(changelog, f, indent=2)
+    artifact_skips = _artifact_skip_set(language)
+    # Files that live only in the library (not the working copy) and are carried
+    # over / regenerated rather than copied from source.
+    carry_skips = artifact_skips | {
+        "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
+    }
+    copy_ignore = shutil.ignore_patterns(*artifact_skips, "*.pyc", ".cartograph_source")
+    snapshot_ignore = shutil.ignore_patterns(
+        *artifact_skips, "*.pyc",
+        "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
+    )
 
-    # --- Diff for AI review ---
-    diff = carto._diff_against_library(path, item_id) if is_update else None
+    # Mutation is scoped to THIS widget's lock, and the new widget directory is
+    # built in a staged sibling then swapped in atomically: the live entry is
+    # never torn down before its replacement is ready, and a concurrent
+    # checkin/sync/delete of the SAME widget can't interleave - while checkins
+    # of OTHER widgets proceed in parallel.
+    diff = None
+    try:
+        with widget_lock(carto.library_path, item_id):
+            diff = carto._diff_against_library(path, item_id) if is_update else None
+            with staged_dir(dest_path) as staged:
+                # 1. working copy -> staged (history/changelog/stamp/sidecar excluded)
+                for item in os.listdir(path):
+                    if item in carry_skips:
+                        continue
+                    src = os.path.join(path, item)
+                    dst = os.path.join(staged, item)
+                    if os.path.isdir(src):
+                        shutil.copytree(src, dst, ignore=copy_ignore)
+                    else:
+                        shutil.copy2(src, dst)
 
-    # --- Write fresh stamp at library path (files are in final state) ---
-    if engine:
-        try:
-            write_stamp(dest_path, language, engine)
-        except OSError as e:
-            log.warning("Could not write validation stamp after checkin: %s", e)
+                # 2. canonical library_notes into the staged manifest, then read
+                #    it back so the source manifest written later matches exactly.
+                staged_manifest = os.path.join(staged, "widget.json")
+                with open(staged_manifest, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                try:
+                    _restore_library_notes(staged_manifest)
+                except Exception as e:
+                    # Abort cleanly: the exception unwinds staged_dir (which
+                    # discards the half-built dir, leaving the library intact)
+                    # and is turned into an error result below.
+                    raise _CheckinAbort(
+                        f"Could not restore canonical library_notes: {e}") from e
+                with open(staged_manifest, encoding="utf-8") as f:
+                    data = json.load(f)
+
+                # 3. carry history + sidecar from the existing library entry and
+                #    archive the previous version into history/<old_version>/.
+                old_changelog = []
+                if is_update and os.path.exists(dest_path):
+                    old_history = os.path.join(dest_path, "history")
+                    if os.path.isdir(old_history):
+                        shutil.copytree(old_history, os.path.join(staged, "history"))
+                    old_version = widget_record.get("version", "unknown")
+                    snap = os.path.join(staged, "history", old_version)
+                    if os.path.exists(snap):
+                        shutil.rmtree(snap)
+                    os.makedirs(snap, exist_ok=True)
+                    for item in os.listdir(dest_path):
+                        if item in carry_skips:
+                            continue
+                        s = os.path.join(dest_path, item)
+                        d = os.path.join(snap, item)
+                        if os.path.isdir(s):
+                            shutil.copytree(s, d, ignore=snapshot_ignore)
+                        else:
+                            shutil.copy2(s, d)
+                    sidecar = os.path.join(dest_path, ".cartograph_source")
+                    if os.path.exists(sidecar):
+                        shutil.copy2(sidecar, os.path.join(staged, ".cartograph_source"))
+
+                    # Prior changelog: preserve a corrupt one (don't silently
+                    # drop the history) by parking it next to the new changelog.
+                    clog = os.path.join(dest_path, "changelog.json")
+                    if os.path.exists(clog):
+                        try:
+                            with open(clog, encoding="utf-8") as f:
+                                loaded = json.load(f)
+                            if not isinstance(loaded, list):
+                                raise ValueError("changelog.json is not a list")
+                            old_changelog = loaded
+                        except Exception as e:
+                            log.warning("Existing changelog.json is unreadable (%s); "
+                                        "preserving it as changelog.json.corrupt", e)
+                            shutil.copy2(clog, os.path.join(staged, "changelog.json.corrupt"))
+
+                # 4. changelog (newest first)
+                changelog = [changelog_entry, *old_changelog]
+                with open(os.path.join(staged, "changelog.json"), "w", encoding="utf-8") as f:
+                    json.dump(changelog, f, indent=2)
+
+                # 5. stamp over the staged (final) files
+                if engine:
+                    try:
+                        write_stamp(staged, language, engine)
+                    except OSError as e:
+                        log.warning("Could not write validation stamp after checkin: %s", e)
+            # staged_dir swapped the new directory into dest_path atomically here.
+
+            # The library write succeeded; only now reflect the bump in the
+            # source manifest. Done last so a mid-write failure leaves source and
+            # library consistent at the old version rather than desynced.
+            try:
+                with open(manifest_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+            except OSError as e:
+                log.warning("Library updated but could not update source manifest: %s", e)
+    except LockTimeout as e:
+        return {"status": "error", "message": str(e)}
+    except _CheckinAbort as e:
+        return {"status": "error", "message": str(e)}
 
     # --- Reload library so the in-memory index reflects the new widget ---
     carto.reload()
