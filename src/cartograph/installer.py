@@ -470,6 +470,13 @@ def rename_widget(carto, old_id: str, new_name: str | None,
         return {"status": "error",
                 "message": f"Unknown domain '{new_dom}'. Valid: {sorted(VALID_DOMAINS)}"}
 
+    # The slug becomes a code identifier; reject names that can't be legal
+    # (e.g. leading digit) before moving anything on disk - same rule as create.
+    from cartograph.scaffolding import validate_name_identifier
+    name_error = validate_name_identifier(new_slug, kind="widget")
+    if name_error:
+        return {"status": "error", "message": name_error}
+
     new_id = f"{new_dom}-{new_slug}-{language}"
     if new_id == old_id:
         return {"status": "error",

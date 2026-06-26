@@ -189,3 +189,42 @@ def test_create_spice_widget(carto, tmp_path, monkeypatch):
         tb = f.read()
     assert ".include ../src/my_filter.cir" in tb
     assert "meas" in tb and "ASSERT_PASS" in tb
+
+
+def test_create_rejects_leading_digit_name(carto, tmp_path):
+    """A name that becomes a digit-leading identifier (illegal in every
+    supported language) is rejected loudly, not silently mangled. Regression
+    for the '8b10b-encoder' -> illegal 'module 8b10b_encoder' class of bug."""
+    result = carto.create(
+        "8b10b-encoder",
+        language="systemverilog",
+        domain="rtl",
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "error"
+    assert "digit" in result["message"].lower()
+    # Nothing should be left on disk when the name is rejected.
+    assert not os.path.exists(os.path.join(str(tmp_path), "cg"))
+
+
+def test_create_rejects_illegal_identifier_chars(carto, tmp_path):
+    result = carto.create(
+        "my widget",
+        language="python",
+        domain="backend",
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "error"
+    assert "identifier" in result["message"].lower()
+
+
+def test_create_accepts_reordered_name(carto, tmp_path):
+    """The suggested reorder of a digit-leading name scaffolds cleanly."""
+    result = carto.create(
+        "encoder-8b10b",
+        language="systemverilog",
+        domain="rtl",
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], ["widget.json", "src", "tests"])
