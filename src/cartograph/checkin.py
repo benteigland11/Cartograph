@@ -36,6 +36,28 @@ from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_
 log = logging.getLogger("cartograph")
 
 
+def _bump_version(version: str, kind: str) -> str | None:
+    """Apply a semver bump (major/minor/patch) to ``version``.
+
+    Returns the bumped "X.Y.Z" string, or None if ``version`` is malformed.
+    Single source of truth for how checkin increments versions, so the
+    conflict check and the actual bump stay in lockstep.
+    """
+    try:
+        from packaging.version import Version as _Version
+        parsed = _Version(version)
+        major, minor, patch = parsed.major, parsed.minor, parsed.micro
+    except Exception:
+        return None
+    if kind == "major":
+        major, minor, patch = major + 1, 0, 0
+    elif kind == "minor":
+        minor, patch = minor + 1, 0
+    elif kind == "patch":
+        patch += 1
+    return f"{major}.{minor}.{patch}"
+
+
 def _artifact_skip_set(language: str | None) -> set[str]:
     """Return the build-artifact dirs to skip when copying widget files.
 
@@ -216,11 +238,53 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     if baseline_version is not None:
         local_version = meta.get("version", "0.0.0")
         if local_version != baseline_version:
-            return {
-                "status": "error",
-                "message": f"Version conflict: local is v{local_version} but {baseline_source} is v{baseline_version}. "
-                           f"Install the latest version first, apply your changes, then checkin."
-            }
+            local_behind = _semver_key(local_version) < _semver_key(baseline_version)
+            if local_behind:
+                # The widget already exists at a newer version. Re-applying edits
+                # on a stale copy would clobber that newer work, so rebase first:
+                # upgrade pulls the latest baseline, then re-apply and checkin.
+                return {
+                    "status": "error",
+                    "message": f"{item_id}: local is v{local_version} but {baseline_source} "
+                               f"already has v{baseline_version}. Run "
+                               f"`cartograph upgrade {item_id}` to get the latest, "
+                               f"re-apply your changes, then checkin.",
+                }
+            # local ahead of baseline — the user hand-bumped meta.version
+            # instead of letting --bump do it. Accept it as a pre-applied bump
+            # IFF it exactly matches the bump they asked for, applied to the
+            # resolved baseline (cloud when the sidecar routes there, else
+            # library). Otherwise their manual version is inconsistent with the
+            # requested --bump and we error with the exact value to use.
+            expected = _bump_version(baseline_version, version_bump)
+            if expected is None:
+                return {"status": "error",
+                        "message": f"Cannot compare against malformed {baseline_source} "
+                                   f"version '{baseline_version}'."}
+            if local_version != expected:
+                # Figure out which --bump level the manual edit corresponds to,
+                # so we can hand the user the exact command to run.
+                intended = next(
+                    (k for k in ("patch", "minor", "major")
+                     if _bump_version(baseline_version, k) == local_version),
+                    None,
+                )
+                if intended:
+                    fix = (f"Your edit is a {intended} bump of v{baseline_version} - "
+                           f"re-run with `--bump {intended}`.")
+                else:
+                    fix = (f"v{local_version} isn't a clean patch/minor/major bump of "
+                           f"v{baseline_version} - reset meta.version to v{baseline_version} "
+                           f"and let `--bump` set it.")
+                return {
+                    "status": "error",
+                    "message": f"{item_id}: local is v{local_version} but a {version_bump} "
+                               f"bump of {baseline_source} v{baseline_version} is v{expected}. "
+                               + fix,
+                }
+            # Valid pre-applied bump: fall through. new_version is computed from
+            # the baseline below, so it lands on exactly v{expected} == local
+            # with no double-bump.
         # --- No-op guard ---
         # Runs against whichever baseline we resolved, as long as that baseline
         # has an implementation_hash to compare against. Library always does;
@@ -297,21 +361,15 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     should_bump = baseline_version is not None
 
     # --- Version bump (whenever a baseline exists, local or cloud) ---
+    # Bump from the resolved baseline, NOT the local manifest version. They're
+    # equal in the normal case; when the user pre-bumped meta.version (already
+    # validated above to match this --bump), bumping the baseline lands on the
+    # same value with no double-bump.
     version = meta.get("version", "1.0.0")
     if should_bump:
-        try:
-            from packaging.version import Version as _Version
-            parsed = _Version(version)
-            major, minor, patch = parsed.major, parsed.minor, parsed.micro
-        except Exception:
-            return {"status": "error", "message": f"Cannot bump malformed version '{version}'. Fix widget.json meta.version to X.Y.Z first."}
-        if version_bump == "major":
-            major, minor, patch = major + 1, 0, 0
-        elif version_bump == "minor":
-            minor, patch = minor + 1, 0
-        elif version_bump == "patch":
-            patch += 1
-        new_version = f"{major}.{minor}.{patch}"
+        new_version = _bump_version(baseline_version, version_bump)
+        if new_version is None:
+            return {"status": "error", "message": f"Cannot bump malformed version '{baseline_version}'. Fix the {baseline_source} version to X.Y.Z first."}
     else:
         new_version = version
 

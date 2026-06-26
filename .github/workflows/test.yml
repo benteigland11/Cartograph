@@ -30,6 +30,12 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
 
+    # Install every engine when this is a release-gating run: any push to
+    # master (the auto-tag/publish chain reads this same run) or an explicit
+    # full_install caller. PRs stay path-filtered for fast feedback.
+    env:
+      FULL_INSTALL: ${{ inputs.full_install || github.event_name == 'push' }}
+
     steps:
       - uses: actions/checkout@v6
 
@@ -67,23 +73,23 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install iverilog (Linux)
-        if: matrix.os == 'ubuntu-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
+        if: matrix.os == 'ubuntu-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
         run: sudo apt-get update && sudo apt-get install -y iverilog
 
       - name: Install iverilog (macOS)
-        if: matrix.os == 'macos-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
+        if: matrix.os == 'macos-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
         run: brew install icarus-verilog
 
       - name: Install iverilog (Windows)
-        if: matrix.os == 'windows-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
+        if: matrix.os == 'windows-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.systemverilog == 'true')
         run: choco install iverilog -y || (sleep 15 && choco install iverilog -y)
 
       - name: Install Angular CLI
-        if: inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.angular == 'true'
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.angular == 'true'
         run: npm install -g @angular/cli
 
       - name: Install PHP and Composer
-        if: inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.php == 'true'
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.php == 'true'
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
@@ -91,7 +97,7 @@ jobs:
           tools: composer
 
       - name: Install Terraform
-        if: inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.terraform == 'true'
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.terraform == 'true'
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: '1.9.0'
@@ -99,21 +105,21 @@ jobs:
 
       # setup-go works identically on all three platforms - no per-OS steps.
       - name: Install Go
-        if: inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.go == 'true'
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.go == 'true'
         uses: actions/setup-go@v6
         with:
           go-version: 'stable'
 
       - name: Install ngspice (Linux)
-        if: matrix.os == 'ubuntu-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
+        if: matrix.os == 'ubuntu-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
         run: sudo apt-get update && sudo apt-get install -y ngspice
 
       - name: Install ngspice (macOS)
-        if: matrix.os == 'macos-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
+        if: matrix.os == 'macos-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
         run: brew install ngspice
 
       - name: Install ngspice (Windows)
-        if: matrix.os == 'windows-latest' && (inputs.full_install || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
+        if: matrix.os == 'windows-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
         run: choco install ngspice -y || (sleep 15 && choco install ngspice -y)
 
       - name: Install dependencies

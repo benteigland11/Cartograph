@@ -11,8 +11,14 @@ on:
 
 jobs:
   # Full 9-cell matrix on the tagged commit. Blocks PyPI upload.
+  #
+  # Skipped on the auto-tag path (workflow_dispatch): test.yml already ran the
+  # full matrix on this exact commit on the master push that created the tag,
+  # so re-running it here is pure duplication. Kept for raw `push` of a tag
+  # (a hand-cut release) where no prior gating run is guaranteed.
   tests:
     name: Tests
+    if: github.event_name != 'workflow_dispatch'
     uses: ./.github/workflows/test.yml
     with:
       full_install: true
@@ -20,6 +26,9 @@ jobs:
   publish:
     name: Build and publish
     needs: tests
+    # Proceed when tests passed OR were skipped (auto-tag path, already gated
+    # on master). Without always() a skipped `needs` would skip publish too.
+    if: ${{ always() && needs.tests.result != 'failure' && needs.tests.result != 'cancelled' }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

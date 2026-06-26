@@ -2487,7 +2487,9 @@ _AGENT_FILENAMES = {
     "codex":        "AGENTS.md",
     "agents":       "AGENTS.md",
     "gemini":       "GEMINI.md",
-    "antigravity":  "GEMINI.md",
+    "antigravity":  "AGENTS.md",
+    "grok":         "AGENTS.md",
+    "agent":        "AGENT.md",
     "cursor":       os.path.join(".cursor", "rules", "cartograph.mdc"),
 }
 
@@ -3607,7 +3609,7 @@ def _build_cli() -> AgentCLI:
             "handler": cmd_setup,
             "args": [
                 {"name": "--agent", "default": None,
-                 "choices": ["claude", "codex", "gemini", "antigravity", "cursor"],
+                 "choices": ["claude", "codex", "gemini", "antigravity", "grok", "agent", "cursor"],
                  "help": "Agent to configure (auto-detected if omitted)"},
                 {"name": "--file", "default": None,
                  "help": "Write to a custom file instead of the agent default"},
