@@ -30,6 +30,7 @@ from cartograph.languages.angular import AngularEngine
 from cartograph.languages.php import PhpEngine
 from cartograph.languages.terraform import TerraformEngine
 from cartograph.languages.go import GoEngine
+from cartograph.languages.rust import RustEngine
 from cartograph.languages.spice import SpiceEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
@@ -88,6 +89,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "terraform": TerraformEngine,
         "go": GoEngine,
         "spice": SpiceEngine,
+        "rust": RustEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -119,6 +121,7 @@ CLEAN = {
     "php":        ("<?php\nclass Item { public function getValue(): mixed { return 'world'; } }\n", "", None),
     "terraform":  ('resource "null_resource" "x" {\n  triggers = { name = var.name }\n}\n', "", None),
     "go":         ('package module\n\n// Hello returns a greeting.\nfunc Hello() string { return "world" }\n', "", None),
+    "rust":       ('/// Hello returns a greeting.\npub fn hello() -> String { String::from("world") }\n', "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -131,6 +134,7 @@ ABS_PATH_SRC = {
     "php":        "<?php\n$log = '/home/user/logs/app.log';\n",
     "terraform":  'locals {\n  log = "/home/user/logs/app.log"\n}\n',
     "go":         'package module\n\nfunc LogPath() string { return "/home/user/logs/app.log" }\n',
+    "rust":       'pub fn log_path() -> &\'static str { "/home/user/logs/app.log" }\n',
 }
 
 # Check 2: Credentials in src/ -> block
@@ -143,6 +147,7 @@ CREDENTIAL_SRC = {
     "php":        "<?php\n$api_key = 'sk-abc123verylongkey';\n",
     "terraform":  'locals {\n  api_key = "sk-abc123verylongkey"\n}\n',
     "go":         'package module\n\nfunc Key() string {\n\tapiKey := "sk-abc123verylongkey"\n\treturn apiKey\n}\n',
+    "rust":       'pub fn key() -> String {\n    let api_key = "sk-abc123verylongkey";\n    api_key.to_string()\n}\n',
 }
 
 # Check 2b: Credentials in tests/ -> warning (not block)
@@ -155,6 +160,7 @@ CREDENTIAL_TEST = {
     "php":        "<?php\n$password = 'fake_test_password_123';\n",
     "terraform":  'locals {\n  password = "fake_test_password_123"\n}\n',
     "go":         'package tests\n\nfunc fakeCred() string {\n\tpassword := "fake_test_password_123"\n\treturn password\n}\n',
+    "rust":       'fn fake_cred() -> String {\n    let password = "fake_test_password_123";\n    password.to_string()\n}\n',
 }
 
 # Check 3: Hardcoded URLs -> block
@@ -167,6 +173,7 @@ URL_SRC = {
     "php":        "<?php\n$api = 'https://api.mycompany.com/v1';\n",
     "terraform":  'locals {\n  api = "https://api.mycompany.com/v1"\n}\n',
     "go":         'package module\n\nfunc API() string { return "https://api.mycompany.com/v1" }\n',
+    "rust":       'pub fn api() -> &\'static str { "https://api.mycompany.com/v1" }\n',
 }
 
 # Check 3b: localhost/example.com URLs -> allowed
@@ -179,6 +186,7 @@ URL_ALLOWED = {
     "php":        "<?php\n$api = 'http://localhost:8080/api';\n",
     "terraform":  'locals {\n  api = "http://localhost:8080/api"\n}\n',
     "go":         'package module\n\nfunc API() string { return "http://localhost:8080/api" }\n',
+    "rust":       'pub fn api() -> &\'static str { "http://localhost:8080/api" }\n',
 }
 
 # Check 4: Hardcoded IPs -> block
@@ -191,6 +199,7 @@ IP_SRC = {
     "php":        "<?php\n$host = '192.168.1.100';\n",
     "terraform":  'locals {\n  host = "192.168.1.100"\n}\n',
     "go":         'package module\n\nfunc Host() string { return "192.168.1.100" }\n',
+    "rust":       'pub fn host() -> &\'static str { "192.168.1.100" }\n',
 }
 
 # Check 5: Sleep in src/ -> block
@@ -201,6 +210,7 @@ SLEEP_SRC = {
     "angular":    "setTimeout(() => {}, 1000)\n",
     "php":        "<?php\nsleep(1);\n",
     "go":         'package module\n\nimport "time"\n\nfunc Wait() { time.Sleep(1 * time.Second) }\n',
+    "rust":       'use std::thread;\nuse std::time::Duration;\n\npub fn wait() { thread::sleep(Duration::from_secs(1)); }\n',
 }
 
 # Check 5b: Sleep in tests/ with small duration -> no warning
@@ -211,6 +221,7 @@ SLEEP_TEST_SMALL = {
     "angular":    "setTimeout(() => {}, 500)\n",
     "php":        "<?php\nsleep(1);\n",  # 1 second - not > 1, no warning
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(500 * time.Millisecond) }\n',
+    "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_millis(500)); }\n',
 }
 
 # Check 5c: Sleep in tests/ with large duration -> warning
@@ -221,6 +232,7 @@ SLEEP_TEST_LARGE = {
     "angular":    "setTimeout(() => {}, 5000)\n",
     "php":        "<?php\nsleep(5);\n",
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(5 * time.Second) }\n',
+    "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_secs(5)); }\n',
 }
 
 # Check 6: Hardcoded values -> warning
@@ -231,6 +243,7 @@ HARDCODED_VALUE = {
     "angular":    "const TIMEOUT = 30\n",
     "php":        "<?php\nclass Item { private $TIMEOUT = 30; }\n",
     "go":         'package module\n\nconst Timeout = 30\n',
+    "rust":       'pub const TIMEOUT: u64 = 30;\n',
 }
 
 # Check 7: Env var access -> warning
@@ -241,6 +254,7 @@ ENV_VAR = {
     "angular":    "const v = process.env['KEY']\n",
     "php":        "<?php\n$v = getenv('KEY');\n",
     "go":         'package module\n\nimport "os"\n\nfunc Cfg() string { return os.Getenv("KEY") }\n',
+    "rust":       'pub fn cfg() -> Option<String> { std::env::var("KEY").ok() }\n',
 }
 
 # Check 8: Unlisted imports -> warning
@@ -251,6 +265,7 @@ UNLISTED_IMPORT = {
     "angular":    "import { something } from 'some-unregistered-pkg'\n",
     "php":        "<?php\nuse GuzzleHttp\\Client;\n",
     "go":         'package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n',
+    "rust":       'use some_unregistered_crate::Thing;\n',
 }
 
 # Check 8b: Listed imports -> no warning
@@ -261,6 +276,7 @@ LISTED_IMPORT = {
     "angular":    ("import { something } from 'some-registered-pkg'\n", ["some-registered-pkg>=1.0.0"]),
     "php":        ("<?php\nuse GuzzleHttp\\Client;\n", ["guzzlehttp/guzzle>=7.0.0"]),
     "go":         ('package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n', ["github.com/google/uuid>=1.6.0"]),
+    "rust":       ('use some_registered_pkg::Thing;\n', ["some-registered-pkg>=1.0.0"]),
 }
 
 # Check 8c: Stdlib imports -> no warning
@@ -272,13 +288,14 @@ STDLIB_IMPORT = {
     # PHP builtins don't need use statements - calling strlen() has no import to flag
     "php":        "<?php\nclass Item { public function run(): void { strlen('test'); } }\n",
     "go":         'package module\n\nimport "encoding/json"\n\nvar _ = json.Marshal\n',
+    "rust":       'use std::collections::HashMap;\n\npub fn f() -> HashMap<u8, u8> { HashMap::new() }\n',
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs"}
 
 # Which languages need external tools to run their scanners
-NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go"}
+NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc"}
 
 
 # ---------------------------------------------------------------------------
@@ -286,10 +303,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust"]
 
 
 def _skip_if_missing(lang):
@@ -2319,6 +2336,70 @@ _SUBCKT_CLEAN = (
     "C1 out 0 {c}\n"
     ".ends lowpass_rc\n"
 )
+
+
+class TestRustSpecific:
+    """Checks unique to the Rust engine's native scanner, including the
+    comment/string/raw-string awareness that regex can't do reliably."""
+
+    def _rust_scan(self, tmp_path, src_code, **kw):
+        _skip_if_missing("rust")
+        return _scan(tmp_path, "rust", "rs", src_code, **kw)
+
+    def test_println_in_src_blocks(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            'pub fn hello() { println!("debug"); }\n')
+        assert any("console output" in b for b in result["blocks"]), \
+            f"println! in src must block: {result}"
+
+    def test_println_in_string_not_blocked(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            'pub fn doc() -> &\'static str { "call println!(x) to print" }\n')
+        assert not any("console output" in b for b in result["blocks"]), \
+            f"println! in a string must not block: {result['blocks']}"
+
+    def test_println_in_raw_string_not_blocked(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            'pub fn doc() -> &\'static str { r#"println!("x") and unsafe {}"# }\n')
+        assert result["blocks"] == [], \
+            f"contents of a raw string must not block: {result['blocks']}"
+
+    def test_println_in_comment_not_blocked(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            '/// Call println!(x) in your own code to inspect values.\n'
+            'pub fn hello() -> String { String::from("world") }\n')
+        assert not any("console output" in b for b in result["blocks"]), \
+            f"println! in a doc comment must not block: {result['blocks']}"
+
+    def test_process_exit_in_src_blocks(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            'pub fn quit() { std::process::exit(1); }\n')
+        assert any("exit" in b.lower() for b in result["blocks"]), \
+            f"process::exit in src must block: {result}"
+
+    def test_unsafe_block_in_src_blocks(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            'pub fn deref(p: *const u8) -> u8 { unsafe { *p } }\n')
+        assert any("unsafe" in b.lower() for b in result["blocks"]), \
+            f"unsafe in src must block: {result}"
+
+    def test_undocumented_pub_fn_warns(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            'pub fn process(v: &str) -> String { v.to_string() }\n')
+        assert any("doc" in w.lower() for w in result["warnings"]), \
+            f"undocumented public item must warn: {result['warnings']}"
+
+    def test_documented_pub_fn_no_doc_warning(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            '/// Echo the input.\npub fn process(v: &str) -> String { v.to_string() }\n')
+        assert not any("doc" in w.lower() for w in result["warnings"]), \
+            f"documented public item must not warn: {result['warnings']}"
+
+    def test_todo_macro_warns(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            '/// WIP.\npub fn process(v: &str) -> String { todo!() }\n')
+        assert any("todo" in w.lower() for w in result["warnings"]), \
+            f"todo! must warn: {result['warnings']}"
 
 
 class TestSpiceSpecific:
