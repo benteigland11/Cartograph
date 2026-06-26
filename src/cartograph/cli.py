@@ -1687,8 +1687,14 @@ def cmd_cloud_adopt(args):
             })
         except Exception:
             pass  # unreadable sidecar - overwrite it
-    with open(sidecar_path, "w", encoding="utf-8") as f:
-        json.dump(sidecar, f)
+    from .engine import LIBRARY_PATH
+    from .safefs import widget_lock, LockTimeout
+    try:
+        with widget_lock(LIBRARY_PATH, widget.get("id", local_id)):
+            with open(sidecar_path, "w", encoding="utf-8") as f:
+                json.dump(sidecar, f)
+    except LockTimeout as e:
+        err({"error": str(e)})
 
     cloud_ver = cloud_widget.get("version", "?")
     print(f"\n  Adopted: {local_id} linked to {cloud_ref} v{cloud_ver}")
@@ -2597,6 +2603,7 @@ def cmd_import(args):
     """
     import zipfile
     from .engine import LIBRARY_PATH
+    from .safefs import assert_members_safe, UnsafeArchiveError, widget_lock, LockTimeout
 
     path = args.path
     if not os.path.isfile(path):
@@ -2605,89 +2612,126 @@ def cmd_import(args):
     if not zipfile.is_zipfile(path):
         err({"error": f"Not a valid zip file: {path}"})
 
-    with zipfile.ZipFile(path, "r") as zf:
-        names = zf.namelist()
-        manifests = [n for n in names if n.endswith("widget.json") and n.count("/") == 1]
-        if not manifests:
-            err({"error": "Zip does not appear to contain a widget library (no widget.json files found)."})
-
-        os.makedirs(LIBRARY_PATH, exist_ok=True)
-
-        imported_widget_ids = set()
-        imported = 0
-        skipped = 0
-        for name in names:
-            dest = os.path.join(LIBRARY_PATH, name)
-            if name.endswith("/"):
-                os.makedirs(dest, exist_ok=True)
-                continue
-            if os.path.exists(dest) and not getattr(args, "force", False):
-                skipped += 1
-                continue
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with zf.open(name) as src, open(dest, "wb") as dst:
-                dst.write(src.read())
-            imported += 1
-            # Track which top-level widget dirs we touched, so we know
-            # what to gate after extraction.
-            head = name.split("/", 1)[0]
-            if head and "/" in name:
-                imported_widget_ids.add(head)
-
-    # Integrity gate: walk each freshly-imported widget. Accept stamped
-    # ones, validate-and-stamp unstamped ones, quarantine failures.
     from .validation_stamp import has_valid_stamp, write_stamp
     from .languages import get_engine
     from .validator import validate_item
     import shutil
 
     quarantine_dir = os.path.join(LIBRARY_PATH, ".quarantine")
-    carto = _carto()
-    accepted_stamped = []
-    accepted_revalidated = []
-    quarantined = []
 
-    for wid_dir in sorted(imported_widget_ids):
-        widget_path = os.path.join(LIBRARY_PATH, wid_dir)
-        manifest_path = os.path.join(widget_path, "widget.json")
-        if not os.path.isfile(manifest_path):
-            continue
-        try:
-            with open(manifest_path, encoding="utf-8") as f:
-                data = json.load(f)
-            language = data.get("tech_stack", {}).get("language", "unknown")
-            if isinstance(language, list):
-                language = language[0] if language else "unknown"
-        except Exception as e:
-            quarantined.append({"id": wid_dir, "reason": f"unreadable manifest: {e}"})
-            _quarantine_widget(widget_path, quarantine_dir, f"unreadable manifest: {e}")
-            continue
+    imported = 0
+    skipped = 0
+    imported_widget_ids = set()
+    gate_results = ([], [], [])
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            names = zf.namelist()
+            manifests = [n for n in names if n.endswith("widget.json") and n.count("/") == 1]
+            if not manifests:
+                err({"error": "Zip does not appear to contain a widget library (no widget.json files found)."})
+            # Zip-slip guard: validate every member up front, before any write.
+            assert_members_safe(names, LIBRARY_PATH)
+            os.makedirs(LIBRARY_PATH, exist_ok=True)
 
-        if has_valid_stamp(widget_path, language):
-            accepted_stamped.append(wid_dir)
-            continue
+            # Group members by top-level widget dir so each widget is written
+            # and gated under its OWN lock - importing widget A doesn't block a
+            # concurrent checkin of widget B, only of widget A.
+            by_widget = {}
+            for name in names:
+                head = name.split("/", 1)[0]
+                if head:
+                    by_widget.setdefault(head, []).append(name)
 
-        engine = get_engine(language)
-        if engine is None:
-            quarantined.append({"id": wid_dir, "reason": f"no engine for language {language!r}"})
-            _quarantine_widget(widget_path, quarantine_dir, f"no engine for language {language!r}")
-            continue
+            carto = _carto()
+            force = getattr(args, "force", False)
+            accepted_stamped, accepted_revalidated, quarantined = [], [], []
+            for head, members in sorted(by_widget.items()):
+                with widget_lock(LIBRARY_PATH, head):
+                    for name in members:
+                        dest = os.path.join(LIBRARY_PATH, name)
+                        if name.endswith("/"):
+                            os.makedirs(dest, exist_ok=True)
+                            continue
+                        if os.path.exists(dest) and not force:
+                            skipped += 1
+                            continue
+                        os.makedirs(os.path.dirname(dest), exist_ok=True)
+                        with zf.open(name) as src, open(dest, "wb") as dst:
+                            dst.write(src.read())
+                        imported += 1
+                        if "/" in name:
+                            imported_widget_ids.add(head)
+                    # Gate THIS widget under its lock.
+                    if head in imported_widget_ids:
+                        category, info = _gate_one_widget(
+                            carto, head, LIBRARY_PATH, quarantine_dir,
+                            has_valid_stamp, write_stamp, get_engine, validate_item)
+                        if category == "stamped":
+                            accepted_stamped.append(info)
+                        elif category == "revalidated":
+                            accepted_revalidated.append(info)
+                        elif category == "quarantined":
+                            quarantined.append(info)
+            _carto()  # reload so new widgets show up
+            gate_results = (accepted_stamped, accepted_revalidated, quarantined)
+    except UnsafeArchiveError as e:
+        err({"error": str(e)})
+    except LockTimeout as e:
+        err({"error": str(e)})
 
-        result = validate_item(carto, widget_path)
-        if isinstance(result, dict) and result.get("status") == "error":
-            reason = result.get("message", "validation failed")
-            quarantined.append({"id": wid_dir, "reason": reason})
-            _quarantine_widget(widget_path, quarantine_dir, reason)
-            continue
-        try:
-            write_stamp(widget_path, language, engine, test_results=None)
-            accepted_revalidated.append(wid_dir)
-        except Exception as e:
-            quarantined.append({"id": wid_dir, "reason": f"stamp write failed: {e}"})
-            _quarantine_widget(widget_path, quarantine_dir, f"stamp write failed: {e}")
+    return _import_summary(
+        imported, imported_widget_ids, quarantine_dir, skipped, gate_results)
 
-    # Reload so any new widgets show up.
-    _carto()
+
+def _gate_one_widget(carto, wid_dir, LIBRARY_PATH, quarantine_dir,
+                     has_valid_stamp, write_stamp, get_engine, validate_item):
+    """Integrity-gate a single freshly-imported widget.
+
+    Returns ``(category, info)`` where category is one of "stamped",
+    "revalidated", "quarantined", or "skipped" (no manifest). Caller holds the
+    widget's lock.
+    """
+    widget_path = os.path.join(LIBRARY_PATH, wid_dir)
+    manifest_path = os.path.join(widget_path, "widget.json")
+    if not os.path.isfile(manifest_path):
+        return "skipped", wid_dir
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            data = json.load(f)
+        language = data.get("tech_stack", {}).get("language", "unknown")
+        if isinstance(language, list):
+            language = language[0] if language else "unknown"
+    except Exception as e:
+        reason = f"unreadable manifest: {e}"
+        _quarantine_widget(widget_path, quarantine_dir, reason)
+        return "quarantined", {"id": wid_dir, "reason": reason}
+
+    if has_valid_stamp(widget_path, language):
+        return "stamped", wid_dir
+
+    engine = get_engine(language)
+    if engine is None:
+        reason = f"no engine for language {language!r}"
+        _quarantine_widget(widget_path, quarantine_dir, reason)
+        return "quarantined", {"id": wid_dir, "reason": reason}
+
+    result = validate_item(carto, widget_path)
+    if isinstance(result, dict) and result.get("status") == "error":
+        reason = result.get("message", "validation failed")
+        _quarantine_widget(widget_path, quarantine_dir, reason)
+        return "quarantined", {"id": wid_dir, "reason": reason}
+    try:
+        write_stamp(widget_path, language, engine, test_results=None)
+        return "revalidated", wid_dir
+    except Exception as e:
+        reason = f"stamp write failed: {e}"
+        _quarantine_widget(widget_path, quarantine_dir, reason)
+        return "quarantined", {"id": wid_dir, "reason": reason}
+
+
+def _import_summary(imported, imported_widget_ids, quarantine_dir, skipped,
+                    gate_results):
+    accepted_stamped, accepted_revalidated, quarantined = gate_results
     print(f"\n  Imported {imported} files from {len(imported_widget_ids)} widget(s).")
     if accepted_stamped:
         print(f"    accepted (stamp valid): {len(accepted_stamped)}")
@@ -2874,6 +2918,10 @@ def cmd_sync(args):
             print(f"ok → v{result.get('version', '?')}")
 
     # Execute pulls — download and extract into library
+    from .safefs import (
+        safe_extractall, staged_dir, widget_lock, LockTimeout,
+        UnsafeArchiveError,
+    )
     for wid, detail in pulls:
         remote = cloud_by_id[wid]
         owner = remote.get("owner", handle)
@@ -2882,15 +2930,18 @@ def cmd_sync(args):
         if "error" in result:
             print(f"FAILED: {result['error']}")
             continue
-        # Extract into library, overwriting existing
+        # Extract registry bytes zip-slip-safely into a staged dir, then swap it
+        # in atomically under the library lock - the old copy is never torn down
+        # before the new one is fully extracted, and a bad member writes nothing.
         dest = os.path.join(carto.library_path, wid)
         try:
-            if os.path.exists(dest):
-                shutil.rmtree(dest)
-            os.makedirs(dest, exist_ok=True)
-            with zipfile.ZipFile(BytesIO(result["zip_bytes"])) as zf:
-                zf.extractall(dest)
+            with widget_lock(carto.library_path, wid):
+                with staged_dir(dest) as staging:
+                    with zipfile.ZipFile(BytesIO(result["zip_bytes"])) as zf:
+                        safe_extractall(zf, staging)
             print(f"ok → v{result.get('version', '?')}")
+        except (UnsafeArchiveError, LockTimeout) as e:
+            print(f"FAILED: {e}")
         except Exception as e:
             print(f"FAILED: {e}")
 
