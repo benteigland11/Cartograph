@@ -15,7 +15,6 @@ toolchain stays green.
 import json
 import os
 import shutil
-import sys
 import tempfile
 
 import pytest
@@ -1402,21 +1401,12 @@ def test_spice_simulate_captures_control_echo():
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="SPICE is WIP (supported=False) and not yet validated on Windows - "
-           "ngspice's .meas/assert block doesn't emit ASSERT_PASS there. Re-enable "
-           "and fix Windows before flipping the engine to supported=True.",
-)
 def test_spice_blueprint_validates_end_to_end(carto, project, monkeypatch):
     if not shutil.which("ngspice"):
         pytest.skip("ngspice not available")
     engine = get_engine("spice")
     if engine is None:
         pytest.skip("spice engine not available")
-    # SPICE ships supported=False until its stress test passes; the blueprint
-    # composition itself is testable regardless of the ship gate.
-    monkeypatch.setattr(type(engine), "supported", True)
     ok, msg = engine.check_available()
     if not ok:
         pytest.skip(f"spice engine not ready: {msg}")
