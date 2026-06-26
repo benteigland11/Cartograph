@@ -232,7 +232,16 @@ class RustEngine(LanguageEngine):
                                 cwd=path, timeout=300, env=self._cargo_env())
                 if res.returncode != 0:
                     output = (res.stderr or res.stdout or "").strip()
-                    errors.append(f"cargo build failed:\n{output[:3000]}")
+                    # validate_widget runs BEFORE install_deps in the validator
+                    # pipeline, so a declared-but-not-yet-added crate is expected
+                    # here (cargo emits E0432/E0433 "unresolved import/module or
+                    # unlinked crate"). Defer to run_tests, which builds again
+                    # after install_deps. Mirrors Go's missing-module skip.
+                    deferred = bool(dependencies) and (
+                        "unresolved module or unlinked crate" in output
+                        or "unresolved import" in output)
+                    if not deferred:
+                        errors.append(f"cargo build failed:\n{output[:3000]}")
             except FileNotFoundError:
                 errors.append("cargo not found - install the Rust toolchain "
                               "(rustup.rs).")
@@ -333,12 +342,12 @@ class RustEngine(LanguageEngine):
         # --summary-only --json gives a machine-readable total; the
         # ignore-filename-regex keeps the denominator to src/ (tests/ and
         # examples/ code must not pad the coverage number).
+        #
+        ignore = self._coverage_ignore_regex(path)
         try:
             res = self._run(
                 ["cargo", "llvm-cov", "--summary-only", "--json",
-                 # tests/ and examples/ never pad the denominator; cg/ excludes
-                 # composed dep widgets when this runs over a blueprint sandbox.
-                 "--ignore-filename-regex", r"(tests|examples|cg)[/\\]"],
+                 "--ignore-filename-regex", ignore],
                 cwd=path, timeout=600, env=self._cargo_env(),
             )
         except FileNotFoundError:
@@ -365,6 +374,22 @@ class RustEngine(LanguageEngine):
                 f"{_COVERAGE_THRESHOLD}% - add tests for the uncovered lines "
                 f"(cargo llvm-cov --summary-only shows per-file gaps)")
         return self._ok()
+
+    @staticmethod
+    def _coverage_ignore_regex(path):
+        """The --ignore-filename-regex for cargo-llvm-cov.
+
+        Always excludes tests/ and examples/ from the coverage denominator.
+        Only excludes cg/ for a BLUEPRINT sandbox, where composed dependency
+        widgets live under cg/ and must not count toward the blueprint's own
+        coverage. A normal widget is itself installed at cg/<id>/src/lib.rs, so
+        excluding cg/ there would match the widget's OWN source via its install
+        path and report a false 0%. A blueprint is detected by its manifest,
+        not its path.
+        """
+        if os.path.isfile(os.path.join(path, "blueprint.json")):
+            return r"(tests|examples|cg)[/\\]"
+        return r"(tests|examples)[/\\]"
 
     @staticmethod
     def _parse_coverage(stdout):
