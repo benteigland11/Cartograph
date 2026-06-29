@@ -189,6 +189,112 @@ def test_create_rust_widget(carto, tmp_path, monkeypatch):
         assert "use my_widget::" in f.read()
 
 
+def test_create_gdscript_widget(carto, tmp_path, monkeypatch):
+    # GDScript ships supported=False until its CI provisions Godot; the scaffold
+    # itself is testable regardless of the ship gate.
+    from cartograph.languages.gdscript import GDScriptEngine
+    monkeypatch.setattr(GDScriptEngine, "supported", True)
+    result = carto.create(
+        "my-widget",
+        language="gdscript",
+        name="My Widget",
+        domain="gamedev",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "project.godot",
+        "src/my_widget.gd",
+        "tests/test_my_widget.gd",
+        "examples/example_usage.gd",
+    ])
+    # src must declare a PascalCase class_name; the test loads it via res://.
+    with open(f"{result['path']}/src/my_widget.gd") as f:
+        assert "class_name MyWidget" in f.read()
+    with open(f"{result['path']}/tests/test_my_widget.gd") as f:
+        assert 'res://src/my_widget.gd' in f.read()
+
+
+def test_create_nim_widget(carto, tmp_path):
+    result = carto.create(
+        "my-nim-widget",
+        language="nim",
+        name="My Nim Widget",
+        domain="universal",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "my_nim_widget.nimble",
+        "src/my_nim_widget_lib.nim",
+        "tests/test_my_nim_widget.nim",
+        "examples/example_usage.nim",
+    ])
+
+
+def test_create_openscad_widget(carto, tmp_path):
+    result = carto.create(
+        "my-scad-widget",
+        language="openscad",
+        name="My Scad Widget",
+        domain="modeling",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "src/my_scad_widget.scad",
+        "tests/test_my_scad_widget.scad",
+        "examples/example_usage.scad",
+        # OpenSCAD ships a python/ sidecar for the contamination fallback.
+        "python/my_scad_widget.py",
+        "python/test_my_scad_widget.py",
+    ])
+
+
+def test_create_systemverilog_widget(carto, tmp_path):
+    result = carto.create(
+        "my-sv-widget",
+        language="systemverilog",
+        name="My Sv Widget",
+        domain="rtl",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "src/my_sv_widget.sv",
+        "tests/test_my_sv_widget.sv",
+        "examples/example_usage.sv",
+    ])
+
+
+def test_create_typescript_widget(carto, tmp_path):
+    result = carto.create(
+        "my-ts-widget",
+        language="typescript",
+        name="My Ts Widget",
+        domain="universal",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "package.json",
+        "vitest.config.js",
+        "src/my_ts_widget.ts",
+        "tests/test_my_ts_widget.ts",
+        "examples/example_usage.ts",
+    ])
+
+
 def test_create_spice_widget(carto, tmp_path, monkeypatch):
     # SPICE ships supported=False until its stress test passes; the scaffold
     # itself is testable regardless of the ship gate.
