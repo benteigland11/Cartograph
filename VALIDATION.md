@@ -283,6 +283,69 @@ path deps are declarative, so `run_blueprint_example` simply runs `cargo run
 --example` in the sandbox (no go.work-style synthesis needed - the sandbox
 layout already matches the declared paths).
 
+### GDScript (Godot 4)
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| project.godot exists | missing | file check |
+| src/ has .gd files | missing | file check |
+| Every .gd parses | syntax error | `godot --headless --check-only --script <file>` (parses, does not run) |
+| Native GDScript scanner passes on src/ | issues found | gdscript_scanner.gd (headless) |
+| All declared dependencies are version-pinned | unpinned dep found | dep pinning check |
+| Each test asserts and exits cleanly | non-zero exit, ASSERT_FAIL, or no ASSERT_PASS | `godot --headless --path . --script tests/<t>.gd` |
+| Example runs and exits cleanly | non-zero exit | `godot --headless --path . --script examples/example_usage.gd` |
+
+**Layout:** the widget root is a minimal Godot project (`project.godot`, so
+`res://` resolves). `src/<name>.gd` holds the reusable script with a PascalCase
+`class_name`; `tests/test_<name>.gd` and `examples/example_usage.gd` are
+`extends SceneTree` scripts run headless. The toolchain is the single `godot`
+binary - the standard build supports `--headless`; the engine never opens the
+editor.
+
+**Coverage:** none. There is no line-coverage tool for GDScript, so - like
+OpenSCAD/SystemVerilog/SPICE - this engine enforces no coverage floor. The
+floor is instead that behavior is *asserted*: a test loads the widget via
+`res://`, exercises it with fake data, prints `ASSERT_PASS` for each verified
+property, and `quit(non-zero)` on failure. A team that wants a coverage bar
+adds it as a custom rule - exactly the kind of opinion that belongs above the
+floor, not inside it.
+
+**Test contract (and the quit() gotcha):** a test is judged by exit code plus
+output markers - it must produce at least one `ASSERT_PASS`, contain no
+`ASSERT_FAIL`, and exit 0. The ASSERT_PASS requirement exists because Godot can
+exit 0 even when logic is wrong, so a clean exit alone does not prove anything
+was checked. Critically, `SceneTree.quit()` does NOT return from the calling
+function - it only requests quit at end of frame, so execution keeps running
+and a later `quit()` overrides an earlier one. Always `return` immediately
+after `quit()` (or make it the last statement). The scaffolded test models this
+guard-clause pattern; the ASSERT_PASS contract is what catches a widget that
+falls through and silently "passes."
+
+**Dependencies:** GDScript widgets are pure engine builtins plus their own
+scripts - there is no package manager, so `install_deps` is a no-op. Any
+declared deps are still checked for version pinning.
+
+**Scanner:** native `gdscript_scanner.gd`, run headless. The target file paths
+arrive on `OS.get_cmdline_user_args()` (after `--`); the scanner's own path
+goes to `--script`, so the self-scan trap is structurally avoided. A
+hand-written lexer blanks `#` line comments and `"..."`/`'...'`/triple-quoted
+strings before applying code checks, so a keyword inside a string or comment
+never trips. The headline check hard-blocks deprecated **Godot 3 syntax** in
+src/ (bare `onready`/`export(...)`/`tool` instead of the `@` annotations,
+`yield`, the 3-arg `.connect`, `Pool*Array`, renamed classes like
+`KinematicBody`/`Spatial`/`Directory`, `.instance()`, `rand_range`,
+`.empty()`) - the whole reason the engine exists, since LLMs constantly emit
+Godot 3 code into Godot 4 projects. Also blocked in src/: `print*`/`print_debug`,
+absolute node paths (scene-tree coupling), `OS.delay_*`, and the standard
+contamination set (absolute paths, hardcoded IPs, credentials). Warnings:
+untyped `var` declarations (static typing is the house style), hardcoded numeric
+`const` tunables, `OS.get_environment`, `TODO`/`FIXME`, and hardcoded URLs
+(localhost/example.* allowlisted).
+
+**Blueprints:** GDScript composition uses `res://cg/<dep-widget>/src/...`
+preloads in the blueprint's scripts; `run_blueprint_example` runs the example
+headless from the sandbox root, where the dep widgets are copied under `cg/`.
+
 ### SPICE
 
 | Check | Fails if | Method |

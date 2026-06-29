@@ -158,6 +158,7 @@ LANGUAGE_ALIASES = {
     "py": "python", "python3": "python", "py3": "python",
     "rs": "rust",
     "golang": "go",
+    "gd": "gdscript", "godot": "gdscript", "godot4": "gdscript",
     "c++": "cpp", "cxx": "cpp",
     "c#": "csharp",
     "hipc++": "hip", "hip c++": "hip",

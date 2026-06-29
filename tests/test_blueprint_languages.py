@@ -1350,6 +1350,123 @@ def test_rust_blueprint_validates_end_to_end(carto, project):
 
 
 # ---------------------------------------------------------------------------
+# GDScript (Godot 4)
+# ---------------------------------------------------------------------------
+
+_GD_PROJECT = 'config_version=5\n\n[application]\n\nconfig/name="{name}"\n'
+
+_GD_GREET_SRC = (
+    "class_name Greet\n## Builds a greeting string.\nextends RefCounted\n\n\n"
+    'static func greeting(who: String) -> String:\n\treturn "hello, %s" % who\n'
+)
+_GD_GREET_TEST = (
+    "extends SceneTree\n\n\nfunc _init() -> void:\n"
+    '\tvar g = load("res://src/greet.gd")\n'
+    '\tif g.greeting("test") != "hello, test":\n'
+    '\t\tprint("ASSERT_FAIL greeting")\n\t\tquit(1)\n\t\treturn\n'
+    '\tprint("ASSERT_PASS greeting")\n\tquit(0)\n'
+)
+_GD_GREET_EXAMPLE = (
+    "extends SceneTree\n\n\nfunc _init() -> void:\n"
+    '\tvar g = load("res://src/greet.gd")\n\tprint(g.greeting("world"))\n\tquit(0)\n'
+)
+
+# The blueprint preloads the composed widget via res://cg/<dep-id>/...; the
+# sandbox copies the dep there and --path makes res:// the sandbox root.
+_GD_SHOUTER_SRC = (
+    "class_name Shouter\n## Uppercases a greeting via the greet widget.\n"
+    "extends RefCounted\n\n"
+    'const Greet = preload("res://cg/gamedev-greet-gdscript/src/greet.gd")\n\n\n'
+    "static func shout(who: String) -> String:\n"
+    "\treturn Greet.greeting(who).to_upper()\n"
+)
+_GD_SHOUTER_TEST = (
+    "extends SceneTree\n\n\nfunc _init() -> void:\n"
+    '\tvar s = load("res://src/shouter.gd")\n'
+    '\tif s.shout("test") != "HELLO, TEST":\n'
+    '\t\tprint("ASSERT_FAIL shout")\n\t\tquit(1)\n\t\treturn\n'
+    '\tprint("ASSERT_PASS shout")\n\tquit(0)\n'
+)
+_GD_SHOUTER_EXAMPLE = (
+    "extends SceneTree\n\n\nfunc _init() -> void:\n"
+    '\tvar s = load("res://src/shouter.gd")\n\tprint(s.shout("world"))\n\tquit(0)\n'
+)
+
+
+def _write_gdscript_widget(project_dir: str) -> str:
+    wdir = os.path.join(project_dir, "cg", "gamedev-greet-gdscript")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(wdir, d))
+    manifest = {
+        "meta": {
+            "id": "gamedev-greet-gdscript", "name": "greet", "version": "1.0.0",
+            "domain": "gamedev", "tags": ["greeting", "demo", "test"],
+        },
+        "tech_stack": {"language": "gdscript", "dependencies": []},
+        "description": "Builds a greeting string.",
+    }
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(wdir, "project.godot"), "w") as f:
+        f.write(_GD_PROJECT.format(name="greet"))
+    with open(os.path.join(wdir, "src", "greet.gd"), "w") as f:
+        f.write(_GD_GREET_SRC)
+    with open(os.path.join(wdir, "tests", "test_greet.gd"), "w") as f:
+        f.write(_GD_GREET_TEST)
+    with open(os.path.join(wdir, "examples", "example_usage.gd"), "w") as f:
+        f.write(_GD_GREET_EXAMPLE)
+    return wdir
+
+
+def _write_gdscript_blueprint(project_dir: str) -> str:
+    bp = os.path.join(project_dir, "cg", "bp-shouter-gdscript")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(bp, d))
+    manifest = {
+        "id": "bp-shouter-gdscript",
+        "name": "shouter",
+        "language": "gdscript",
+        "version": "0.1.0",
+        "description": "Uppercases a greeting via the greet widget.",
+        "tags": ["greeting", "demo", "blueprint"],
+        "dependencies": [
+            {"id": "gamedev-greet-gdscript", "version": "1.0.0"},
+        ],
+        "domains": [],
+    }
+    with open(os.path.join(bp, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(bp, "project.godot"), "w") as f:
+        f.write(_GD_PROJECT.format(name="shouter"))
+    with open(os.path.join(bp, "src", "shouter.gd"), "w") as f:
+        f.write(_GD_SHOUTER_SRC)
+    with open(os.path.join(bp, "tests", "test_shouter.gd"), "w") as f:
+        f.write(_GD_SHOUTER_TEST)
+    with open(os.path.join(bp, "examples", "example_usage.gd"), "w") as f:
+        f.write(_GD_SHOUTER_EXAMPLE)
+    return bp
+
+
+@pytest.mark.slow
+def test_gdscript_blueprint_validates_end_to_end(carto, project):
+    if not shutil.which("godot"):
+        pytest.skip("godot not available")
+    engine = get_engine("gdscript")
+    if engine is None or not engine.supported:
+        pytest.skip("gdscript engine not available")
+    ok, msg = engine.check_available()
+    if not ok:
+        pytest.skip(f"gdscript engine not ready: {msg}")
+
+    _write_gdscript_widget(str(project))
+    bp = _write_gdscript_blueprint(str(project))
+
+    res = carto.validate_blueprint(bp)
+    assert res.get("status") == "success", res
+    assert res["id"] == "bp-shouter-gdscript"
+
+
+# ---------------------------------------------------------------------------
 # SPICE
 # ---------------------------------------------------------------------------
 

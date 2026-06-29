@@ -189,6 +189,34 @@ def test_create_rust_widget(carto, tmp_path, monkeypatch):
         assert "use my_widget::" in f.read()
 
 
+def test_create_gdscript_widget(carto, tmp_path, monkeypatch):
+    # GDScript ships supported=False until its CI provisions Godot; the scaffold
+    # itself is testable regardless of the ship gate.
+    from cartograph.languages.gdscript import GDScriptEngine
+    monkeypatch.setattr(GDScriptEngine, "supported", True)
+    result = carto.create(
+        "my-widget",
+        language="gdscript",
+        name="My Widget",
+        domain="gamedev",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "project.godot",
+        "src/my_widget.gd",
+        "tests/test_my_widget.gd",
+        "examples/example_usage.gd",
+    ])
+    # src must declare a PascalCase class_name; the test loads it via res://.
+    with open(f"{result['path']}/src/my_widget.gd") as f:
+        assert "class_name MyWidget" in f.read()
+    with open(f"{result['path']}/tests/test_my_widget.gd") as f:
+        assert 'res://src/my_widget.gd' in f.read()
+
+
 def test_create_nim_widget(carto, tmp_path):
     result = carto.create(
         "my-nim-widget",
