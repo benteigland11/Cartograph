@@ -2263,7 +2263,7 @@ def cmd_doctor(args):
 
     # --- Language engines (auto-discovered) ---
     from .languages.registry import _ENGINES
-    _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3, "openscad": 4, "angular": 5, "php": 6, "terraform": 7, "go": 8, "spice": 9, "rust": 10, "gdscript": 11}
+    _lang_order = {"python": 0, "javascript": 1, "typescript": 2, "nim": 3, "openscad": 4, "systemverilog": 5, "angular": 6, "php": 7, "terraform": 8, "go": 9, "spice": 10, "rust": 11, "gdscript": 12}
     lang_checks = []
     for lang_name, engine in sorted(_ENGINES.items(), key=lambda x: _lang_order.get(x[0], 99)):
         available, message = engine.check_available()
