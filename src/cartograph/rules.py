@@ -52,6 +52,7 @@ _LANGUAGE_RULES = {
     "go":            ("rules.go.py",         [sys.executable]),
     "spice":         ("rules.spice.py",      [sys.executable]),
     "rust":          ("rules.rust.py",       [sys.executable]),
+    "gdscript":      ("rules.gdscript.py",   [sys.executable]),
 }
 
 
@@ -1343,6 +1344,93 @@ if __name__ == "__main__":
     main()
 """
 
+_TEMPLATE_GDSCRIPT = """\
+\"\"\"
+Custom validation rules for GDScript (Godot 4) widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+GDSCRIPT-SPECIFIC CHECKS TO CONSIDER
+------------------------------------
+The engine already blocks Godot 3 syntax, console output, absolute node
+paths, and OS.delay_* in src/, and warns on untyped vars. Teams often want
+more on top - and because there is no built-in coverage tool, a coverage
+floor is exactly the kind of opinion that belongs HERE rather than in the
+engine:
+
+  - Coverage: instrument your tests (or count asserted public methods) and
+    block below a threshold your studio agrees on.
+  - Required @export docs: every @export field should have a ## doc comment
+    so the inspector tooltip is useful.
+  - Signal discipline: require signals to be declared (`signal x`) and named
+    in past tense (health_changed, not change_health).
+  - No print_rich/push_warning spam in src/.
+  - Class naming: enforce a PascalCase class_name on every src script.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      project.godot
+      src/        the reusable script(s)
+      tests/      test_*.gd (headless, assert + ASSERT_PASS)
+      examples/   example_usage.gd
+      widget.json
+
+This is a Python script - use any stdlib module you want.
+EXAMPLE
+-------
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def main() -> None:
+    widget_path = sys.argv[1] if len(sys.argv) > 1 else "."
+    blocks: list[str] = []
+    warnings: list[str] = []
+
+    src_dir = os.path.join(widget_path, "src")
+    for root, _dirs, files in os.walk(src_dir):
+        for fname in files:
+            if not fname.endswith(".gd"):
+                continue
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, widget_path)
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            # [TODO] Replace with your team's checks. Example: every src
+            # script should declare a class_name.
+            if not re.search(r"^\\s*class_name\\s+\\w+", text, re.MULTILINE):
+                warnings.append(
+                    f"{rel}: no class_name - declare one so consumers can "
+                    f"reference the script by type"
+                )
+
+    print(json.dumps({"blocks": blocks, "warnings": warnings}))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 _TEMPLATE_SPICE = """\
 \"\"\"
 Custom validation rules for SPICE widgets.
@@ -1437,6 +1525,7 @@ _TEMPLATES = {
     "go":            _TEMPLATE_GO,
     "spice":         _TEMPLATE_SPICE,
     "rust":          _TEMPLATE_RUST,
+    "gdscript":      _TEMPLATE_GDSCRIPT,
 }
 
 

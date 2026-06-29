@@ -31,6 +31,7 @@ from cartograph.languages.php import PhpEngine
 from cartograph.languages.terraform import TerraformEngine
 from cartograph.languages.go import GoEngine
 from cartograph.languages.rust import RustEngine
+from cartograph.languages.gdscript import GDScriptEngine
 from cartograph.languages.spice import SpiceEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
@@ -90,6 +91,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "go": GoEngine,
         "spice": SpiceEngine,
         "rust": RustEngine,
+        "gdscript": GDScriptEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -122,6 +124,7 @@ CLEAN = {
     "terraform":  ('resource "null_resource" "x" {\n  triggers = { name = var.name }\n}\n', "", None),
     "go":         ('package module\n\n// Hello returns a greeting.\nfunc Hello() string { return "world" }\n', "", None),
     "rust":       ('/// Hello returns a greeting.\npub fn hello() -> String { String::from("world") }\n', "", None),
+    "gdscript":   ('func hello() -> String:\n\treturn "world"\n', "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -135,6 +138,7 @@ ABS_PATH_SRC = {
     "terraform":  'locals {\n  log = "/home/user/logs/app.log"\n}\n',
     "go":         'package module\n\nfunc LogPath() string { return "/home/user/logs/app.log" }\n',
     "rust":       'pub fn log_path() -> &\'static str { "/home/user/logs/app.log" }\n',
+    "gdscript":   'var log_path: String = "/home/user/logs/app.log"\n',
 }
 
 # Check 2: Credentials in src/ -> block
@@ -148,6 +152,7 @@ CREDENTIAL_SRC = {
     "terraform":  'locals {\n  api_key = "sk-abc123verylongkey"\n}\n',
     "go":         'package module\n\nfunc Key() string {\n\tapiKey := "sk-abc123verylongkey"\n\treturn apiKey\n}\n',
     "rust":       'pub fn key() -> String {\n    let api_key = "sk-abc123verylongkey";\n    api_key.to_string()\n}\n',
+    "gdscript":   'var api_key: String = "sk-abc123verylongkey"\n',
 }
 
 # Check 2b: Credentials in tests/ -> warning (not block)
@@ -161,6 +166,7 @@ CREDENTIAL_TEST = {
     "terraform":  'locals {\n  password = "fake_test_password_123"\n}\n',
     "go":         'package tests\n\nfunc fakeCred() string {\n\tpassword := "fake_test_password_123"\n\treturn password\n}\n',
     "rust":       'fn fake_cred() -> String {\n    let password = "fake_test_password_123";\n    password.to_string()\n}\n',
+    "gdscript":   'var password: String = "fake_test_password_123"\n',
 }
 
 # Check 3: Hardcoded URLs -> block
@@ -174,6 +180,7 @@ URL_SRC = {
     "terraform":  'locals {\n  api = "https://api.mycompany.com/v1"\n}\n',
     "go":         'package module\n\nfunc API() string { return "https://api.mycompany.com/v1" }\n',
     "rust":       'pub fn api() -> &\'static str { "https://api.mycompany.com/v1" }\n',
+    "gdscript":   'var api: String = "https://api.mycompany.com/v1"\n',
 }
 
 # Check 3b: localhost/example.com URLs -> allowed
@@ -187,6 +194,7 @@ URL_ALLOWED = {
     "terraform":  'locals {\n  api = "http://localhost:8080/api"\n}\n',
     "go":         'package module\n\nfunc API() string { return "http://localhost:8080/api" }\n',
     "rust":       'pub fn api() -> &\'static str { "http://localhost:8080/api" }\n',
+    "gdscript":   'var api: String = "http://localhost:8080/api"\n',
 }
 
 # Check 4: Hardcoded IPs -> block
@@ -200,6 +208,7 @@ IP_SRC = {
     "terraform":  'locals {\n  host = "192.168.1.100"\n}\n',
     "go":         'package module\n\nfunc Host() string { return "192.168.1.100" }\n',
     "rust":       'pub fn host() -> &\'static str { "192.168.1.100" }\n',
+    "gdscript":   'var host: String = "192.168.1.100"\n',
 }
 
 # Check 5: Sleep in src/ -> block
@@ -292,10 +301,10 @@ STDLIB_IMPORT = {
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd"}
 
 # Which languages need external tools to run their scanners
-NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc"}
+NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot"}
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +312,7 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
 LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust"]
@@ -2400,6 +2409,76 @@ class TestRustSpecific:
             '/// WIP.\npub fn process(v: &str) -> String { todo!() }\n')
         assert any("todo" in w.lower() for w in result["warnings"]), \
             f"todo! must warn: {result['warnings']}"
+
+
+class TestGDScriptSpecific:
+    """Checks unique to the GDScript engine - the Godot 3 -> 4 syntax blocks
+    (the whole point of the engine) and the lexer's string/comment awareness."""
+
+    def _gd_scan(self, tmp_path, src_code, **kw):
+        _skip_if_missing("gdscript")
+        return _scan(tmp_path, "gdscript", "gd", src_code, **kw)
+
+    def test_godot3_onready_blocks(self, tmp_path):
+        result = self._gd_scan(tmp_path, "onready var sprite = null\n")
+        assert any("godot 3" in b.lower() for b in result["blocks"]), \
+            f"onready var (Godot 3) must block: {result}"
+
+    def test_godot3_export_paren_blocks(self, tmp_path):
+        result = self._gd_scan(tmp_path, "export(int) var speed = 5\n")
+        assert any("godot 3" in b.lower() for b in result["blocks"]), \
+            f"export(...) (Godot 3) must block: {result}"
+
+    def test_godot3_yield_blocks(self, tmp_path):
+        result = self._gd_scan(tmp_path,
+            'func go():\n\tyield(get_tree(), "idle_frame")\n')
+        assert any("godot 3" in b.lower() for b in result["blocks"]), \
+            f"yield (Godot 3) must block: {result}"
+
+    def test_godot3_pool_array_blocks(self, tmp_path):
+        result = self._gd_scan(tmp_path, "var data := PoolIntArray()\n")
+        assert any("godot 3" in b.lower() for b in result["blocks"]), \
+            f"Pool*Array (Godot 3) must block: {result}"
+
+    def test_godot4_syntax_is_clean(self, tmp_path):
+        result = self._gd_scan(tmp_path,
+            "## A Godot 4 node.\n@export var speed: int = 5\n"
+            "var data: PackedInt32Array = PackedInt32Array()\n")
+        assert result["blocks"] == [], \
+            f"Godot 4 syntax must not block: {result['blocks']}"
+
+    def test_godot3_keyword_in_string_not_blocked(self, tmp_path):
+        """Lexer awareness: a Godot 3 keyword inside a string must not block."""
+        result = self._gd_scan(tmp_path,
+            'func doc() -> String:\n\treturn "use yield() and onready in Godot 3"\n')
+        assert result["blocks"] == [], \
+            f"Godot 3 keyword in a string must not block: {result['blocks']}"
+
+    def test_godot3_keyword_in_comment_not_blocked(self, tmp_path):
+        result = self._gd_scan(tmp_path,
+            "# onready and yield() were removed in Godot 4\n"
+            "func ok() -> int:\n\treturn 1\n")
+        assert result["blocks"] == [], \
+            f"Godot 3 keyword in a comment must not block: {result['blocks']}"
+
+    def test_print_in_src_blocks(self, tmp_path):
+        result = self._gd_scan(tmp_path, 'func f() -> void:\n\tprint("debug")\n')
+        assert any("print" in b.lower() for b in result["blocks"]), \
+            f"print() in src must block: {result}"
+
+    def test_absolute_node_path_blocks(self, tmp_path):
+        # Bare $/... node-path syntax is code (not a string), so it trips the
+        # scene-tree-coupling check specifically. A quoted "/root/..." path is
+        # also blocked, but as an absolute-path literal.
+        result = self._gd_scan(tmp_path,
+            "func f() -> Node:\n\treturn $/root/Main/Player\n")
+        assert any("node path" in b.lower() for b in result["blocks"]), \
+            f"absolute node path must block: {result}"
+
+    def test_untyped_var_warns(self, tmp_path):
+        result = self._gd_scan(tmp_path, "var speed = 100\n")
+        assert any("typed" in w.lower() for w in result["warnings"]), \
+            f"untyped var should warn: {result['warnings']}"
 
 
 class TestSpiceSpecific:
