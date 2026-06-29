@@ -161,6 +161,43 @@ class PhpEngine(LanguageEngine):
     validation_version = 1
     file_ext = "php"
     supported = True
+    env_dir = "vendor"
+
+    def lock_patterns(self, path: str) -> list:
+        pats = []
+        for f in ("composer.lock", "composer.json"):
+            fp = os.path.join(path, f)
+            if os.path.exists(fp):
+                pats.append(fp)
+        return pats
+
+    def verify_installed(self, path: str, dependencies: list) -> bool:
+        from ..dep_cache import parse_requirement, satisfies
+        installed_json = os.path.join(path, "vendor", "composer", "installed.json")
+        if not os.path.isfile(installed_json):
+            return False
+        try:
+            with open(installed_json, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return False
+        # Composer 2 wraps the list in {"packages": [...]}; v1 is a bare list.
+        pkgs = data.get("packages", []) if isinstance(data, dict) else data
+        versions = {}
+        for p in pkgs:
+            nm = p.get("name")
+            if nm:
+                versions[nm.lower()] = (p.get("version") or "").lstrip("vV")
+        for dep in dependencies:
+            name, spec = parse_requirement(dep)
+            if not name:
+                continue
+            ver = versions.get(name.lower())
+            if ver is None:
+                return False
+            if satisfies(ver, spec) is False:
+                return False
+        return True
 
     toolchain = {
         "php": "Install PHP 8.1+ - php.net/downloads",
@@ -463,6 +500,9 @@ class PhpEngine(LanguageEngine):
     # ── Install ───────────────────────────────────────────────────────────────
 
     def install_deps(self, path: str, dependencies: list) -> None:
+        if self._deps_cached(path, dependencies):
+            log.debug("Reusing cached vendor/ at %s", path)
+            return
         composer_path = os.path.join(path, "composer.json")
         if os.path.exists(composer_path) and dependencies:
             with open(composer_path, encoding="utf-8") as f:
@@ -494,6 +534,8 @@ class PhpEngine(LanguageEngine):
                 "Failed to install Composer dependencies."
                 + (f"\n{output[:2000]}" if output else "")
             )
+
+        self._record_dep_cache(path, dependencies)
 
     # ── Tests ─────────────────────────────────────────────────────────────────
 

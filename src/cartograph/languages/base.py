@@ -120,6 +120,11 @@ class LanguageEngine:
     scanner_warning_messages: dict = {}  # {finding_kind: "human-readable header"} - warnings (don't block)
     import_pattern: str = ""         # regex for "does example import from src?"
     manifest_patterns: list = []     # e.g. ["*.rockspec"] - added to watched_patterns
+    # Project-local dependency directory installed into the widget tree
+    # (e.g. ".venv", "node_modules", "vendor"). When set, install_deps can
+    # reuse it across runs via the dep cache, and cleanup preserves it.
+    # Empty string means this engine has no cacheable per-project install.
+    env_dir: str = ""
 
     # -- Methods (override for custom behavior) --------------------------------
 
@@ -309,6 +314,53 @@ class LanguageEngine:
         test_files = _glob.glob(os.path.join(path, "tests", "**", f"*.{ext}"), recursive=True)
         return src_files, test_files
 
+    def lock_patterns(self, path: str) -> list:
+        """Glob patterns for lockfiles whose change invalidates the dep cache.
+
+        Override per engine. The declared dependency set is always part of
+        the cache key; these patterns add file-content sensitivity (e.g.
+        package-lock.json, composer.lock) so a lockfile edit forces a
+        rebuild even when the declared deps are unchanged.
+        """
+        return []
+
+    def _deps_cached(self, path: str, dependencies: list) -> bool:
+        """True if a reusable project-local install already exists for these deps.
+
+        Two gates: the fingerprint (declared deps + lockfiles unchanged) AND
+        verify_installed (the env actually contains the declared packages at
+        satisfying versions). The second gate makes the cache self-healing
+        against a drifted, partial, or hand-edited env.
+        """
+        if not self.env_dir:
+            return False
+        from ..dep_cache import deps_satisfied
+        if not deps_satisfied(
+            path, self.name, dependencies, self.env_dir, self.lock_patterns(path)
+        ):
+            return False
+        if not self.verify_installed(path, dependencies):
+            log.debug("Dep cache fingerprint hit but env verification failed for %s "
+                      "- forcing reinstall", path)
+            return False
+        return True
+
+    def verify_installed(self, path: str, dependencies: list) -> bool:
+        """Confirm the project-local env satisfies the declared dependencies.
+
+        Override per engine to check installed versions against the declared
+        specifiers. Default trusts the fingerprint (engines without a
+        per-project env have nothing to verify).
+        """
+        return True
+
+    def _record_dep_cache(self, path: str, dependencies: list) -> None:
+        """Stamp the project-local install so the next run can reuse it."""
+        if not self.env_dir:
+            return
+        from ..dep_cache import record_deps
+        record_deps(path, self.name, dependencies, self.lock_patterns(path))
+
     def install_deps(self, path: str, dependencies: list) -> None:
         """Install dependencies required to run tests."""
         if not self.dep_install_command or not dependencies:
@@ -382,6 +434,9 @@ class LanguageEngine:
         except ImportError:
             return
         for entry in excludes_for(language=self.name):
+            # Preserve the cached dependency dir so the next run can reuse it.
+            if self.env_dir and entry == self.env_dir:
+                continue
             full = os.path.join(path, entry)
             if os.path.isdir(full):
                 shutil.rmtree(full, ignore_errors=True)

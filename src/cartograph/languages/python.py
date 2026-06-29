@@ -2,6 +2,7 @@
 
 import ast
 import glob
+import json
 import os
 import re
 import subprocess
@@ -63,6 +64,48 @@ class PythonEngine(LanguageEngine):
     name = "python"
     validation_version = 1
     file_ext = "py"
+    env_dir = ".venv"
+
+    def lock_patterns(self, path: str) -> list:
+        pats = []
+        for f in ("requirements.txt", "requirements-dev.txt",
+                  "pyproject.toml", "setup.cfg"):
+            fp = os.path.join(path, f)
+            if os.path.exists(fp):
+                pats.append(fp)
+        return pats
+
+    def verify_installed(self, path: str, dependencies: list) -> bool:
+        from ..dep_cache import parse_requirement, satisfies
+        venv_dir = os.path.join(path, ".venv")
+        py = (os.path.join(venv_dir, "Scripts", "python.exe") if os.name == "nt"
+              else os.path.join(venv_dir, "bin", "python"))
+        if not os.path.exists(py):
+            return False
+        res = self._run([py, "-m", "pip", "list", "--format=json"],
+                        cwd=path, timeout=30)
+        if res.returncode != 0:
+            return False
+        try:
+            installed = {
+                p["name"].lower().replace("_", "-"): p["version"]
+                for p in json.loads(res.stdout)
+            }
+        except (ValueError, KeyError):
+            return False
+        for dep in dependencies:
+            name, spec = parse_requirement(dep)
+            if not name:
+                continue
+            base = name.split("[")[0].lower().replace("_", "-")
+            if base in _HEAVY_ML_DEPS:
+                continue  # inherited from global site-packages, not in the venv list
+            ver = installed.get(base)
+            if ver is None:
+                return False
+            if satisfies(ver, spec) is False:
+                return False
+        return True
 
     def runtime_version(self) -> str | None:
         v = sys.version_info
@@ -366,6 +409,21 @@ class PythonEngine(LanguageEngine):
         import shutil
         import venv
         venv_dir = os.path.join(path, ".venv")
+
+        # Reuse a cached venv when the declared deps and lockfiles are
+        # unchanged. The venv inherits global site-packages, so a hit means
+        # both the venv and the prior pip resolve can be skipped entirely.
+        if self._deps_cached(path, dependencies):
+            cached_py = (
+                os.path.join(venv_dir, "Scripts", "python.exe")
+                if os.name == "nt"
+                else os.path.join(venv_dir, "bin", "python")
+            )
+            if os.path.exists(cached_py):
+                self._venv_py = cached_py
+                log.debug("Reusing cached venv at %s", venv_dir)
+                return
+
         log.debug("Creating isolated venv at %s", venv_dir)
 
         # Retry venv creation to handle stale venvs whose python binary is still
@@ -437,6 +495,8 @@ class PythonEngine(LanguageEngine):
                     f"Failed to install Python dependency '{dep_name}'."
                     + (f"\n{output[:2000]}" if output else "")
                 )
+
+        self._record_dep_cache(path, dependencies)
 
     def run_tests(self, path: str) -> dict:
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
@@ -611,9 +671,12 @@ class PythonEngine(LanguageEngine):
         except ImportError:
             artifact_dirs = frozenset({"__pycache__", ".pytest_cache", ".venv"})
         self._venv_py = None
-        # Walk to catch nested __pycache__ / .pytest_cache anywhere in the tree.
+        # Preserve the cached venv so the next run can reuse it; still strip
+        # __pycache__ / .pytest_cache. Pruning .venv from traversal also keeps
+        # us from walking into site-packages to delete its __pycache__ dirs.
+        preserve = {self.env_dir} if self.env_dir else set()
         for root, dirs, _files in os.walk(path):
             for d in list(dirs):
-                if d in artifact_dirs:
+                if d in artifact_dirs and d not in preserve:
                     shutil.rmtree(os.path.join(root, d), ignore_errors=True)
-            dirs[:] = [d for d in dirs if d not in artifact_dirs]
+            dirs[:] = [d for d in dirs if d not in artifact_dirs and d not in preserve]

@@ -33,6 +33,7 @@ from .languages import get_engine
 from .safefs import widget_lock, staged_dir, LockTimeout
 from .scaffolding import _library_notes as _canonical_library_notes
 from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_FILE
+from .dep_cache import DEP_STAMP_FILE as _DEP_STAMP_FILE
 
 log = logging.getLogger("cartograph")
 
@@ -417,12 +418,15 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
     # Files that live only in the library (not the working copy) and are carried
     # over / regenerated rather than copied from source.
     carry_skips = artifact_skips | {
-        "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
+        "history", "changelog.json", _STAMP_FILE, _DEP_STAMP_FILE,
+        ".cartograph_source",
     }
-    copy_ignore = shutil.ignore_patterns(*artifact_skips, "*.pyc", ".cartograph_source")
+    copy_ignore = shutil.ignore_patterns(
+        *artifact_skips, "*.pyc", _DEP_STAMP_FILE, ".cartograph_source")
     snapshot_ignore = shutil.ignore_patterns(
         *artifact_skips, "*.pyc",
-        "history", "changelog.json", _STAMP_FILE, ".cartograph_source",
+        "history", "changelog.json", _STAMP_FILE, _DEP_STAMP_FILE,
+        ".cartograph_source",
     )
 
     # Mutation is scoped to THIS widget's lock, and the new widget directory is

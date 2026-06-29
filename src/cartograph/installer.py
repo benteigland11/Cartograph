@@ -523,10 +523,11 @@ def _rewrite_widget_dir(path: str, new_id: str, new_domain: str,
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-    # Invalidate validation stamp — contents have changed.
-    stamp = os.path.join(path, ".validation_stamp.json")
-    if os.path.isfile(stamp):
-        os.remove(stamp)
+    # Invalidate validation + dep-cache stamps — contents have changed.
+    for _stamp_name in (".validation_stamp.json", ".dep_cache.json"):
+        stamp = os.path.join(path, _stamp_name)
+        if os.path.isfile(stamp):
+            os.remove(stamp)
 
     if old_module != new_module:
         _rename_python_module(path, old_module, new_module)

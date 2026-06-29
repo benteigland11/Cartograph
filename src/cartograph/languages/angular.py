@@ -240,6 +240,20 @@ class AngularEngine(LanguageEngine):
         "risky_import": "Node.js I/O or network imports found in src/ - ensure no hardcoded paths, URLs, or commands:",
     }
     manifest_patterns = ["package.json", "angular.json"]
+    env_dir = "node_modules"
+
+    def lock_patterns(self, path: str) -> list:
+        pats = []
+        for f in ("package-lock.json", "package.json"):
+            fp = os.path.join(path, f)
+            if os.path.exists(fp):
+                pats.append(fp)
+        return pats
+
+    def verify_installed(self, path: str, dependencies: list) -> bool:
+        # node_modules verification is identical to plain JS.
+        from .javascript import JavaScriptEngine
+        return JavaScriptEngine.verify_installed(self, path, dependencies)
 
     # -- Runtime -----------------------------------------------------------
 
@@ -471,6 +485,9 @@ class AngularEngine(LanguageEngine):
     # -- Install -----------------------------------------------------------
 
     def install_deps(self, path: str, dependencies: list) -> None:
+        if self._deps_cached(path, dependencies):
+            log.debug("Reusing cached node_modules at %s", path)
+            return
         package_json_path = os.path.join(path, "package.json")
         if os.path.exists(package_json_path) and dependencies:
             with open(package_json_path, encoding="utf-8") as f:
@@ -517,6 +534,8 @@ class AngularEngine(LanguageEngine):
                 "Failed to install npm dependencies."
                 + (f"\n{output[:2000]}" if output else "")
             )
+
+        self._record_dep_cache(path, dependencies)
 
     # -- Tests -------------------------------------------------------------
 
