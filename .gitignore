@@ -76,3 +76,6 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Dependency-environment cache stamp (local-only, mirrors .venv/node_modules state)
+.dep_cache.json

@@ -330,7 +330,7 @@ def _make_handler(engine):
             import os
             files = {}
             skip_dirs = {"__pycache__", ".pytest_cache", "history", ".git", "node_modules"}
-            skip_files = {".coverage", ".validation_stamp.json"}
+            skip_files = {".coverage", ".validation_stamp.json", ".dep_cache.json"}
             max_size = 500_000
 
             for root, dirs, filenames in os.walk(base):

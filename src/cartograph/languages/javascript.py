@@ -144,6 +144,35 @@ class JavaScriptEngine(LanguageEngine):
     }
     import_pattern = r"from\s+['\"]\.\.?/src/"
     manifest_patterns = ["package.json"]
+    env_dir = "node_modules"
+
+    def lock_patterns(self, path: str) -> list:
+        pats = []
+        for f in ("package-lock.json", "package.json"):
+            fp = os.path.join(path, f)
+            if os.path.exists(fp):
+                pats.append(fp)
+        return pats
+
+    def verify_installed(self, path: str, dependencies: list) -> bool:
+        from ..dep_cache import parse_requirement, satisfies
+        nm = os.path.join(path, "node_modules")
+        for dep in dependencies:
+            name, spec = parse_requirement(dep)
+            if not name:
+                continue
+            # Scoped names (@scope/pkg) map to nested dirs on disk.
+            pj = os.path.join(nm, *name.split("/"), "package.json")
+            if not os.path.isfile(pj):
+                return False
+            try:
+                with open(pj, encoding="utf-8") as f:
+                    ver = json.load(f).get("version")
+            except (OSError, ValueError):
+                return False
+            if not ver or satisfies(ver, spec) is False:
+                return False
+        return True
 
     def runtime_version(self) -> str | None:
         try:
@@ -296,6 +325,12 @@ class JavaScriptEngine(LanguageEngine):
     # ------------------------------------------------------------------ install
 
     def install_deps(self, path: str, dependencies: list) -> None:
+        # Reuse node_modules when deps + lockfiles are unchanged, skipping the
+        # full npm ci (which otherwise wipes and rebuilds the tree).
+        if self._deps_cached(path, dependencies):
+            log.debug("Reusing cached node_modules at %s", path)
+            return
+
         log.debug("Installing npm packages...")
 
         package_json_path = os.path.join(path, "package.json")
@@ -357,6 +392,8 @@ class JavaScriptEngine(LanguageEngine):
                 "Failed to install npm dependencies."
                 + (f"\n{output[:2000]}" if output else "")
             )
+
+        self._record_dep_cache(path, dependencies)
 
     # ------------------------------------------------------------------ tests
 

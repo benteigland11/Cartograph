@@ -691,7 +691,7 @@ def _zip_widget(widget_path: str) -> bytes:
             prefixes |= set(prefix_excludes_for(language=sidecar[0]))
     except Exception:
         pass
-    skip_files = {".validation_stamp.json", ".file_stamp.json",
+    skip_files = {".validation_stamp.json", ".file_stamp.json", ".dep_cache.json",
                   "reviews.json", "changelog.json"}
 
     buf = BytesIO()

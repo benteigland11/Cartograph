@@ -216,10 +216,10 @@ def checkin_blueprint(carto, path: str, reason: str = "", version_bump: str = "m
         os.makedirs(history_path, exist_ok=True)
         ignore = shutil.ignore_patterns(
             ".venv", "__pycache__", ".pytest_cache", "*.pyc",
-            "history", "changelog.json", ".validation_stamp.json",
+            "history", "changelog.json", ".validation_stamp.json", ".dep_cache.json",
             ".cartograph_source", "cg",
         )
-        per_item_skips = {"history", "changelog.json", ".validation_stamp.json",
+        per_item_skips = {"history", "changelog.json", ".validation_stamp.json", ".dep_cache.json",
                           ".cartograph_source", ".venv", "__pycache__",
                           ".pytest_cache", "cg"}
         for item in os.listdir(dest_path):
@@ -237,7 +237,7 @@ def checkin_blueprint(carto, path: str, reason: str = "", version_bump: str = "m
         ".venv", "__pycache__", ".pytest_cache", "*.pyc",
         ".cartograph_source", "cg",
     )
-    per_item_skips = {"history", "changelog.json", ".validation_stamp.json",
+    per_item_skips = {"history", "changelog.json", ".validation_stamp.json", ".dep_cache.json",
                       ".cartograph_source", ".venv", "__pycache__",
                       ".pytest_cache", "cg"}
     os.makedirs(dest_path, exist_ok=True)
