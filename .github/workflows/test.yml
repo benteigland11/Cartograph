@@ -67,6 +67,12 @@ jobs:
               - 'src/cartograph/languages/scanners/go_scanner.go'
             spice:
               - 'src/cartograph/languages/spice.py'
+            rust:
+              - 'src/cartograph/languages/rust.py'
+              - 'src/cartograph/languages/scanners/rust_scanner.rs'
+            gdscript:
+              - 'src/cartograph/languages/gdscript.py'
+              - 'src/cartograph/languages/scanners/gdscript_scanner.gd'
 
       - uses: actions/setup-python@v6
         with:
@@ -122,6 +128,30 @@ jobs:
         if: matrix.os == 'windows-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.spice == 'true')
         run: choco install ngspice -y || (sleep 15 && choco install ngspice -y)
 
+      # Rust ships preinstalled on GH runners; the engine only needs the
+      # coverage subcommand + the llvm-tools-preview component for the gate.
+      # taiki-e/install-action pulls a prebuilt cargo-llvm-cov on all 3 OSes.
+      - name: Install cargo-llvm-cov
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.rust == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Add llvm-tools-preview component
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.rust == 'true'
+        run: rustup component add llvm-tools-preview
+
+      # GDScript validates via the single headless `godot` binary. setup-godot
+      # installs the standard (non-.NET) build and puts `godot` on PATH on all
+      # three platforms in one step. 4.5.0 matches the scaffold's declared
+      # config/features feature level.
+      - name: Install Godot
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.gdscript == 'true'
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.5.0
+          use-dotnet: false
+
       - name: Install dependencies
         run: pip install -e . && pip install pytest pytest-cov
 
@@ -166,9 +196,9 @@ jobs:
           python -c "
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
-          expected = {'angular', 'go', 'javascript', 'nim', 'openscad',
-                      'php', 'python', 'systemverilog', 'terraform',
-                      'typescript'}
+          expected = {'angular', 'gdscript', 'go', 'javascript', 'nim',
+                      'openscad', 'php', 'python', 'rust', 'spice',
+                      'systemverilog', 'terraform', 'typescript'}
           missing = expected - langs
           assert not missing, f'engines missing from wheel install: {missing}'
           print('all engines registered:', sorted(langs))

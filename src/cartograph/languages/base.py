@@ -653,11 +653,18 @@ class LanguageEngine:
 
         return errors, warnings, blocks
 
+    # On Windows, shell scripts like npm/npx/ng are .cmd wrappers that
+    # subprocess can't launch without a shell, so _run defaults to shell=True
+    # there. But shell=True + a bare list means cmd.exe reparses every arg:
+    # metacharacters like `|` (e.g. a coverage --ignore-filename-regex of
+    # `(tests|examples|cg)/`) get treated as pipes. Engines whose toolchain is
+    # real .exe binaries (cargo, rustc, go, ...) don't need the shell and must
+    # opt out so their args pass through untouched.
+    windows_shell = True
+
     def _run(self, cmd: list, cwd: str, timeout: int = 60,
              env: dict = None) -> subprocess.CompletedProcess:
-        # On Windows, shell scripts like npm/npx need shell=True or the .cmd extension.
-        # Using shell=True is simpler and handles both cases.
-        use_shell = os.name == "nt"
+        use_shell = os.name == "nt" and self.windows_shell
         if cmd:
             cmd = [self._maybe_override(cmd[0]), *cmd[1:]]
         return subprocess.run(

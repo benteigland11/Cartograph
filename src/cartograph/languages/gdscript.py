@@ -139,7 +139,7 @@ class GDScriptEngine(LanguageEngine):
     toolchain = {"godot": "Install Godot 4 - godotengine.org (the standard "
                           "binary supports --headless; the engine never opens "
                           "the editor)"}
-    supported = False
+    supported = True
 
     manifest_patterns = ["project.godot"]
 
