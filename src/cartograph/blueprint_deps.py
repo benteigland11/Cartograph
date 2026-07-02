@@ -19,8 +19,29 @@ import os
 
 from .engine import DEFAULT_INSTALL_DIR, find_installed_widget_dir
 from .blueprints import is_blueprint_id, parse_blueprint_id
+from .languages import get_engine
 
 log = logging.getLogger("cartograph")
+
+
+def _snapshot_manifests(engine, blueprint_path: str) -> dict:
+    """Capture the current contents of the engine's manifest files so a failed
+    validation can restore them (None marks a file that did not exist)."""
+    snap = {}
+    for name in getattr(engine, "manifest_patterns", []) or []:
+        p = os.path.join(blueprint_path, name)
+        snap[p] = open(p, encoding="utf-8").read() if os.path.isfile(p) else None
+    return snap
+
+
+def _restore_manifests(snap: dict) -> None:
+    for p, content in snap.items():
+        if content is None:
+            if os.path.isfile(p):
+                os.remove(p)
+        else:
+            with open(p, "w", newline="\n", encoding="utf-8") as f:
+                f.write(content)
 
 
 def _load_blueprint(blueprint_path: str) -> tuple[dict | None, dict | None]:
@@ -170,8 +191,26 @@ def add_dep(carto, blueprint_path: str, widget_id: str, validate: bool = True) -
     data["dependencies"] = deps
     _write_manifest(blueprint_path, data)
 
+    # Wire the composed widget into the blueprint's language manifest (Cargo
+    # path dep, go.mod require+replace, ...) so it compiles against the dep
+    # without the author hand-editing. No-op for interpreted languages.
+    engine = get_engine(bid.language)
+    manifest_snap = _snapshot_manifests(engine, blueprint_path) if engine else {}
+    if engine:
+        cg_root = os.path.join(project_root, DEFAULT_INSTALL_DIR)
+        dep_dir = find_installed_widget_dir(cg_root, widget_id)
+        try:
+            engine.wire_blueprint_dep(blueprint_path, widget_id, dep_dir)
+        except Exception as e:
+            _write_manifest(blueprint_path, before)
+            _restore_manifests(manifest_snap)
+            return {"status": "error",
+                    "message": f"Failed to wire {widget_id} into the "
+                               f"blueprint manifest: {e}"}
+
     failure = _maybe_validate(carto, blueprint_path, before, validate)
     if failure:
+        _restore_manifests(manifest_snap)
         return failure
 
     log.info("blueprint %s: added dep %s@%s", bp_id, widget_id, pinned)
@@ -212,8 +251,24 @@ def remove_dep(carto, blueprint_path: str, widget_id: str, validate: bool = True
     data["dependencies"] = new_deps
     _write_manifest(blueprint_path, data)
 
+    # Unwire the composed widget from the blueprint's language manifest. No-op
+    # for interpreted languages. bid from parse_blueprint_id above.
+    bid = parse_blueprint_id(bp_id)
+    engine = get_engine(bid.language)
+    manifest_snap = _snapshot_manifests(engine, blueprint_path) if engine else {}
+    if engine:
+        try:
+            engine.unwire_blueprint_dep(blueprint_path, widget_id)
+        except Exception as e:
+            _write_manifest(blueprint_path, before)
+            _restore_manifests(manifest_snap)
+            return {"status": "error",
+                    "message": f"Failed to unwire {widget_id} from the "
+                               f"blueprint manifest: {e}"}
+
     failure = _maybe_validate(carto, blueprint_path, before, validate)
     if failure:
+        _restore_manifests(manifest_snap)
         return failure
 
     log.info("blueprint %s: removed dep %s", bp_id, widget_id)
