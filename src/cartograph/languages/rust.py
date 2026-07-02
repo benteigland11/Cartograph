@@ -109,6 +109,9 @@ class RustEngine(LanguageEngine):
                           "rustup component add llvm-tools-preview)",
     }
     supported = True
+    # cargo/rustc are real .exe binaries on PATH - no shell needed, and running
+    # through cmd.exe would reparse the coverage regex's `|` as a pipe.
+    windows_shell = False
 
     # Like Go, `rustc scanner.rs <files...>` would treat the target files as
     # nothing useful; the scanner is compiled once to a cached binary
