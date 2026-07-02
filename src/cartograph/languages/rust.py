@@ -108,7 +108,7 @@ class RustEngine(LanguageEngine):
                           "(needs the llvm-tools-preview component: "
                           "rustup component add llvm-tools-preview)",
     }
-    supported = False
+    supported = True
 
     # Like Go, `rustc scanner.rs <files...>` would treat the target files as
     # nothing useful; the scanner is compiled once to a cached binary
