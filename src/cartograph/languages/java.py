@@ -202,7 +202,7 @@ class JavaEngine(LanguageEngine):
         "java": "Install a JDK 21+ - adoptium.net",
         "gradle": "Install Gradle 8+ - gradle.org/install",
     }
-    supported = False
+    supported = True
 
     scanner_runner = ["java"]
     scanner_messages = {
