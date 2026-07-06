@@ -54,11 +54,19 @@ jobs:
   fresh-install:
     name: Fresh install
     needs: publish
+    # Explicit condition: the default success() looks at the TRANSITIVE needs
+    # chain, and `tests` is skipped on the auto-tag (workflow_dispatch) path -
+    # which silently skipped this job and `release` on every dispatched
+    # release (v0.7.12-v0.7.14 shipped with no fresh-install check and no
+    # GitHub release). Gate only on what we actually need: publish succeeded.
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     uses: ./.github/workflows/fresh-install.yml
 
   release:
     name: Create GitHub release
     needs: fresh-install
+    # Same transitive-skip trap as fresh-install above.
+    if: ${{ !cancelled() && needs.fresh-install.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
