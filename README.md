@@ -145,7 +145,7 @@ pytest
 
 The widget library lives in your platform's user data directory. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
-Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, terraform, go) are installed correctly.
+Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, terraform, go, cargo, cargo-llvm-cov, ngspice, godot) are installed correctly.
 
 ### Pre-push checks and release preflight
 
