@@ -2436,6 +2436,19 @@ class TestJavaSpecific:
         _skip_if_missing("java")
         return _scan(tmp_path, "java", "java", src_code, **kw)
 
+    def test_toolchain_mismatch_detected(self):
+        # Gradle 8.x on JDK 25 dies with "Unsupported class file major
+        # version 69" - must surface as a toolchain error naming the JDK,
+        # not as a widget content failure.
+        from cartograph.languages.java import JavaEngine
+        msg = JavaEngine._toolchain_mismatch(
+            "BUG! exception in phase 'semantic analysis' in source unit "
+            "'_BuildScript_' Unsupported class file major version 69")
+        assert "Java 25" in msg
+        assert "Gradle" in msg
+        assert JavaEngine._toolchain_mismatch("Could not resolve gson") == ""
+        assert JavaEngine._toolchain_mismatch("") == ""
+
     def test_println_in_src_blocks(self, tmp_path):
         result = self._java_scan(tmp_path,
             'public final class Module {\n'
