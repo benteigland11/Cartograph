@@ -295,9 +295,12 @@ class JavaEngine(LanguageEngine):
         if src_files:
             # Compile src/ only: a type error should fail validation with a
             # javac message, not surface later as a confusing test failure.
-            # Declared-but-not-yet-fetched deps are expected here (install
-            # runs later in the pipeline), so dependency-resolution failures
-            # are skipped - run_tests catches genuinely missing deps.
+            # validate runs before install_deps in the pipeline, so write
+            # the declared deps into cartograph-deps.gradle first - Gradle
+            # resolves them itself during the compile. Resolution failures
+            # (offline, registry hiccup) are still skipped here; run_tests
+            # catches genuinely missing deps after install.
+            self._write_deps_gradle(path, dependencies)
             try:
                 res = self._run(self._gradle_cmd("compileJava"), cwd=path,
                                 timeout=300)
@@ -356,18 +359,7 @@ class JavaEngine(LanguageEngine):
         cache (~/.gradle) is checksummed per coordinate, so no per-widget
         isolation is needed.
         """
-        lines = [_DEPS_GRADLE_HEADER, "dependencies {\n"]
-        for dep in dependencies or []:
-            bare = _dep_bare_name(dep)
-            if not bare or ":" not in bare:
-                continue
-            m = _DEP_FLOOR_RE.search(str(dep))
-            coord = f"{bare}:{m.group(1)}" if m else bare
-            lines.append(f"    implementation '{coord}'\n")
-        lines.append("}\n")
-        with open(os.path.join(path, "cartograph-deps.gradle"), "w",
-                  newline="\n", encoding="utf-8") as f:
-            f.writelines(lines)
+        self._write_deps_gradle(path, dependencies)
         if not dependencies:
             return
         res = self._run(self._gradle_cmd("dependencies",
@@ -444,6 +436,22 @@ class JavaEngine(LanguageEngine):
         self._cleanup_artifact_dirs(path)
 
     # ---- private -----------------------------------------------------------
+
+    @staticmethod
+    def _write_deps_gradle(path: str, dependencies: list) -> None:
+        """Regenerate cartograph-deps.gradle from the declared deps."""
+        lines = [_DEPS_GRADLE_HEADER, "dependencies {\n"]
+        for dep in dependencies or []:
+            bare = _dep_bare_name(dep)
+            if not bare or ":" not in bare:
+                continue
+            m = _DEP_FLOOR_RE.search(str(dep))
+            coord = f"{bare}:{m.group(1)}" if m else bare
+            lines.append(f"    implementation '{coord}'\n")
+        lines.append("}\n")
+        with open(os.path.join(path, "cartograph-deps.gradle"), "w",
+                  newline="\n", encoding="utf-8") as f:
+            f.writelines(lines)
 
     @staticmethod
     def _gradle_cmd(*tasks: str) -> list:
