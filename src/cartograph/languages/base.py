@@ -535,6 +535,29 @@ class LanguageEngine:
                     "error": (res.stderr or res.stdout or "").strip()}
         return {"passed": True}
 
+    def wire_blueprint_dep(self, blueprint_dir: str, dep_id: str,
+                           dep_dir: str) -> None:
+        """Wire a composed widget into the blueprint's language manifest.
+
+        Called by `blueprint add-dep` after the dep is pinned in
+        blueprint.json. Compiled languages that resolve deps through a
+        manifest (Rust's Cargo.toml, Go's go.mod) override this to add a
+        path/replace entry pointing at `cg/<dep_id>/` - the layout the
+        validator sandbox populates - so the blueprint compiles against
+        the composed widget without the author hand-editing the manifest.
+
+        Base is a no-op: interpreted languages resolve composed widgets via
+        the sandbox's cg/ copy plus relative references in source (Python's
+        PYTHONPATH, JS/PHP relative requires, Nim's --path:), so there is no
+        separate manifest to touch. Must be idempotent.
+        """
+        return
+
+    def unwire_blueprint_dep(self, blueprint_dir: str, dep_id: str) -> None:
+        """Remove a composed widget's entry from the blueprint's language
+        manifest. The inverse of wire_blueprint_dep; base is a no-op."""
+        return
+
     def required_files(self, path: str) -> list[tuple[str, str]]:
         """Return [(relative_path, error_hint)] for files that must exist before tests run."""
         return []

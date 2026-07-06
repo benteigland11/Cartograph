@@ -97,6 +97,19 @@ def _rust_crate_name(module_name: str) -> str:
     return module_name.replace("-", "_")
 
 
+def _insert_under_section(text: str, header: str, line: str) -> str:
+    """Insert `line` immediately after the `[section]` header in a TOML-ish
+    manifest, creating the section at the end if it is absent. Stdlib-only
+    (no toml dep) - the manifest is a flat Cargo.toml the scaffold controls."""
+    lines = text.splitlines(keepends=True)
+    for i, raw in enumerate(lines):
+        if raw.strip() == header:
+            lines.insert(i + 1, line)
+            return "".join(lines)
+    tail = "" if text.endswith("\n") or not text else "\n"
+    return text + tail + f"\n{header}\n{line}"
+
+
 class RustEngine(LanguageEngine):
     name = "rust"
     validation_version = 1
@@ -454,6 +467,59 @@ class RustEngine(LanguageEngine):
             return {"passed": False,
                     "error": (res.stderr or res.stdout or "").strip()}
         return {"passed": True}
+
+    # ---- blueprint dep wiring ----------------------------------------------
+
+    def wire_blueprint_dep(self, blueprint_dir, dep_id, dep_dir):
+        """Add a Cargo path dependency on the composed widget so the blueprint
+        compiles against it. Points at `cg/<dep_id>/`, the layout the validator
+        sandbox populates. Idempotent - re-adding an existing dep is a no-op."""
+        manifest = os.path.join(blueprint_dir, "Cargo.toml")
+        if not os.path.isfile(manifest):
+            return
+        rel = f"cg/{dep_id}"
+        with open(manifest, encoding="utf-8") as f:
+            text = f.read()
+        if f'path = "{rel}"' in text:
+            return
+        crate = self._cargo_package_name(dep_dir) or _rust_crate_name(dep_id)
+        line = f'{crate} = {{ path = "{rel}" }}\n'
+        text = _insert_under_section(text, "[dependencies]", line)
+        with open(manifest, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+    def unwire_blueprint_dep(self, blueprint_dir, dep_id):
+        """Drop the Cargo path dependency on the composed widget."""
+        manifest = os.path.join(blueprint_dir, "Cargo.toml")
+        if not os.path.isfile(manifest):
+            return
+        rel = f'path = "cg/{dep_id}"'
+        with open(manifest, encoding="utf-8") as f:
+            lines = f.readlines()
+        kept = [ln for ln in lines if rel not in ln]
+        if len(kept) != len(lines):
+            with open(manifest, "w", encoding="utf-8", newline="\n") as f:
+                f.writelines(kept)
+
+    @staticmethod
+    def _cargo_package_name(widget_dir):
+        """Read the [package] name from a widget's Cargo.toml, or None."""
+        manifest = os.path.join(widget_dir, "Cargo.toml")
+        if not os.path.isfile(manifest):
+            return None
+        import re
+        section = None
+        with open(manifest, encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if line.startswith("[") and line.endswith("]"):
+                    section = line
+                    continue
+                if section == "[package]":
+                    m = re.match(r'name\s*=\s*"([^"]+)"', line)
+                    if m:
+                        return m.group(1)
+        return None
 
     # ---- cleanup -----------------------------------------------------------
 
