@@ -159,6 +159,7 @@ LANGUAGE_ALIASES = {
     "rs": "rust",
     "golang": "go",
     "gd": "gdscript", "godot": "gdscript", "godot4": "gdscript",
+    "jdk": "java", "openjdk": "java",
     "c++": "cpp", "cxx": "cpp",
     "c#": "csharp",
     "hipc++": "hip", "hip c++": "hip",
