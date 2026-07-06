@@ -32,6 +32,7 @@ from cartograph.languages.terraform import TerraformEngine
 from cartograph.languages.go import GoEngine
 from cartograph.languages.rust import RustEngine
 from cartograph.languages.gdscript import GDScriptEngine
+from cartograph.languages.java import JavaEngine
 from cartograph.languages.spice import SpiceEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
@@ -92,6 +93,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "spice": SpiceEngine,
         "rust": RustEngine,
         "gdscript": GDScriptEngine,
+        "java": JavaEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -124,6 +126,7 @@ CLEAN = {
     "terraform":  ('resource "null_resource" "x" {\n  triggers = { name = var.name }\n}\n', "", None),
     "go":         ('package module\n\n// Hello returns a greeting.\nfunc Hello() string { return "world" }\n', "", None),
     "rust":       ('/// Hello returns a greeting.\npub fn hello() -> String { String::from("world") }\n', "", None),
+    "java":       ('/** Clean module. */\npublic final class Module {\n    private Module() {}\n\n    /** Returns a greeting. */\n    public static String hello() { return "world"; }\n}\n', "", None),
     "gdscript":   ('func hello() -> String:\n\treturn "world"\n', "", None),
 }
 
@@ -138,6 +141,7 @@ ABS_PATH_SRC = {
     "terraform":  'locals {\n  log = "/home/user/logs/app.log"\n}\n',
     "go":         'package module\n\nfunc LogPath() string { return "/home/user/logs/app.log" }\n',
     "rust":       'pub fn log_path() -> &\'static str { "/home/user/logs/app.log" }\n',
+    "java":       'public final class Module {\n    public static String logPath() { return "/home/user/logs/app.log"; }\n}\n',
     "gdscript":   'var log_path: String = "/home/user/logs/app.log"\n',
 }
 
@@ -152,6 +156,7 @@ CREDENTIAL_SRC = {
     "terraform":  'locals {\n  api_key = "sk-abc123verylongkey"\n}\n',
     "go":         'package module\n\nfunc Key() string {\n\tapiKey := "sk-abc123verylongkey"\n\treturn apiKey\n}\n',
     "rust":       'pub fn key() -> String {\n    let api_key = "sk-abc123verylongkey";\n    api_key.to_string()\n}\n',
+    "java":       'public final class Module {\n    public static String key() {\n        String api_key = "sk-abc123verylongkey";\n        return api_key;\n    }\n}\n',
     "gdscript":   'var api_key: String = "sk-abc123verylongkey"\n',
 }
 
@@ -166,6 +171,7 @@ CREDENTIAL_TEST = {
     "terraform":  'locals {\n  password = "fake_test_password_123"\n}\n',
     "go":         'package tests\n\nfunc fakeCred() string {\n\tpassword := "fake_test_password_123"\n\treturn password\n}\n',
     "rust":       'fn fake_cred() -> String {\n    let password = "fake_test_password_123";\n    password.to_string()\n}\n',
+    "java":       'class ModuleTest {\n    String fakeCred() {\n        String password = "fake_test_password_123";\n        return password;\n    }\n}\n',
     "gdscript":   'var password: String = "fake_test_password_123"\n',
 }
 
@@ -180,6 +186,7 @@ URL_SRC = {
     "terraform":  'locals {\n  api = "https://api.mycompany.com/v1"\n}\n',
     "go":         'package module\n\nfunc API() string { return "https://api.mycompany.com/v1" }\n',
     "rust":       'pub fn api() -> &\'static str { "https://api.mycompany.com/v1" }\n',
+    "java":       'public final class Module {\n    public static String api() { return "https://api.mycompany.com/v1"; }\n}\n',
     "gdscript":   'var api: String = "https://api.mycompany.com/v1"\n',
 }
 
@@ -194,6 +201,7 @@ URL_ALLOWED = {
     "terraform":  'locals {\n  api = "http://localhost:8080/api"\n}\n',
     "go":         'package module\n\nfunc API() string { return "http://localhost:8080/api" }\n',
     "rust":       'pub fn api() -> &\'static str { "http://localhost:8080/api" }\n',
+    "java":       'public final class Module {\n    public static String api() { return "http://localhost:8080/api"; }\n}\n',
     "gdscript":   'var api: String = "http://localhost:8080/api"\n',
 }
 
@@ -208,6 +216,7 @@ IP_SRC = {
     "terraform":  'locals {\n  host = "192.168.1.100"\n}\n',
     "go":         'package module\n\nfunc Host() string { return "192.168.1.100" }\n',
     "rust":       'pub fn host() -> &\'static str { "192.168.1.100" }\n',
+    "java":       'public final class Module {\n    public static String host() { return "192.168.1.100"; }\n}\n',
     "gdscript":   'var host: String = "192.168.1.100"\n',
 }
 
@@ -219,6 +228,7 @@ SLEEP_SRC = {
     "angular":    "setTimeout(() => {}, 1000)\n",
     "php":        "<?php\nsleep(1);\n",
     "go":         'package module\n\nimport "time"\n\nfunc Wait() { time.Sleep(1 * time.Second) }\n',
+    "java":       'public final class Module {\n    public static void pause() throws InterruptedException { Thread.sleep(1000); }\n}\n',
     "rust":       'use std::thread;\nuse std::time::Duration;\n\npub fn wait() { thread::sleep(Duration::from_secs(1)); }\n',
 }
 
@@ -230,6 +240,7 @@ SLEEP_TEST_SMALL = {
     "angular":    "setTimeout(() => {}, 500)\n",
     "php":        "<?php\nsleep(1);\n",  # 1 second - not > 1, no warning
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(500 * time.Millisecond) }\n',
+    "java":       'class ModuleTest {\n    void pause() throws InterruptedException { Thread.sleep(500); }\n}\n',
     "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_millis(500)); }\n',
 }
 
@@ -241,6 +252,7 @@ SLEEP_TEST_LARGE = {
     "angular":    "setTimeout(() => {}, 5000)\n",
     "php":        "<?php\nsleep(5);\n",
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(5 * time.Second) }\n',
+    "java":       'class ModuleTest {\n    void pause() throws InterruptedException { Thread.sleep(5000); }\n}\n',
     "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_secs(5)); }\n',
 }
 
@@ -252,6 +264,7 @@ HARDCODED_VALUE = {
     "angular":    "const TIMEOUT = 30\n",
     "php":        "<?php\nclass Item { private $TIMEOUT = 30; }\n",
     "go":         'package module\n\nconst Timeout = 30\n',
+    "java":       'public final class Module {\n    static final int TIMEOUT = 30;\n    private Module() {}\n}\n',
     "rust":       'pub const TIMEOUT: u64 = 30;\n',
 }
 
@@ -263,6 +276,7 @@ ENV_VAR = {
     "angular":    "const v = process.env['KEY']\n",
     "php":        "<?php\n$v = getenv('KEY');\n",
     "go":         'package module\n\nimport "os"\n\nfunc Cfg() string { return os.Getenv("KEY") }\n',
+    "java":       'public final class Module {\n    public static String cfg() { return System.getenv("KEY"); }\n}\n',
     "rust":       'pub fn cfg() -> Option<String> { std::env::var("KEY").ok() }\n',
 }
 
@@ -274,6 +288,7 @@ UNLISTED_IMPORT = {
     "angular":    "import { something } from 'some-unregistered-pkg'\n",
     "php":        "<?php\nuse GuzzleHttp\\Client;\n",
     "go":         'package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n',
+    "java":       'import com.google.gson.Gson;\n\npublic final class Module {\n    public static String js(Object o) { return new Gson().toJson(o); }\n}\n',
     "rust":       'use some_unregistered_crate::Thing;\n',
 }
 
@@ -285,6 +300,7 @@ LISTED_IMPORT = {
     "angular":    ("import { something } from 'some-registered-pkg'\n", ["some-registered-pkg>=1.0.0"]),
     "php":        ("<?php\nuse GuzzleHttp\\Client;\n", ["guzzlehttp/guzzle>=7.0.0"]),
     "go":         ('package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n', ["github.com/google/uuid>=1.6.0"]),
+    "java":       ('import com.google.gson.Gson;\n\npublic final class Module {\n    public static String js(Object o) { return new Gson().toJson(o); }\n}\n', ["com.google.code.gson:gson>=2.11.0"]),
     "rust":       ('use some_registered_pkg::Thing;\n', ["some-registered-pkg>=1.0.0"]),
 }
 
@@ -297,14 +313,15 @@ STDLIB_IMPORT = {
     # PHP builtins don't need use statements - calling strlen() has no import to flag
     "php":        "<?php\nclass Item { public function run(): void { strlen('test'); } }\n",
     "go":         'package module\n\nimport "encoding/json"\n\nvar _ = json.Marshal\n',
+    "java":       'import java.util.List;\n\npublic final class Module {\n    public static int size(List<String> xs) { return xs.size(); }\n}\n',
     "rust":       'use std::collections::HashMap;\n\npub fn f() -> HashMap<u8, u8> { HashMap::new() }\n',
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java"}
 
 # Which languages need external tools to run their scanners
-NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot"}
+NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot", "java": "java"}
 
 
 # ---------------------------------------------------------------------------
@@ -312,10 +329,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java"]
 
 
 def _skip_if_missing(lang):
@@ -2409,6 +2426,112 @@ class TestRustSpecific:
             '/// WIP.\npub fn process(v: &str) -> String { todo!() }\n')
         assert any("todo" in w.lower() for w in result["warnings"]), \
             f"todo! must warn: {result['warnings']}"
+
+
+class TestJavaSpecific:
+    """Checks unique to the Java engine's native scanner, including the
+    comment/string/text-block awareness that regex can't do reliably."""
+
+    def _java_scan(self, tmp_path, src_code, **kw):
+        _skip_if_missing("java")
+        return _scan(tmp_path, "java", "java", src_code, **kw)
+
+    def test_println_in_src_blocks(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'public final class Module {\n'
+            '    public static void hello() { System.out.println("debug"); }\n'
+            '}\n')
+        assert any("console output" in b for b in result["blocks"]), \
+            f"System.out.println in src must block: {result}"
+
+    def test_stderr_print_in_src_blocks(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'public final class Module {\n'
+            '    public static void hello() { System.err.print("oops"); }\n'
+            '}\n')
+        assert any("console output" in b for b in result["blocks"]), \
+            f"System.err.print in src must block: {result}"
+
+    def test_println_in_string_not_blocked(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'public final class Module {\n'
+            '    public static String doc() { return "call System.out.println(x)"; }\n'
+            '}\n')
+        assert not any("console output" in b for b in result["blocks"]), \
+            f"println in a string must not block: {result['blocks']}"
+
+    def test_println_in_text_block_not_blocked(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'public final class Module {\n'
+            '    public static String doc() {\n'
+            '        return """\n'
+            '            System.out.println("x") and System.exit(1)\n'
+            '            """;\n'
+            '    }\n'
+            '}\n')
+        assert result["blocks"] == [], \
+            f"contents of a text block must not block: {result['blocks']}"
+
+    def test_println_in_comment_not_blocked(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            '/** Call System.out.println(x) in your own code. */\n'
+            'public final class Module {\n'
+            '    private Module() {}\n'
+            '    // System.exit(1) would end the process\n'
+            '    /** Returns a greeting. */\n'
+            '    public static String hello() { return "world"; }\n'
+            '}\n')
+        assert result["blocks"] == [], \
+            f"print/exit in comments must not block: {result['blocks']}"
+
+    def test_system_exit_in_src_blocks(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'public final class Module {\n'
+            '    public static void quit() { System.exit(1); }\n'
+            '}\n')
+        assert any("exit" in b.lower() for b in result["blocks"]), \
+            f"System.exit in src must block: {result}"
+
+    def test_runtime_halt_in_src_blocks(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'public final class Module {\n'
+            '    public static void quit() { Runtime.getRuntime().halt(1); }\n'
+            '}\n')
+        assert any("exit" in b.lower() for b in result["blocks"]), \
+            f"Runtime.halt in src must block: {result}"
+
+    def test_static_mutable_field_warns(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'public final class Module {\n'
+            '    static int counter = 0;\n'
+            '    private Module() {}\n'
+            '}\n')
+        assert any("static" in w.lower() for w in result["warnings"]), \
+            f"non-final static field must warn: {result['warnings']}"
+
+    def test_static_final_field_no_static_warning(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'public final class Module {\n'
+            '    static final String NAME = "value";\n'
+            '    private Module() {}\n'
+            '}\n')
+        assert not any("static" in w.lower() and "final" not in w
+                       for w in result["warnings"]), \
+            f"static final must not warn as mutable: {result['warnings']}"
+
+    def test_print_in_example_not_flagged(self, tmp_path):
+        _skip_if_missing("java")
+        clean_src = CLEAN["java"][0]
+        wdir = _make_widget(tmp_path, "java", "Module.java", clean_src)
+        _write(os.path.join(wdir, "examples", "ExampleUsage.java"),
+               'public final class ExampleUsage {\n'
+               '    public static void main(String[] args) {\n'
+               '        System.out.println("demo output");\n'
+               '    }\n'
+               '}\n')
+        result = JavaEngine().scan_contamination(wdir, {})
+        assert result["blocks"] == [], \
+            f"examples demonstrate by printing - must not block: {result['blocks']}"
 
 
 class TestGDScriptSpecific:

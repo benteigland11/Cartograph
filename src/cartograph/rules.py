@@ -53,6 +53,7 @@ _LANGUAGE_RULES = {
     "spice":         ("rules.spice.py",      [sys.executable]),
     "rust":          ("rules.rust.py",       [sys.executable]),
     "gdscript":      ("rules.gdscript.py",   [sys.executable]),
+    "java":          ("rules.java.py",       [sys.executable]),
 }
 
 
@@ -1511,6 +1512,93 @@ if __name__ == "__main__":
     print(json.dumps(validate(sys.argv[1])))
 """
 
+_TEMPLATE_JAVA = """\
+\"\"\"
+Custom validation rules for Java widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+              Use for things that must never ship.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+JAVA-SPECIFIC CHECKS TO CONSIDER
+--------------------------------
+The engine already blocks console printing, System.exit, and Thread.sleep
+in src/, and enforces 80% JaCoCo line coverage. Teams often want more:
+
+  - Checked-exception policy: forbid `throws Exception` on public methods
+    (declare the specific exception types).
+  - Forbidden deps: block a dependency your team bans by inspecting
+    cartograph-deps.gradle or widget.json.
+  - Null-safety: require @Nullable/@NonNull annotations on the public API.
+  - Formatting floor: shell out to google-java-format --dry-run and block
+    on any diff.
+  - Reflection ban: flag Class.forName/setAccessible in src/.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      settings.gradle
+      build.gradle             owned by the widget (plugins included)
+      cartograph-deps.gradle   generated from widget.json deps
+      src/        library sources
+      tests/      JUnit 5 tests (*Test.java)
+      examples/   ExampleUsage.java
+      widget.json
+
+This is a Python script - use any stdlib module you want.
+EXAMPLE
+-------
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def main() -> None:
+    widget_path = sys.argv[1] if len(sys.argv) > 1 else "."
+    blocks: list[str] = []
+    warnings: list[str] = []
+
+    src_dir = os.path.join(widget_path, "src")
+    for root, _dirs, files in os.walk(src_dir):
+        for fname in files:
+            if not fname.endswith(".java"):
+                continue
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, widget_path)
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                for lineno, line in enumerate(f, 1):
+                    # [TODO] Replace with your team's checks. Example:
+                    # a blanket `throws Exception` hides the real contract.
+                    if re.search(r"throws\\s+Exception\\b", line):
+                        warnings.append(
+                            f"{rel}:{lineno}: `throws Exception` on the "
+                            f"public API - declare specific exception types"
+                        )
+
+    print(json.dumps({"blocks": blocks, "warnings": warnings}))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 _TEMPLATES = {
     "python":        _TEMPLATE_PYTHON,
     "javascript":    _TEMPLATE_JAVASCRIPT,
@@ -1526,6 +1614,7 @@ _TEMPLATES = {
     "spice":         _TEMPLATE_SPICE,
     "rust":          _TEMPLATE_RUST,
     "gdscript":      _TEMPLATE_GDSCRIPT,
+    "java":          _TEMPLATE_JAVA,
 }
 
 

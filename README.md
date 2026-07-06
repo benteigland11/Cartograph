@@ -114,6 +114,7 @@ what the tool actually supports.
 - **PHP**: Composer + PHPUnit 11, Xdebug or PCOV for coverage, 80% threshold via `--min-coverage`. PSR-4 autoloading under `Cartograph\` namespace. Contamination scanner blocks WordPress globals (`wp_*`, `add_action`, `$wpdb`, etc.) and `echo` in src/ to enforce pure PHP utility widgets.
 - **Terraform**: `terraform validate` against src/, tests/, and examples/ (shape-only - no test runner, no coverage; modules harden through use). Blocks provider/backend blocks in src/, real AWS account IDs, and credential-shaped assignments. Providers cached via `TF_PLUGIN_CACHE_DIR`.
 - **Go**: `go test` with built-in coverage (80% via `-coverpkg`), `go vet` + build check, native `go/ast` contamination scanner. Single-binary toolchain. Widgets are libraries: console output, `os.Exit`, and `panic` in `init()` are blocked in src/.
+- **Java**: Gradle + JUnit 5, JaCoCo line coverage (80%, Gradle core plugin - the whole toolchain is JDK 21+ plus Gradle), native comment/string/text-block-aware scanner run in JDK single-file mode. Widgets own their full build.gradle including plugins (build-time plugins like Fabric Loom work); the engine only requires a JaCoCo XML report from `test` and a `runExample` task. `System.out/err`, `System.exit`, and `Thread.sleep` are blocked in src/.
 
 Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD and SystemVerilog use Python-based scanners since neither language has general-purpose file I/O suitable for static analysis tooling.
 
@@ -145,7 +146,7 @@ pytest
 
 The widget library lives in your platform's user data directory. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
-Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, terraform, go, cargo, cargo-llvm-cov, ngspice, godot) are installed correctly.
+Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, terraform, go, cargo, cargo-llvm-cov, ngspice, godot, java, gradle) are installed correctly.
 
 ### Pre-push checks and release preflight
 

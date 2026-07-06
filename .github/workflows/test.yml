@@ -73,6 +73,9 @@ jobs:
             gdscript:
               - 'src/cartograph/languages/gdscript.py'
               - 'src/cartograph/languages/scanners/gdscript_scanner.gd'
+            java:
+              - 'src/cartograph/languages/java.py'
+              - 'src/cartograph/languages/scanners/java_scanner.java'
 
       - uses: actions/setup-python@v6
         with:
@@ -151,6 +154,23 @@ jobs:
         with:
           version: 4.5.0
           use-dotnet: false
+
+      # setup-java + setup-gradle both work identically on all three
+      # platforms. JaCoCo is a Gradle core plugin and JUnit 5 is fetched
+      # from Maven Central by the scaffolded build, so JDK + Gradle is the
+      # whole toolchain.
+      - name: Install JDK
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.java == 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Gradle
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.java == 'true'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
 
       - name: Install dependencies
         run: pip install -e . && pip install pytest pytest-cov

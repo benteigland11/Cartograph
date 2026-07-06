@@ -346,6 +346,79 @@ untyped `var` declarations (static typing is the house style), hardcoded numeric
 preloads in the blueprint's scripts; `run_blueprint_example` runs the example
 headless from the sandbox root, where the dep widgets are copied under `cg/`.
 
+### Java
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| build.gradle exists | missing | file check |
+| settings.gradle exists | missing | file check |
+| src/ has .java files | missing | file check |
+| gradle compileJava passes | compile/type errors | subprocess (library only) |
+| Native Java scanner passes on src/ | issues found | java_scanner.java |
+| All declared dependencies are version-pinned | unpinned dep found | dep pinning check |
+| gradle test passes | any test fails | subprocess (JUnit 5) |
+| Coverage meets threshold | below 80% | JaCoCo XML report LINE counter |
+| Example runs and exits cleanly | non-zero exit | gradle runExample |
+
+**Layout:** `settings.gradle` (rootProject.name, and the reason Gradle never
+walks up into an enclosing project) and `build.gradle` at the widget root.
+Library sources live in `src/` under the package named for the widget slug
+(underscored - Java identifiers can't contain hyphens); tests in `tests/` are
+black-box (`package tests`, `*Test.java` filenames, JUnit 5) and import the
+widget by package exactly as a consumer would; `examples/ExampleUsage.java`
+is `package examples` with a `main()`.
+
+**The widget owns its build.gradle - plugins included.** This is deliberate:
+builds that need build-time plugins (Fabric Loom for Minecraft mod widgets,
+annotation processors, code generators) work without engine changes. The
+engine's whole contract with the build is two tasks: `test` must produce a
+JaCoCo XML report (`xml.required = true`), and `runExample` must run the
+example. Break either and validation says so explicitly.
+
+**Coverage:** 80% enforced via JaCoCo, a Gradle core plugin (no extra system
+install - the whole toolchain is JDK + Gradle). The engine parses the XML
+report's document-level `LINE` counter; only `src/` classes are in the
+denominator because only the main source set is instrumented.
+
+**Dependencies:** declared in widget.json as `group:artifact>=version` (e.g.
+`com.google.code.gson:gson>=2.11.0`). The validator writes them to a
+generated `cartograph-deps.gradle` (which the scaffolded build applies) and
+resolves the runtime classpath - it never edits the user-owned build.gradle.
+The floor becomes the Gradle coordinate version; consumers can raise it.
+Gradle's shared module cache is coordinate-addressed and checksummed, so no
+per-validation isolation is needed. JUnit 5 itself is fetched from Maven
+Central by the scaffolded build - same posture as Go's `go get` and PHP's
+Composer (declared build deps may be fetched at validation time).
+
+**Scanner:** native `java_scanner.java`, stdlib-only, run in the JDK's
+single-file source mode (`java java_scanner.java <files...>`, JDK 11+) - no
+compile-and-cache step and no self-scan trap, since single-file mode consumes
+the scanner source as the program and passes the rest as argv (it skips its
+own basename anyway, mirroring go/rust). It is comment- and string-aware by
+construction - a hand-written lexer that blanks `//` line comments, `/* */`
+block comments, string literals, char literals, and Java 15+ text blocks
+before applying code checks, while keeping string contents visible to the
+checks that look inside strings (paths, URLs, IPs, credentials).
+Blocks in src/: `System.out/System.err` printing, `System.exit`/
+`Runtime.getRuntime().halt/exit`, credentials, absolute paths, hardcoded
+IPs, `Thread.sleep`/`TimeUnit.*.sleep`. Warnings: hardcoded URLs
+(localhost/127.0.0.1/example.* /.test exempted), env var access
+(`System.getenv`/`getProperty`), non-final static fields (shared mutable
+state), hardcoded numeric `final` constants other than 0/±1, and unlisted
+package imports (resolved against widget.json deps with loose group/artifact
+matching, since Maven groups don't always equal package roots -
+`com.google.code.gson` ships `com.google.gson`; `java.*`/`javax.*`/`jdk.*`
+and `org.junit.*` are exempt). Sleeps in tests warn only above 1s, estimated
+statically from the literal argument. Examples are exempt from the print
+block - they demonstrate by printing.
+
+**Blueprints:** Java composition adds the dep widget's sources to the
+blueprint's main source set (`srcDirs = ['src', 'cg/<dep-widget>/src']`) in
+the blueprint's own build.gradle - the same hand-written path wiring Cargo
+path deps use for Rust. The validator sandbox copies each dep under `cg/`,
+so the relative paths resolve there; `run_blueprint_example` just runs
+`gradle runExample` in the sandbox.
+
 ### SPICE
 
 | Check | Fails if | Method |
