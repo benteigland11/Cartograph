@@ -412,6 +412,71 @@ class GoEngine(LanguageEngine):
                     "error": (res.stderr or res.stdout or "").strip()}
         return {"passed": True}
 
+    # ---- blueprint dep wiring ----------------------------------------------
+
+    def wire_blueprint_dep(self, blueprint_dir, dep_id, dep_dir):
+        """Wire a composed widget into go.mod via Go's local-module mechanism:
+        a `require <module> v0.0.0` plus a `replace <module> => ./cg/<dep_id>`
+        pointing at the layout the validator sandbox populates. Idempotent."""
+        manifest = os.path.join(blueprint_dir, "go.mod")
+        if not os.path.isfile(manifest):
+            return
+        rel = f"./cg/{dep_id}"
+        with open(manifest, encoding="utf-8") as f:
+            text = f.read()
+        if f"=> {rel}" in text:
+            return
+        module = self._go_module_name(dep_dir)
+        if not module:
+            return
+        block = f"\nrequire {module} v0.0.0\n\nreplace {module} => {rel}\n"
+        text = text.rstrip("\n") + "\n" + block
+        with open(manifest, "w", newline="\n", encoding="utf-8") as f:
+            f.write(text)
+
+    def unwire_blueprint_dep(self, blueprint_dir, dep_id):
+        """Drop the require/replace pair that composes the given widget."""
+        manifest = os.path.join(blueprint_dir, "go.mod")
+        if not os.path.isfile(manifest):
+            return
+        rel = f"./cg/{dep_id}"
+        with open(manifest, encoding="utf-8") as f:
+            lines = f.readlines()
+        module = None
+        for ln in lines:
+            parts = ln.split()
+            if (len(parts) >= 4 and parts[0] == "replace"
+                    and parts[2] == "=>" and parts[3] == rel):
+                module = parts[1]
+                break
+        if module is None:
+            return
+        kept = []
+        for ln in lines:
+            parts = ln.split()
+            if (len(parts) >= 4 and parts[0] == "replace"
+                    and parts[2] == "=>" and parts[3] == rel):
+                continue
+            if (len(parts) >= 2 and parts[0] == "require"
+                    and parts[1] == module):
+                continue
+            kept.append(ln)
+        with open(manifest, "w", newline="\n", encoding="utf-8") as f:
+            f.writelines(kept)
+
+    @staticmethod
+    def _go_module_name(widget_dir):
+        """Read the module path from a widget's go.mod, or None."""
+        manifest = os.path.join(widget_dir, "go.mod")
+        if not os.path.isfile(manifest):
+            return None
+        with open(manifest, encoding="utf-8") as f:
+            for raw in f:
+                parts = raw.split()
+                if len(parts) >= 2 and parts[0] == "module":
+                    return parts[1]
+        return None
+
     # ---- cleanup -----------------------------------------------------------
 
     def cleanup(self, path: str) -> None:
