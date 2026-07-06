@@ -217,6 +217,38 @@ def test_create_gdscript_widget(carto, tmp_path, monkeypatch):
         assert 'res://src/my_widget.gd' in f.read()
 
 
+def test_create_java_widget(carto, tmp_path, monkeypatch):
+    # Java ships supported=False until its cross-platform CI proves the
+    # Gradle toolchain; the scaffold itself is testable regardless.
+    from cartograph.languages.java import JavaEngine
+    monkeypatch.setattr(JavaEngine, "supported", True)
+    result = carto.create(
+        "my-widget",
+        language="java",
+        name="My Widget",
+        domain="backend",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "settings.gradle",
+        "build.gradle",
+        "cartograph-deps.gradle",
+        "src/MyWidget.java",
+        "tests/MyWidgetTest.java",
+        "examples/ExampleUsage.java",
+    ])
+    # The source package must match what the test/example import.
+    with open(f"{result['path']}/src/MyWidget.java") as f:
+        assert "package my_widget;" in f.read()
+    with open(f"{result['path']}/tests/MyWidgetTest.java") as f:
+        assert "import my_widget.MyWidget;" in f.read()
+    with open(f"{result['path']}/settings.gradle") as f:
+        assert "rootProject.name = 'my_widget'" in f.read()
+
+
 def test_create_nim_widget(carto, tmp_path):
     result = carto.create(
         "my-nim-widget",
