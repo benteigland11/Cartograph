@@ -43,7 +43,7 @@ jobs:
           python -c "
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
-          expected = {'angular', 'gdscript', 'go', 'javascript', 'nim',
+          expected = {'angular', 'gdscript', 'go', 'java', 'javascript', 'nim',
                       'openscad', 'php', 'python', 'rust', 'spice',
                       'systemverilog', 'terraform', 'typescript'}
           missing = expected - langs
@@ -180,6 +180,31 @@ jobs:
           WIDGET_DIR=$(find cg -maxdepth 2 -name "project.godot" -printf "%h" -quit)
           echo "GDScript widget at: $WIDGET_DIR"
           test -f "$WIDGET_DIR/project.godot"
+          test -d "$WIDGET_DIR/src"
+          test -d "$WIDGET_DIR/tests"
+          test -d "$WIDGET_DIR/examples"
+
+      - name: Install JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+
+      - name: cartograph create (java)
+        run: cartograph create universal-ci-test-java --language java --domain universal --name "CI Java Test"
+
+      - name: Verify java widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "build.gradle" -printf "%h" -quit)
+          echo "Java widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/build.gradle"
+          test -f "$WIDGET_DIR/settings.gradle"
+          test -f "$WIDGET_DIR/cartograph-deps.gradle"
           test -d "$WIDGET_DIR/src"
           test -d "$WIDGET_DIR/tests"
           test -d "$WIDGET_DIR/examples"

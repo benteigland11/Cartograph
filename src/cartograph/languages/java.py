@@ -202,7 +202,7 @@ class JavaEngine(LanguageEngine):
         "java": "Install a JDK 21+ - adoptium.net",
         "gradle": "Install Gradle 8+ - gradle.org/install",
     }
-    supported = False
+    supported = True
 
     scanner_runner = ["java"]
     scanner_messages = {
@@ -306,7 +306,10 @@ class JavaEngine(LanguageEngine):
                                 timeout=300)
                 if res.returncode != 0:
                     output = (res.stderr or res.stdout or "").strip()
-                    if "Could not resolve" not in output \
+                    mismatch = self._toolchain_mismatch(output)
+                    if mismatch:
+                        errors.append(mismatch)
+                    elif "Could not resolve" not in output \
                             and "Could not find" not in output:
                         errors.append(f"gradle compileJava failed:\n"
                                       f"{output[:3000]}")
@@ -368,6 +371,9 @@ class JavaEngine(LanguageEngine):
                         cwd=path, timeout=300)
         if res.returncode != 0:
             output = (res.stderr or res.stdout or "").strip()
+            mismatch = self._toolchain_mismatch(output)
+            if mismatch:
+                raise RuntimeError(mismatch)
             raise RuntimeError(
                 f"Failed to resolve Java dependencies:\n{output[:2000]}")
 
@@ -383,6 +389,10 @@ class JavaEngine(LanguageEngine):
             return self._fail("Gradle not found - install Gradle 8+ "
                               "(gradle.org/install).")
         if res.returncode != 0:
+            output = (res.stdout or "") + (res.stderr or "")
+            mismatch = self._toolchain_mismatch(output)
+            if mismatch:
+                return self._fail(mismatch)
             return self._fail(res.stdout or res.stderr)
 
         report = os.path.join(path, "build", "reports", "jacoco", "test",
@@ -423,6 +433,10 @@ class JavaEngine(LanguageEngine):
             return self._fail("Gradle not found - install Gradle 8+ "
                               "(gradle.org/install).")
         if res.returncode != 0:
+            output = (res.stdout or "") + (res.stderr or "")
+            mismatch = self._toolchain_mismatch(output)
+            if mismatch:
+                return self._fail(mismatch)
             return self._fail(res.stderr or res.stdout)
         return self._ok()
 
@@ -452,6 +466,25 @@ class JavaEngine(LanguageEngine):
         with open(os.path.join(path, "cartograph-deps.gradle"), "w",
                   newline="\n", encoding="utf-8") as f:
             f.writelines(lines)
+
+    @staticmethod
+    def _toolchain_mismatch(output: str) -> str:
+        """Detect a JDK too new for the installed Gradle.
+
+        Gradle's embedded Groovy rejects class files newer than it knows
+        ("Unsupported class file major version N", e.g. 69 = JDK 25 vs
+        Gradle 8.x). That is a toolchain incompatibility, not a widget
+        content failure - report it as such instead of blaming the code.
+        """
+        m = re.search(r"Unsupported class file major version (\d+)",
+                      output or "")
+        if not m:
+            return ""
+        jdk = int(m.group(1)) - 44  # class file major = Java version + 44
+        return (f"Your JDK (Java {jdk}) is newer than the installed Gradle "
+                f"supports. Use JDK 21 LTS, or upgrade Gradle to a release "
+                f"that supports Java {jdk} "
+                f"(docs.gradle.org/current/userguide/compatibility.html).")
 
     @staticmethod
     def _gradle_cmd(*tasks: str) -> list:
