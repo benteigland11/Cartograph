@@ -13,6 +13,13 @@ def _clear_agent_env(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
+def _set_home(monkeypatch, path):
+    """Redirect the home directory cross-platform: expanduser('~') reads
+    HOME on POSIX but USERPROFILE on Windows."""
+    monkeypatch.setenv("HOME", str(path))
+    monkeypatch.setenv("USERPROFILE", str(path))
+
+
 def _clean_subprocess_env(home=None):
     """Environment for subprocess tests with agent env vars stripped.
 
@@ -24,7 +31,9 @@ def _clean_subprocess_env(home=None):
     env = os.environ.copy()
     for var in ("CLAUDECODE", "GEMINI_CLI", "AGENT"):
         env.pop(var, None)
-    env["HOME"] = str(home) if home else tempfile.mkdtemp()
+    fake_home = str(home) if home else tempfile.mkdtemp()
+    env["HOME"] = fake_home
+    env["USERPROFILE"] = fake_home
     # HOME redirection hides user-site installs, so make the checked-out
     # package importable in the subprocess explicitly.
     repo = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -286,7 +295,7 @@ def test_detect_mcp_from_project_mcp_json(tmp_path):
 def test_detect_mcp_nothing(tmp_path, monkeypatch):
     """No MCP config anywhere -> not detected."""
     from cartograph.cli import _detect_mcp
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _set_home(monkeypatch, tmp_path / "home")
     found, reason = _detect_mcp("claude", str(tmp_path))
     assert not found and reason is None
 
@@ -298,7 +307,7 @@ def test_detect_mcp_other_project_does_not_count(tmp_path, monkeypatch):
     from cartograph.cli import _detect_mcp
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
+    _set_home(monkeypatch, home)
     (home / ".claude.json").write_text(json.dumps(
         {"projects": {"/other/project": {"mcpServers": {"cartograph": {}}}}}))
     found, _ = _detect_mcp("claude", str(tmp_path))
@@ -311,7 +320,7 @@ def test_detect_mcp_user_scope_counts(tmp_path, monkeypatch):
     from cartograph.cli import _detect_mcp
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
+    _set_home(monkeypatch, home)
     (home / ".claude.json").write_text(json.dumps(
         {"mcpServers": {"plugin:cartograph:cartograph": {}}}))
     found, reason = _detect_mcp("claude", str(tmp_path))
@@ -325,7 +334,7 @@ def test_detect_mcp_codex_toml_header_only(tmp_path, monkeypatch):
     from cartograph.cli import _detect_mcp
     home = tmp_path / "home"
     (home / ".codex").mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(home))
+    _set_home(monkeypatch, home)
     cfg = home / ".codex" / "config.toml"
     cfg.write_text("# cartograph is neat\n[mcp_servers.other]\n")
     assert not _detect_mcp("codex", str(tmp_path))[0]
