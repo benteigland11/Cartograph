@@ -340,6 +340,12 @@ def _skip_if_missing(lang):
     tool = NEEDS_TOOL.get(lang)
     if tool and not shutil.which(tool):
         pytest.skip(f"{tool} not installed")
+    if lang == "java":
+        # macOS ships a /usr/bin/java stub with no JDK behind it, so a PATH
+        # hit isn't proof java can run - probe it like the engine does.
+        from cartograph.languages import get_engine
+        if get_engine("java").runtime_version() is None:
+            pytest.skip("java on PATH is not a working JDK (macOS no-JDK stub)")
 
 
 class TestContaminationStandard:
@@ -2698,3 +2704,54 @@ class TestSpiceSpecific:
             'R2 a b {r}  ; secret = "do-not-flag-this-comment"\n')
         assert not any("credential" in b.lower() for b in result["blocks"]), \
             f"credential in comment must not block: {result['blocks']}"
+
+
+# ---------------------------------------------------------------------------
+# macOS filesystem cruft and unparseable sources
+# ---------------------------------------------------------------------------
+
+class TestMacosCruft:
+    def test_appledouble_file_in_src_is_ignored(self, tmp_path):
+        wdir = _make_widget(tmp_path, "python", "mod.py", "def f():\n    return 1\n")
+        with open(os.path.join(wdir, "src", "._mod.py"), "wb") as f:
+            f.write(b"\x00\x05\x16\x07binary resource fork")
+        result = PythonEngine().scan_contamination(
+            wdir, {"language": "python", "dependencies": []})
+        assert result["blocks"] == []
+
+    def test_unparseable_src_file_blocks(self, tmp_path):
+        wdir = _make_widget(tmp_path, "python", "mod.py", "def broken(:\n")
+        result = PythonEngine().scan_contamination(
+            wdir, {"language": "python", "dependencies": []})
+        assert any("not valid Python" in b for b in result["blocks"]), result
+
+    def test_unparseable_test_file_does_not_block(self, tmp_path):
+        wdir = _make_widget(tmp_path, "python", "mod.py",
+                            "def f():\n    return 1\n",
+                            test_code="def broken(:\n")
+        result = PythonEngine().scan_contamination(
+            wdir, {"language": "python", "dependencies": []})
+        assert not any("not valid Python" in b for b in result["blocks"])
+
+
+class TestJavaStubDetection:
+    def test_check_available_rejects_non_working_java(self, monkeypatch):
+        """macOS's /usr/bin/java stub resolves on PATH but can't run."""
+        engine = JavaEngine()
+        monkeypatch.setattr(JavaEngine, "_java_probe_ok", None)
+        monkeypatch.setattr(JavaEngine, "runtime_version", lambda self: None)
+        monkeypatch.setattr(type(engine).__mro__[1], "check_available",
+                            lambda self: (True, ""))
+        ok, msg = engine.check_available()
+        assert ok is False
+        assert "JDK" in msg
+
+    def test_check_available_accepts_working_java(self, monkeypatch):
+        engine = JavaEngine()
+        monkeypatch.setattr(JavaEngine, "_java_probe_ok", None)
+        monkeypatch.setattr(JavaEngine, "runtime_version",
+                            lambda self: "java 21.0.1")
+        monkeypatch.setattr(type(engine).__mro__[1], "check_available",
+                            lambda self: (True, ""))
+        ok, msg = engine.check_available()
+        assert ok is True

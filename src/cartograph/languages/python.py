@@ -10,6 +10,17 @@ import sys
 import time
 
 from .base import LanguageEngine, _dep_bare_name, log
+from ..engine import _is_os_metadata
+
+
+def _py_files(path: str, subdir: str) -> list:
+    """All .py files under a widget subdir, minus OS metadata.
+
+    AppleDouble resource forks are named `._<original>.py`, so a bare
+    `**/*.py` glob picks them up - they are binary garbage, not source.
+    """
+    found = glob.glob(os.path.join(path, subdir, "**", "*.py"), recursive=True)
+    return [f for f in found if not _is_os_metadata(os.path.basename(f))]
 
 # Starter file contents for scaffold
 _SRC_INIT = "# Package marker - add explicit exports here once the public API is stable.\n"
@@ -137,7 +148,7 @@ class PythonEngine(LanguageEngine):
             errors.append("src/__init__.py is missing — add an empty one so the package is importable")
 
         # 2. No print() calls in src/ (AST-based: ignores docstrings and comments)
-        src_files = glob.glob(os.path.join(path, "src", "**", "*.py"), recursive=True)
+        src_files = _py_files(path, "src")
         for fpath in src_files:
             for lineno in self._find_print_calls(fpath):
                 rel = os.path.relpath(fpath, path)
@@ -211,9 +222,9 @@ class PythonEngine(LanguageEngine):
                 if f.endswith(".py"):
                     own_modules.add(f[:-3])
 
-        src_files = glob.glob(os.path.join(path, "src", "**", "*.py"), recursive=True)
-        test_files = glob.glob(os.path.join(path, "tests", "**", "*.py"), recursive=True)
-        example_files = glob.glob(os.path.join(path, "examples", "**", "*.py"), recursive=True)
+        src_files = _py_files(path, "src")
+        test_files = _py_files(path, "tests")
+        example_files = _py_files(path, "examples")
 
         for fpath in src_files + test_files + example_files:
             rel = os.path.relpath(fpath, path)
@@ -259,9 +270,18 @@ class PythonEngine(LanguageEngine):
                     if any(len(o) >= 2 for o in octets):
                         blocks.append(f"Hardcoded IP in {rel}:{line_no}: {m.group()}")
 
-            # AST-based checks
+            # AST-based checks. A src/ file that doesn't parse cannot have
+            # been exercised by tests or scanned for contamination - block
+            # instead of silently skipping it.
             try:
                 tree = ast.parse(code)
+            except SyntaxError as e:
+                if is_src:
+                    blocks.append(
+                        f"src file {rel} is not valid Python "
+                        f"(line {e.lineno}: {e.msg}) - fix or remove it"
+                    )
+                continue
             except Exception:
                 continue
 
@@ -547,7 +567,10 @@ class PythonEngine(LanguageEngine):
         sub = os.path.join(widget_path, subdir)
         if not os.path.isdir(sub):
             return self._ok()
-        py_files = sorted(glob.glob(os.path.join(sub, "*.py")))
+        py_files = sorted(
+            f for f in glob.glob(os.path.join(sub, "*.py"))
+            if not _is_os_metadata(os.path.basename(f))
+        )
         if not py_files:
             return self._ok()
 

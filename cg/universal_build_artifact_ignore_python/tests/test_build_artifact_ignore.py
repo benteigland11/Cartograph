@@ -193,3 +193,51 @@ def test_walk_integration(tmp_path):
     assert any("code.py" in v for v in visited)
     assert not any("huge.bin" in v for v in visited)
     assert not any(".git" in v for v in visited)
+
+
+# ---------------------------------------------------------------------------
+# OS metadata
+# ---------------------------------------------------------------------------
+
+def test_is_os_metadata_names():
+    from src.build_artifact_ignore import is_os_metadata
+    assert is_os_metadata(".DS_Store")
+    assert is_os_metadata("__MACOSX")
+    assert is_os_metadata("Thumbs.db")
+    assert is_os_metadata("desktop.ini")
+
+
+def test_is_os_metadata_appledouble_prefix():
+    from src.build_artifact_ignore import is_os_metadata
+    assert is_os_metadata("._module.py")
+    assert is_os_metadata("._")
+    assert not is_os_metadata("_module.py")
+    assert not is_os_metadata(".module.py")
+    assert not is_os_metadata("module.py")
+
+
+def test_is_os_metadata_accepts_paths():
+    from src.build_artifact_ignore import is_os_metadata
+    assert is_os_metadata("src/._module.py")
+    assert is_os_metadata(os.path.join("a", "b", ".DS_Store"))
+    assert not is_os_metadata("src/module.py")
+
+
+def test_os_metadata_glob_patterns_cover_names():
+    import fnmatch
+    from src.build_artifact_ignore import os_metadata_glob_patterns
+    patterns = os_metadata_glob_patterns()
+    for name in (".DS_Store", "._module.py", "__MACOSX", "Thumbs.db", "desktop.ini"):
+        assert any(fnmatch.fnmatch(name, p) for p in patterns), name
+    assert not any(fnmatch.fnmatch("module.py", p) for p in patterns)
+
+
+def test_should_skip_os_metadata_without_explicit_excludes():
+    assert should_skip("src/._module.py", excludes=())
+    assert should_skip("__MACOSX/src/module.py", excludes=())
+    assert not should_skip("src/module.py", excludes=())
+
+
+def test_filter_dirs_removes_os_metadata():
+    result = filter_dirs(["src", "__MACOSX", "._junk"], excludes=())
+    assert result == ["src"]

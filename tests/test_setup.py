@@ -1,4 +1,5 @@
 """Tests for the setup command - auto-detection, write, print, workflows."""
+import sys
 import os
 
 import pytest
@@ -138,7 +139,7 @@ def test_setup_print_mode(tmp_path):
     import subprocess
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup", "--print"],
+        [sys.executable, "-m", "cartograph", "setup", "--print"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -154,7 +155,7 @@ def test_setup_writes_to_detected_agent(tmp_path):
     import subprocess
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup"],
+        [sys.executable, "-m", "cartograph", "setup"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -173,7 +174,7 @@ def test_setup_appends_not_replaces(tmp_path):
     existing = "# My Project\n\nSome existing content.\n"
     (tmp_path / "CLAUDE.md").write_text(existing)
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup"],
+        [sys.executable, "-m", "cartograph", "setup"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -190,14 +191,14 @@ def test_setup_duplicate_detection(tmp_path):
     os.makedirs(tmp_path / ".claude")
     # First run
     subprocess.run(
-        ["python", "-m", "cartograph", "setup"],
+        [sys.executable, "-m", "cartograph", "setup"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
     )
     # Second run
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup"],
+        [sys.executable, "-m", "cartograph", "setup"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -210,7 +211,7 @@ def test_setup_custom_file(tmp_path):
     """--file should write to a custom filename."""
     import subprocess
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup", "--file", "opencode.md"],
+        [sys.executable, "-m", "cartograph", "setup", "--file", "opencode.md"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -225,7 +226,7 @@ def test_setup_explicit_agent(tmp_path):
     """--agent should override auto-detection."""
     import subprocess
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup", "--agent", "codex"],
+        [sys.executable, "-m", "cartograph", "setup", "--agent", "codex"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -238,7 +239,7 @@ def test_setup_no_agent_no_file_shows_help(tmp_path):
     """No agent detected and no flags should show helpful guidance."""
     import subprocess
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup"],
+        [sys.executable, "-m", "cartograph", "setup"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -254,7 +255,7 @@ def test_setup_with_workflow(tmp_path):
     import subprocess
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup", "--workflow"],
+        [sys.executable, "-m", "cartograph", "setup", "--workflow"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -269,7 +270,7 @@ def test_setup_without_workflow_shows_tip(tmp_path):
     import subprocess
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup"],
+        [sys.executable, "-m", "cartograph", "setup"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -358,7 +359,7 @@ def test_setup_mcp_flag_writes_trimmed(tmp_path):
     import subprocess
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup", "--mcp"],
+        [sys.executable, "-m", "cartograph", "setup", "--mcp"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -379,7 +380,7 @@ def test_setup_autodetects_mcp_from_project_config(tmp_path):
     (tmp_path / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"cartograph": {"command": "cartograph-mcp"}}}))
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup"],
+        [sys.executable, "-m", "cartograph", "setup"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -400,7 +401,7 @@ def test_setup_no_mcp_overrides_detection(tmp_path):
     (tmp_path / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"cartograph": {"command": "cartograph-mcp"}}}))
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup", "--no-mcp"],
+        [sys.executable, "-m", "cartograph", "setup", "--no-mcp"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -416,7 +417,7 @@ def test_setup_mcp_with_workflow(tmp_path):
     import subprocess
     os.makedirs(tmp_path / ".claude")
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup", "--mcp", "--workflow"],
+        [sys.executable, "-m", "cartograph", "setup", "--mcp", "--workflow"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
         env=_clean_subprocess_env(),
@@ -436,11 +437,11 @@ def test_setup_overwrite_preserves_mcp_mode(tmp_path):
         json.dumps({"mcpServers": {"cartograph": {}}}))
     env = _clean_subprocess_env()
     subprocess.run(
-        ["python", "-m", "cartograph", "setup", "--workflow"],
+        [sys.executable, "-m", "cartograph", "setup", "--workflow"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path), env=env)
     result = subprocess.run(
-        ["python", "-m", "cartograph", "setup", "--overwrite"],
+        [sys.executable, "-m", "cartograph", "setup", "--overwrite"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path), env=env)
     assert result.returncode == 0

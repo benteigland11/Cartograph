@@ -228,6 +228,28 @@ class JavaEngine(LanguageEngine):
 
     # ---- toolchain ---------------------------------------------------------
 
+    # Cached result of the functional `java -version` probe. macOS ships a
+    # /usr/bin/java stub that exists on PATH with no JDK installed - it only
+    # prints "Unable to locate a Java Runtime". PATH resolution alone is a
+    # lie there, so availability must actually run the binary. None = not
+    # probed yet.
+    _java_probe_ok: bool | None = None
+
+    def check_available(self) -> tuple[bool, str]:
+        ok, msg = super().check_available()
+        if not ok:
+            return ok, msg
+        if JavaEngine._java_probe_ok is None:
+            JavaEngine._java_probe_ok = self.runtime_version() is not None
+        if not JavaEngine._java_probe_ok:
+            return False, (
+                "Java engine requires a working JDK - the `java` binary on "
+                "PATH could not report a version (on macOS this is Apple's "
+                "no-JDK stub). Install a JDK 21+ - adoptium.net "
+                "(or set paths.java in `cartograph config`)"
+            )
+        return True, ""
+
     def runtime_version(self) -> str | None:
         try:
             res = self._run(["java", "-version"], cwd=".", timeout=15)

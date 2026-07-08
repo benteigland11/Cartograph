@@ -284,7 +284,7 @@ Cartograph's way (the quality guarantee), once yours (your preferences).
 
     import subprocess
     result = subprocess.run(
-        ["python", "-m", "pytest", "tests/", "--timeout=120", "-x"],
+        [sys.executable, "-m", "pytest", "tests/", "--timeout=120", "-x"],
         capture_output=True, text=True, cwd=widget_path,
     )
     if result.returncode != 0:

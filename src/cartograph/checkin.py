@@ -28,7 +28,7 @@ import logging
 import os
 import shutil
 
-from .engine import semver_key as _semver_key
+from .engine import semver_key as _semver_key, _is_os_metadata
 from .languages import get_engine
 from .safefs import widget_lock, staged_dir, LockTimeout
 from .scaffolding import _library_notes as _canonical_library_notes
@@ -83,6 +83,20 @@ def _artifact_skip_set(language: str | None) -> set[str]:
         return set(excludes_for(language=language))
     except ImportError:
         return {"__pycache__", ".pytest_cache", "node_modules", ".git"}
+
+
+def _os_metadata_patterns() -> tuple:
+    """Glob patterns for OS-scattered metadata (.DS_Store, AppleDouble
+    `._*`, __MACOSX, Thumbs.db). Finder drops these into working copies;
+    without this filter they get checked into the library and propagate
+    to every consumer on install."""
+    try:
+        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+            os_metadata_glob_patterns,
+        )
+        return os_metadata_glob_patterns()
+    except ImportError:
+        return (".DS_Store", "._*", "__MACOSX", "Thumbs.db", "desktop.ini")
 
 
 def _restore_library_notes(manifest_path: str) -> None:
@@ -421,10 +435,12 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
         "history", "changelog.json", _STAMP_FILE, _DEP_STAMP_FILE,
         ".cartograph_source",
     }
+    os_metadata = _os_metadata_patterns()
     copy_ignore = shutil.ignore_patterns(
-        *artifact_skips, "*.pyc", _DEP_STAMP_FILE, ".cartograph_source")
+        *artifact_skips, *os_metadata, "*.pyc", _DEP_STAMP_FILE,
+        ".cartograph_source")
     snapshot_ignore = shutil.ignore_patterns(
-        *artifact_skips, "*.pyc",
+        *artifact_skips, *os_metadata, "*.pyc",
         "history", "changelog.json", _STAMP_FILE, _DEP_STAMP_FILE,
         ".cartograph_source",
     )
@@ -684,9 +700,10 @@ def _modified_files(installed_path: str, library_path: str) -> dict:
             if not os.path.isdir(root_path):
                 continue
             for root, dirs, files in os.walk(root_path):
-                dirs[:] = [d for d in dirs if d != "__pycache__"]
+                dirs[:] = [d for d in dirs
+                           if d != "__pycache__" and not _is_os_metadata(d)]
                 for name in files:
-                    if name.endswith(".pyc"):
+                    if name.endswith(".pyc") or _is_os_metadata(name):
                         continue
                     full = os.path.join(root, name)
                     rel = os.path.relpath(full, base)

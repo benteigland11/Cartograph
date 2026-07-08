@@ -19,6 +19,8 @@ import logging
 import os
 import re
 
+from .engine import _is_os_metadata
+
 log = logging.getLogger("cartograph")
 
 
@@ -157,14 +159,16 @@ def scan_blueprint_contamination(path: str) -> dict:
 
 
 def _collect_files(root: str) -> list[str]:
-    """Return all files under `root` (any extension). Skips __pycache__."""
+    """Return all files under `root` (any extension). Skips __pycache__
+    and OS metadata (.DS_Store, AppleDouble `._*` forks, __MACOSX)."""
     if not os.path.isdir(root):
         return []
     out: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        dirnames[:] = [d for d in dirnames
+                       if d != "__pycache__" and not _is_os_metadata(d)]
         for name in filenames:
-            if name.endswith(".pyc") or name == ".DS_Store":
+            if name.endswith(".pyc") or _is_os_metadata(name):
                 continue
             out.append(os.path.join(dirpath, name))
     return out
