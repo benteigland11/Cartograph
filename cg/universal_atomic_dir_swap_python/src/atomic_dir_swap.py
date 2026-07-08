@@ -21,11 +21,58 @@ containing exactly the staged contents, nothing from the previous version.
 
 import os
 import shutil
+import stat
+import sys
 import tempfile
 import uuid
 from contextlib import contextmanager
 
-__all__ = ["staged_dir", "atomic_swap_dir"]
+__all__ = ["staged_dir", "atomic_swap_dir", "robust_rmtree"]
+
+
+def _clear_readonly_and_retry(func, path, exc_info):
+    """``shutil.rmtree`` error handler: strip the read-only attribute and retry.
+
+    On Windows a read-only file makes ``os.unlink``/``os.rmdir`` raise
+    ``PermissionError`` (WinError 5), so a plain ``rmtree`` stops partway
+    through and leaves the tree half-deleted. POSIX deletes are governed by
+    the parent directory's permissions instead, so the handler also chmods
+    the parent when retrying the entry itself doesn't help.
+    """
+    del exc_info
+    try:
+        os.chmod(path, stat.S_IRWXU)
+        func(path)
+        return
+    except OSError:
+        pass
+    parent = os.path.dirname(path)
+    if parent:
+        os.chmod(parent, stat.S_IRWXU)
+    func(path)
+
+
+def robust_rmtree(path: str, ignore_errors: bool = False) -> None:
+    """``shutil.rmtree`` that survives read-only entries.
+
+    Drop-in replacement for the ``rmtree(path)`` / ``rmtree(path,
+    ignore_errors=True)`` call sites. Read-only files (the Windows attribute
+    or a POSIX mode with the write bit stripped) are made writable and
+    deleted instead of aborting mid-tree.
+    """
+    # ``onerror`` is deprecated since 3.12; ``onexc`` doesn't exist before it.
+    if sys.version_info >= (3, 12):
+        kwargs = {"onexc": lambda f, p, e: _clear_readonly_and_retry(f, p, None)}
+    else:
+        kwargs = {"onerror": _clear_readonly_and_retry}
+    try:
+        shutil.rmtree(path, **kwargs)
+    except FileNotFoundError:
+        if not ignore_errors:
+            raise
+    except OSError:
+        if not ignore_errors:
+            raise
 
 
 def atomic_swap_dir(new_dir: str, dest: str) -> None:
@@ -54,7 +101,7 @@ def atomic_swap_dir(new_dir: str, dest: str) -> None:
         raise
     finally:
         if backup is not None:
-            shutil.rmtree(backup, ignore_errors=True)
+            robust_rmtree(backup, ignore_errors=True)
 
 
 @contextmanager
@@ -72,7 +119,7 @@ def staged_dir(dest: str):
     try:
         yield tmp
     except BaseException:
-        shutil.rmtree(tmp, ignore_errors=True)
+        robust_rmtree(tmp, ignore_errors=True)
         raise
     else:
         try:
@@ -81,4 +128,4 @@ def staged_dir(dest: str):
             # On a successful swap, tmp was renamed into place; only a failed
             # swap leaves it behind.
             if os.path.isdir(tmp):
-                shutil.rmtree(tmp, ignore_errors=True)
+                robust_rmtree(tmp, ignore_errors=True)

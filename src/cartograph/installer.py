@@ -7,14 +7,39 @@ import json
 import os
 import re
 import shutil
+from .safefs import robust_rmtree
 import zipfile
 from io import BytesIO
+
+
+def _long_path_error(e, dest_path):
+    """Turn Windows' bare WinError 3/206 into an actionable message when the
+    real problem is the 260-char MAX_PATH default. Returns None otherwise."""
+    if (os.name == "nt" and isinstance(e, OSError)
+            and getattr(e, "winerror", None) in (3, 206)
+            and len(dest_path) > 200):
+        return {"error": (
+            f"Install path is likely too long for Windows "
+            f"({len(dest_path)}+ chars): {dest_path}. Windows limits paths "
+            f"to 260 characters by default. Install into a shorter target "
+            f"path, or enable long paths (set the LongPathsEnabled registry "
+            f"value to 1) and retry."
+        )}
+    return None
 
 
 def _copy_widget(source_path, dest_path):
     """Copy widget files from library to destination."""
     os.makedirs(dest_path, exist_ok=True)
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache")
+    try:
+        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+            os_metadata_glob_patterns,
+        )
+        os_junk = os_metadata_glob_patterns()
+    except ImportError:
+        os_junk = (".DS_Store", "._*", "__MACOSX", "Thumbs.db", "desktop.ini")
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache",
+                                    *os_junk)
 
     for folder in ("src", "tests", "examples"):
         src = os.path.join(source_path, folder)
@@ -143,8 +168,8 @@ def _install_from_cloud(widget_id, dest_path, registry_url=None, owner_hint=None
         }
     except Exception as e:
         # Clean up partial install
-        shutil.rmtree(dest_path, ignore_errors=True)
-        return {"error": f"Failed to extract widget: {e}"}
+        robust_rmtree(dest_path, ignore_errors=True)
+        return _long_path_error(e, dest_path) or {"error": f"Failed to extract widget: {e}"}
 
 
 def install(carto, widget_id, target_dir, version=None,
@@ -251,7 +276,7 @@ def install(carto, widget_id, target_dir, version=None,
                 "installed_at": dest_path,
             }
         except Exception as e:
-            return {"error": str(e)}
+            return _long_path_error(e, dest_path) or {"error": str(e)}
 
     # Fall back to cloud registry if enabled
     from .config import cloud_enabled
@@ -296,7 +321,7 @@ def upgrade(carto, widget_id, target_dir, version=None):
     backup_path = _upgrade_backup_path(widget_id)
     try:
         if os.path.exists(backup_path):
-            shutil.rmtree(backup_path)
+            robust_rmtree(backup_path)
         shutil.copytree(dest_path, backup_path)
     except Exception as e:
         return {"error": f"Could not create upgrade backup: {e}"}
@@ -304,7 +329,7 @@ def upgrade(carto, widget_id, target_dir, version=None):
     # Remove old copy
     result = uninstall(carto, widget_id, target_dir)
     if "error" in result:
-        shutil.rmtree(backup_path, ignore_errors=True)
+        robust_rmtree(backup_path, ignore_errors=True)
         return result
 
     # Install new copy — pass owner and registry from sidecar so we upgrade
@@ -323,11 +348,11 @@ def upgrade(carto, widget_id, target_dir, version=None):
         else:
             result["restored"] = True
             result["restored_version"] = old_version
-        shutil.rmtree(backup_path, ignore_errors=True)
+        robust_rmtree(backup_path, ignore_errors=True)
         return result
 
     # Success — clean up backup
-    shutil.rmtree(backup_path, ignore_errors=True)
+    robust_rmtree(backup_path, ignore_errors=True)
     result["previous_version"] = old_version
     return result
 
@@ -354,7 +379,7 @@ def delete_from_library(carto, widget_id, confirm=False):
     from .safefs import widget_lock, LockTimeout
     try:
         with widget_lock(carto.library_path, widget_id):
-            shutil.rmtree(widget_path)
+            robust_rmtree(widget_path)
     except LockTimeout as e:
         return {"error": str(e)}
     except Exception as e:
@@ -394,7 +419,7 @@ def uninstall(carto, widget_id, target_dir):
         return {"error": f"Safety check failed: path escapes target directory."}
 
     try:
-        shutil.rmtree(widget_path)
+        robust_rmtree(widget_path)
         return {"status": "success", "widget_id": widget_id, "removed_from": widget_path}
     except Exception as e:
         return {"error": f"Failed to remove: {e}"}

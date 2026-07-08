@@ -23,6 +23,7 @@ from cg.infra_interprocess_lock_python.src.interprocess_lock import (
 from cg.universal_atomic_dir_swap_python.src.atomic_dir_swap import (
     staged_dir,
     atomic_swap_dir,
+    robust_rmtree,
 )
 from cg.universal_safe_archive_extract_python.src.safe_archive_extract import (
     safe_extractall,
@@ -38,6 +39,7 @@ __all__ = [
     "UnsafeArchiveError",
     "staged_dir",
     "atomic_swap_dir",
+    "robust_rmtree",
     "widget_lock",
     "library_lock",
     "LockTimeout",

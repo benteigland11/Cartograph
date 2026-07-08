@@ -97,3 +97,48 @@ def test_no_leftover_backup_dirs(tmp_path):
         with open(os.path.join(tmp, "y"), "w") as f:
             f.write("2")
     assert not any(p.name.startswith(".cg-old-") for p in tmp_path.iterdir())
+
+
+def _make_readonly_tree(tmp_path):
+    tree = tmp_path / "victim"
+    (tree / "sub").mkdir(parents=True)
+    locked = tree / "sub" / "locked.txt"
+    locked.write_text("keep out")
+    os.chmod(locked, 0o444)
+    if os.name == "nt":
+        import stat as _stat
+        os.chmod(locked, _stat.S_IREAD)
+    return tree
+
+
+def test_robust_rmtree_removes_readonly_entries(tmp_path):
+    from src.atomic_dir_swap import robust_rmtree
+    tree = _make_readonly_tree(tmp_path)
+    robust_rmtree(str(tree))
+    assert not tree.exists()
+
+
+def test_robust_rmtree_missing_path_raises_by_default(tmp_path):
+    from src.atomic_dir_swap import robust_rmtree
+    with pytest.raises(FileNotFoundError):
+        robust_rmtree(str(tmp_path / "nope"))
+
+
+def test_robust_rmtree_missing_path_ignored_when_asked(tmp_path):
+    from src.atomic_dir_swap import robust_rmtree
+    robust_rmtree(str(tmp_path / "nope"), ignore_errors=True)
+
+
+def test_robust_rmtree_readonly_dir_entries(tmp_path):
+    from src.atomic_dir_swap import robust_rmtree
+    tree = tmp_path / "victim2"
+    inner = tree / "inner"
+    inner.mkdir(parents=True)
+    (inner / "f.txt").write_text("x")
+    os.chmod(inner, 0o555)
+    try:
+        robust_rmtree(str(tree))
+    finally:
+        if inner.exists():
+            os.chmod(inner, 0o755)
+    assert not tree.exists()
