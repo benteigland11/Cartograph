@@ -143,3 +143,19 @@ Only project specific wiring should not be made into widgets.
 6. Validate before checking in, check in before publishing
 
 Definition of reusable code: Any code that would be written for another project. A lot of code may look "project specific" but if you peel back the logic you will realize it can be used across many projects. These are the widgets that need to be extracted, or made.
+
+### Pre-flight checklist (before merging engine/release PRs)
+
+1. Full local test suite green (`pytest`), including the language's
+   create / contamination / blueprint suites.
+2. Real-widget stress: at least one widget validated end-to-end via the
+   actual CLI (`cartograph create` -> `validate`), not engine methods.
+3. If remote validation nodes are configured on this machine (see the
+   workspace-level CLAUDE.md and `scripts/remote-stress-*`), run the
+   ephemeral cross-platform stress on each node and require PASS.
+4. Wait for PR CI green on all 9 matrix combos before merging. Never tag
+   or bump ahead of CI.
+5. After merge, verify the release actually shipped by checking master:
+   pyproject version bumped, the change present on origin/master, and the
+   vX.Y.Z tag created (auto-tag silently skips when the version wasn't
+   bumped - a merged PR is not proof).
