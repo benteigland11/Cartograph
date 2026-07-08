@@ -83,5 +83,15 @@ def available_languages() -> set[str]:
 def allowed_extensions() -> set[str]:
     """Return all file extensions used by registered language engines.
     Used by the cloud registry to validate widget zip contents — automatically
-    includes any new language without cloud-side changes."""
-    return {engine.file_ext for engine in _ENGINES.values() if engine.file_ext}
+    includes any new language without cloud-side changes.
+
+    Covers each engine's source extension plus the extensions of its
+    engine-owned manifest files (manifest_patterns), so build files like
+    Java's build.gradle are accepted by the cloud zip validator."""
+    exts = {engine.file_ext for engine in _ENGINES.values() if engine.file_ext}
+    for engine in _ENGINES.values():
+        for pattern in engine.manifest_patterns:
+            ext = os.path.splitext(pattern)[1].lstrip(".")
+            if ext:
+                exts.add(ext)
+    return exts
