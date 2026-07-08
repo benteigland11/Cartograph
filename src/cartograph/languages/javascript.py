@@ -188,7 +188,11 @@ class JavaScriptEngine(LanguageEngine):
         checks = []
         try:
             # Through self._run so paths.npx (if configured) is honored.
-            r = self._run(["npx", "playwright", "--version"],
+            # --no-install: without it, npx DOWNLOADS playwright from the
+            # registry just to answer --version when it isn't installed -
+            # doctor hung for 30s+ on Windows and polluted the npm cache.
+            # A status probe must never mutate the machine.
+            r = self._run(["npx", "--no-install", "playwright", "--version"],
                           cwd=os.getcwd(), timeout=15)
             installed = r.returncode == 0
         except Exception:
