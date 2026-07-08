@@ -37,6 +37,20 @@ def test_supported_languages():
     assert "systemverilog" in langs
 
 
+def test_allowed_extensions_includes_source_exts():
+    from cartograph.languages.registry import allowed_extensions
+    exts = allowed_extensions()
+    assert "py" in exts
+    assert "java" in exts
+
+
+def test_allowed_extensions_includes_manifest_exts():
+    # Engine-owned build files (Java's build.gradle) must be accepted by
+    # the cloud zip validator, which builds its whitelist from this seam.
+    from cartograph.languages.registry import allowed_extensions
+    assert "gradle" in allowed_extensions()
+
+
 def test_python_engine_run_tests_pass(tmp_path):
     from cartograph.languages.python import PythonEngine
     # Create a minimal passing widget
