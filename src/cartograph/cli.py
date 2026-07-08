@@ -2331,7 +2331,8 @@ def cmd_doctor(args):
         sys.exit(1)
 
 
-def _build_setup_instructions() -> str:
+def _domain_lines() -> str:
+    """Render the indented domain table from library_config.json."""
     import json as _json
     _cfg_path = os.path.join(os.path.dirname(__file__), "library_config.json")
     try:
@@ -2340,10 +2341,14 @@ def _build_setup_instructions() -> str:
     except Exception:
         cfg = {}
     domains = cfg.get("domains", {})
-    domain_lines = "\n".join(
+    return "\n".join(
         f"    {name:<10} {desc.split('.')[0].strip()}"
         for name, desc in domains.items()
     )
+
+
+def _build_setup_instructions() -> str:
+    domain_lines = _domain_lines()
 
     from .config import _SCHEMA, _DEFAULTS
     _flat_defaults = {k: v for section in _DEFAULTS.values() for k, v in section.items()}
@@ -2527,6 +2532,119 @@ def _detect_agent(directory: str) -> tuple[str | None, str | None]:
     if os.path.isfile(os.path.join(directory, "AGENTS.md")):
         return "agents", "AGENTS.md"
     return None, None
+
+
+def _build_setup_instructions_mcp() -> str:
+    """Trimmed instructions for agents with the Cartograph MCP server connected.
+
+    The MCP tool schemas already carry the command mechanics and the server
+    instructions carry the what-is-Cartograph framing, so this section only
+    keeps what lives in neither: the domain meanings (the schema enum gives
+    legal values, not judgment) and a pointer to the CLI for operations
+    deliberately left off the MCP surface.
+    """
+    return f"""\
+## Cartograph
+
+Widget library manager. Widgets are reusable code modules with tests,
+examples, and metadata. Installed widgets live under `cg/<widget_id>/`.
+
+The Cartograph MCP server is connected: use its tools for daily widget work
+(create, validate, checkin, status, registry, config, rules). Tool schemas
+carry the command mechanics; this section carries what they don't.
+
+### Domains
+
+{_domain_lines()}
+
+### Beyond the MCP surface
+
+The MCP is intentionally not the full CLI. Cloud publishing and sync,
+rollback, login, and registry management run via the shell. The CLI is the
+source of truth for the complete command surface: `cartograph --help`.
+"""
+
+
+# Per-agent MCP config locations, relative to (project, home). A cartograph
+# server registered in any of these files is evidence the agent session has
+# the MCP surface, so setup can write the trimmed instructions.
+_MCP_CONFIG_PATHS = {
+    "claude": [
+        (".mcp.json", "project"),
+        (os.path.join(".claude", "settings.json"), "project"),
+        (".claude.json", "home"),
+    ],
+    "cursor": [
+        (os.path.join(".cursor", "mcp.json"), "project"),
+        (os.path.join(".cursor", "mcp.json"), "home"),
+    ],
+    "gemini": [
+        (os.path.join(".gemini", "settings.json"), "project"),
+        (os.path.join(".gemini", "settings.json"), "home"),
+    ],
+    "codex": [
+        (os.path.join(".codex", "config.toml"), "home"),
+    ],
+}
+
+
+def _detect_mcp(agent: str | None, directory: str) -> tuple[bool, str | None]:
+    """Detect whether a cartograph MCP server is configured for this agent.
+
+    Evidence-based, not identity-based: reads the agent's actual MCP config
+    files rather than assuming a harness implies MCP. A server whose name
+    contains "cartograph" in any known config counts. Returns
+    (detected, reason).
+    """
+    import json as _json
+
+    def _server_names(node):
+        """Yield server names from every mcpServers mapping in a JSON tree."""
+        if isinstance(node, dict):
+            servers = node.get("mcpServers")
+            if isinstance(servers, dict):
+                yield from servers
+            for value in node.values():
+                yield from _server_names(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from _server_names(value)
+
+    for rel, base in _MCP_CONFIG_PATHS.get(agent or "", []):
+        root = directory if base == "project" else os.path.expanduser("~")
+        path = os.path.join(root, rel)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            continue
+        if rel.endswith(".toml"):
+            # Codex config: match the table header, not free text.
+            import re as _re
+            found = _re.search(r"\[mcp_servers\.[^\]]*cartograph", text) is not None
+        else:
+            try:
+                tree = _json.loads(text)
+            except ValueError:
+                continue
+            if rel == ".claude.json" and isinstance(tree, dict):
+                # User-scope servers apply everywhere; project-scope entries
+                # only count for THIS project (a cartograph server wired into
+                # some other project is not evidence for this one).
+                projects = tree.get("projects")
+                scoped = {"mcpServers": tree.get("mcpServers", {})}
+                if isinstance(projects, dict):
+                    entry = projects.get(directory) or projects.get(os.path.realpath(directory))
+                    if isinstance(entry, dict):
+                        scoped["project"] = entry
+                tree = scoped
+            found = any("cartograph" in name for name in _server_names(tree))
+        if found:
+            display = os.path.join("~" if base == "home" else ".", rel)
+            return True, f"cartograph MCP server in {display}"
+    return False, None
 
 
 
@@ -3014,8 +3132,23 @@ def cmd_setup(args):
             print()
             return
 
+    # --- Resolve MCP mode: explicit flags win, else evidence-based detection ---
+    mcp_reason = None
+    if getattr(args, "mcp", False):
+        mcp_mode = True
+        mcp_reason = "--mcp flag"
+    elif getattr(args, "no_mcp", False):
+        mcp_mode = False
+    else:
+        mcp_mode, mcp_reason = _detect_mcp(agent, target_dir)
+
+    def _base_instructions():
+        if mcp_mode:
+            return _build_setup_instructions_mcp()
+        return _build_setup_instructions() + _render_commands_block()
+
     # --- Build content ---
-    content = _build_setup_instructions() + _render_commands_block()
+    content = _base_instructions()
     content += _resolve_workflow(getattr(args, "workflow", None))
 
     # --- Resolve target file ---
@@ -3056,8 +3189,7 @@ def cmd_setup(args):
                 # don't silently strip their workflow on overwrite.
                 if workflow_marker in existing and getattr(args, "workflow", None) is None:
                     content_with_workflow = (
-                        _build_setup_instructions() + _render_commands_block()
-                        + _resolve_workflow("default")
+                        _base_instructions() + _resolve_workflow("default")
                     )
                     if agent == "cursor":
                         content_with_workflow = _cursor_mdc(content_with_workflow)
@@ -3070,6 +3202,8 @@ def cmd_setup(args):
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(new_file)
                 print(f"\n  Replaced ## Cartograph section in {filepath}{workflow_note}")
+                if mcp_mode:
+                    print(f"  MCP mode: trimmed instructions ({mcp_reason}). Pass --no-mcp for the full reference.")
                 return
             # Section exists - check if user is just adding workflow
             workflow_content = _resolve_workflow(getattr(args, "workflow", None))
@@ -3089,6 +3223,8 @@ def cmd_setup(args):
 
     if detected_reason:
         print(f"\n  Detected {agent} (found {detected_reason})")
+    if mcp_mode:
+        print(f"  MCP mode: trimmed instructions ({mcp_reason}). Pass --no-mcp for the full reference.")
     print(f"  Appended to {filepath}")
     if not getattr(args, "workflow", None):
         print(f"  Tip: add --workflow to include suggested workflow guidelines")
@@ -3668,6 +3804,10 @@ def _build_cli() -> AgentCLI:
                  "help": "Print instructions to stdout instead of writing"},
                 {"name": "--workflow", "nargs": "?", "default": None, "const": "default",
                  "help": "Include workflow (default or custom name from workflows/)"},
+                {"name": "--mcp", "action": "store_true", "default": False,
+                 "help": "Write trimmed instructions for agents with the Cartograph MCP connected (auto-detected from the agent's MCP config if omitted)"},
+                {"name": "--no-mcp", "action": "store_true", "default": False,
+                 "help": "Force the full CLI reference even if a Cartograph MCP server is detected"},
                 {"name": "--overwrite", "action": "store_true", "default": False,
                  "help": "Replace the existing ## Cartograph section in place (preserves everything else in the file)"},
             ],
