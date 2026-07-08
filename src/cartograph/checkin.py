@@ -30,7 +30,7 @@ import shutil
 
 from .engine import semver_key as _semver_key, _is_os_metadata
 from .languages import get_engine
-from .safefs import widget_lock, staged_dir, LockTimeout
+from .safefs import widget_lock, staged_dir, robust_rmtree, LockTimeout
 from .scaffolding import _library_notes as _canonical_library_notes
 from .validation_stamp import is_stamp_valid, write_stamp, STAMP_FILE as _STAMP_FILE
 from .dep_cache import DEP_STAMP_FILE as _DEP_STAMP_FILE
@@ -492,7 +492,7 @@ def checkin(carto, path: str, reason: str = "", version_bump: str = "minor",
                     old_version = widget_record.get("version", "unknown")
                     snap = os.path.join(staged, "history", old_version)
                     if os.path.exists(snap):
-                        shutil.rmtree(snap)
+                        robust_rmtree(snap)
                     os.makedirs(snap, exist_ok=True)
                     for item in os.listdir(dest_path):
                         if item in carry_skips:
@@ -595,7 +595,7 @@ def restore(carto, item_id, version, reason):
     # Copy history version to a temp dir, then checkin as update
     import tempfile
     temp_dir = tempfile.mkdtemp(prefix=f"cartograph_restore_{item_id}_")
-    shutil.rmtree(temp_dir)  # mkdtemp creates it, copytree needs it to not exist
+    robust_rmtree(temp_dir)  # mkdtemp creates it, copytree needs it to not exist
     shutil.copytree(history_path, temp_dir)
 
     # Set manifest version to current library version so the version guard
@@ -610,7 +610,7 @@ def restore(carto, item_id, version, reason):
 
     result = checkin(carto, temp_dir, reason=f"RESTORE from v{version}: {reason}",
                      version_bump="patch")
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    robust_rmtree(temp_dir, ignore_errors=True)
     return result
 
 

@@ -2723,6 +2723,16 @@ def cmd_import(args):
     from .engine import LIBRARY_PATH
     from .safefs import assert_members_safe, UnsafeArchiveError, widget_lock, LockTimeout
 
+    try:
+        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+            is_os_metadata as _is_os_metadata,
+        )
+    except ImportError:  # partial install - keep the gate working regardless
+        def _is_os_metadata(name):
+            base = os.path.basename(name.rstrip("/\\"))
+            return (base in {".DS_Store", "__MACOSX", "Thumbs.db", "desktop.ini"}
+                    or base.startswith("._"))
+
     path = args.path
     if not os.path.isfile(path):
         err({"error": f"File not found: {path}"})
@@ -2743,7 +2753,22 @@ def cmd_import(args):
     gate_results = ([], [], [])
     try:
         with zipfile.ZipFile(path, "r") as zf:
-            names = zf.namelist()
+            # Normalize separators up front: zips written by tools like
+            # PowerShell 5.1's Compress-Archive use backslashes, which only
+            # "work" on Windows by accident (os.path treats them as
+            # separators) and scatter literal-backslash filenames on POSIX.
+            # Everything below operates on the normalized name; the original
+            # is kept only as the zf.open() key.
+            members = [(n, n.replace("\\", "/")) for n in zf.namelist()]
+            # Drop OS-scattered metadata (__MACOSX/, AppleDouble ._*,
+            # Thumbs.db, .DS_Store, desktop.ini) before it can become a
+            # phantom library dir or ride into a widget's files.
+            members = [
+                (orig, norm) for orig, norm in members
+                if not any(_is_os_metadata(part)
+                           for part in norm.split("/") if part)
+            ]
+            names = [norm for _, norm in members]
             manifests = [n for n in names if n.endswith("widget.json") and n.count("/") == 1]
             if not manifests:
                 err({"error": "Zip does not appear to contain a widget library (no widget.json files found)."})
@@ -2755,29 +2780,41 @@ def cmd_import(args):
             # and gated under its OWN lock - importing widget A doesn't block a
             # concurrent checkin of widget B, only of widget A.
             by_widget = {}
-            for name in names:
-                head = name.split("/", 1)[0]
+            for orig, norm in members:
+                head = norm.split("/", 1)[0]
                 if head:
-                    by_widget.setdefault(head, []).append(name)
+                    by_widget.setdefault(head, []).append((orig, norm))
 
             carto = _carto()
             force = getattr(args, "force", False)
             accepted_stamped, accepted_revalidated, quarantined = [], [], []
-            for head, members in sorted(by_widget.items()):
+            for head, widget_members in sorted(by_widget.items()):
+                # Widget ids are lowercase slugs by construction. A mixed-case
+                # dir would silently merge into an existing entry on a
+                # case-insensitive filesystem (NTFS/APFS), letting a crafted
+                # zip rename or overwrite a widget it doesn't name.
+                if head != head.lower():
+                    quarantined.append({
+                        "id": head,
+                        "reason": "rejected: widget directory is not a "
+                                  "lowercase slug (case-insensitive filesystems "
+                                  "would merge it into another entry)",
+                    })
+                    continue
                 with widget_lock(LIBRARY_PATH, head):
-                    for name in members:
-                        dest = os.path.join(LIBRARY_PATH, name)
-                        if name.endswith("/"):
+                    for orig, norm in widget_members:
+                        dest = os.path.join(LIBRARY_PATH, *norm.split("/"))
+                        if norm.endswith("/"):
                             os.makedirs(dest, exist_ok=True)
                             continue
                         if os.path.exists(dest) and not force:
                             skipped += 1
                             continue
                         os.makedirs(os.path.dirname(dest), exist_ok=True)
-                        with zf.open(name) as src, open(dest, "wb") as dst:
+                        with zf.open(orig) as src, open(dest, "wb") as dst:
                             dst.write(src.read())
                         imported += 1
-                        if "/" in name:
+                        if "/" in norm:
                             imported_widget_ids.add(head)
                     # Gate THIS widget under its lock.
                     if head in imported_widget_ids:
@@ -2838,6 +2875,11 @@ def _gate_one_widget(carto, wid_dir, LIBRARY_PATH, quarantine_dir,
         reason = result.get("message", "validation failed")
         _quarantine_widget(widget_path, quarantine_dir, reason)
         return "quarantined", {"id": wid_dir, "reason": reason}
+    # Validation ran IN the library dir (unlike checkin, which validates the
+    # working copy and filters artifacts during the copy), so scrub the
+    # artifacts it left behind - a .venv alone is thousands of files that
+    # would otherwise live in the library and flow to consumers.
+    _clean_validation_artifacts(widget_path, language)
     try:
         write_stamp(widget_path, language, engine, test_results=None)
         return "revalidated", wid_dir
@@ -2864,6 +2906,37 @@ def _import_summary(imported, imported_widget_ids, quarantine_dir, skipped,
     if skipped:
         print(f"    skipped (already exist, no --force): {skipped}")
     print()
+
+
+def _clean_validation_artifacts(widget_path: str, language: str) -> None:
+    """Remove build/validation artifacts from a library widget dir in place.
+
+    Mirrors the artifact filter checkin applies when copying into the
+    library; import's re-validation gate is the one path that validates
+    directly inside the library entry.
+    """
+    from .safefs import robust_rmtree
+    from .dep_cache import DEP_STAMP_FILE
+    try:
+        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+            excludes_for,
+        )
+        skip_names = set(excludes_for(language=language))
+    except ImportError:
+        skip_names = {"__pycache__", ".pytest_cache", ".venv", "node_modules",
+                      ".coverage", "coverage"}
+    skip_names |= {".coverage", DEP_STAMP_FILE}
+    for root, dirs, files in os.walk(widget_path, topdown=True):
+        for d in list(dirs):
+            if d in skip_names:
+                robust_rmtree(os.path.join(root, d), ignore_errors=True)
+                dirs.remove(d)
+        for f in files:
+            if f in skip_names:
+                try:
+                    os.remove(os.path.join(root, f))
+                except OSError:
+                    pass
 
 
 def _quarantine_widget(widget_path: str, quarantine_dir: str, reason: str) -> None:

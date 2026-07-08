@@ -16,6 +16,7 @@ Override semantics (newer-pin wins):
 import json
 import os
 import shutil
+from .safefs import robust_rmtree
 
 from .blueprints import is_blueprint_id
 
@@ -341,4 +342,4 @@ def _rollback(carto, target_dir, leaf_changes, placed_blueprint, bp_dest):
         except Exception:
             pass
     if placed_blueprint and os.path.isdir(bp_dest):
-        shutil.rmtree(bp_dest, ignore_errors=True)
+        robust_rmtree(bp_dest, ignore_errors=True)

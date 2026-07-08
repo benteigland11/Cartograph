@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import shutil
+from .safefs import robust_rmtree
 
 from .languages import get_engine
 from .validation_stamp import has_valid_stamp, write_stamp
@@ -212,7 +213,7 @@ def checkin_blueprint(carto, path: str, reason: str = "", version_bump: str = "m
     if is_update:
         history_path = os.path.join(dest_path, "history", baseline_version or "unknown")
         if os.path.exists(history_path):
-            shutil.rmtree(history_path)
+            robust_rmtree(history_path)
         os.makedirs(history_path, exist_ok=True)
         ignore = shutil.ignore_patterns(
             ".venv", "__pycache__", ".pytest_cache", "*.pyc",
@@ -248,7 +249,7 @@ def checkin_blueprint(carto, path: str, reason: str = "", version_bump: str = "m
         dst = os.path.join(dest_path, item)
         if os.path.isdir(src):
             if os.path.exists(dst):
-                shutil.rmtree(dst)
+                robust_rmtree(dst)
             shutil.copytree(src, dst, ignore=ignore)
         else:
             shutil.copy2(src, dst)
