@@ -681,3 +681,40 @@ def test_checkin_malformed_version_errors(carto_tmp, modified_widget):
         result = carto_tmp.checkin(modified_widget, reason="x")
     assert result["status"] == "error"
     assert "malformed version" in result["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# OS metadata (macOS Finder droppings) must never count as widget content
+# ---------------------------------------------------------------------------
+
+class TestOsMetadataIgnored:
+    def _make_widget_dirs(self, tmp_path):
+        src = tmp_path / "w" / "src"
+        src.mkdir(parents=True)
+        (src / "module.py").write_text("def f():\n    return 1\n")
+        return tmp_path / "w"
+
+    def test_hash_ignores_ds_store_and_appledouble(self, tmp_path):
+        from cartograph.engine import calculate_implementation_hash
+        w = self._make_widget_dirs(tmp_path)
+        clean = calculate_implementation_hash(str(w))
+        (w / "src" / ".DS_Store").write_bytes(b"finder junk")
+        (w / "src" / "._module.py").write_bytes(b"\x00\x05\x16\x07fork")
+        (w / "src" / "__MACOSX").mkdir()
+        (w / "src" / "__MACOSX" / "extra").write_bytes(b"zip junk")
+        assert calculate_implementation_hash(str(w)) == clean
+
+    def test_hash_still_sees_real_changes(self, tmp_path):
+        from cartograph.engine import calculate_implementation_hash
+        w = self._make_widget_dirs(tmp_path)
+        clean = calculate_implementation_hash(str(w))
+        (w / "src" / "module.py").write_text("def f():\n    return 2\n")
+        assert calculate_implementation_hash(str(w)) != clean
+
+    def test_checkin_copy_excludes_os_metadata(self):
+        import fnmatch
+        from cartograph.checkin import _os_metadata_patterns
+        patterns = _os_metadata_patterns()
+        for junk in (".DS_Store", "._module.py", "__MACOSX", "Thumbs.db"):
+            assert any(fnmatch.fnmatch(junk, p) for p in patterns), junk
+        assert not any(fnmatch.fnmatch("module.py", p) for p in patterns)

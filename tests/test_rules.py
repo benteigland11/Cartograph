@@ -1,4 +1,5 @@
 """Tests for custom validation rules system."""
+import sys
 import json
 import os
 
@@ -348,7 +349,7 @@ def test_cli_rules_init(tmp_path):
     """cartograph rules init should create the rules file."""
     import subprocess
     result = subprocess.run(
-        ["python", "-m", "cartograph", "rules", "init", "--language", "python"],
+        [sys.executable, "-m", "cartograph", "rules", "init", "--language", "python"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
     )
@@ -364,12 +365,12 @@ def test_cli_rules_init_already_exists(tmp_path):
     """Running init twice should tell you the file exists."""
     import subprocess
     subprocess.run(
-        ["python", "-m", "cartograph", "rules", "init", "--language", "python"],
+        [sys.executable, "-m", "cartograph", "rules", "init", "--language", "python"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
     )
     result = subprocess.run(
-        ["python", "-m", "cartograph", "rules", "init", "--language", "python"],
+        [sys.executable, "-m", "cartograph", "rules", "init", "--language", "python"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
     )
@@ -382,7 +383,7 @@ def test_cli_rules_reset(tmp_path):
     import subprocess
     # Init, then break it
     subprocess.run(
-        ["python", "-m", "cartograph", "rules", "init", "--language", "python"],
+        [sys.executable, "-m", "cartograph", "rules", "init", "--language", "python"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
     )
@@ -392,7 +393,7 @@ def test_cli_rules_reset(tmp_path):
     # Reset without --confirm should block as an error (CLI contract:
     # refusals exit non-zero so agents/CI notice).
     result = subprocess.run(
-        ["python", "-m", "cartograph", "rules", "reset", "--language", "python"],
+        [sys.executable, "-m", "cartograph", "rules", "reset", "--language", "python"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
     )
@@ -401,7 +402,7 @@ def test_cli_rules_reset(tmp_path):
 
     # Reset with --confirm should succeed
     result = subprocess.run(
-        ["python", "-m", "cartograph", "rules", "reset", "--language", "python", "--confirm"],
+        [sys.executable, "-m", "cartograph", "rules", "reset", "--language", "python", "--confirm"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
     )
@@ -418,7 +419,7 @@ def test_cli_rules_list_shows_global(tmp_path):
     """Listing should show global rules that were auto-created."""
     import subprocess
     result = subprocess.run(
-        ["python", "-m", "cartograph", "rules"],
+        [sys.executable, "-m", "cartograph", "rules"],
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", cwd=str(tmp_path),
     )

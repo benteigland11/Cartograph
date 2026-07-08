@@ -17,11 +17,47 @@ _UNIVERSAL: frozenset[str] = frozenset({
     ".hg",
     ".svn",
     ".DS_Store",
+    "__MACOSX",
+    "Thumbs.db",
+    "desktop.ini",
     ".idea",
     ".vscode",
     ".cache",
     ".tmp",
 })
+
+
+# OS metadata the desktop shell scatters into trees behind the user's back.
+# Unlike the artifact-dir sets these need file-level matching: macOS
+# AppleDouble resource forks are named `._<original file>`, so no exact-name
+# set can express them.
+_OS_METADATA_NAMES: frozenset[str] = frozenset({
+    ".DS_Store", "__MACOSX", "Thumbs.db", "desktop.ini",
+})
+_OS_METADATA_PREFIXES: tuple[str, ...] = ("._",)
+
+
+def is_os_metadata(name: str) -> bool:
+    """True if the basename of ``name`` is OS-scattered metadata.
+
+    Covers macOS ``.DS_Store``, AppleDouble ``._*`` resource forks, and
+    ``__MACOSX`` zip directories, plus Windows ``Thumbs.db`` and
+    ``desktop.ini``. Accepts a bare basename or a path.
+    """
+    base = os.path.basename(name.rstrip("/\\"))
+    if base in _OS_METADATA_NAMES:
+        return True
+    return base.startswith(_OS_METADATA_PREFIXES)
+
+
+def os_metadata_glob_patterns() -> tuple[str, ...]:
+    """The same set as glob patterns, for ``shutil.ignore_patterns``-style
+    consumers that match names against fnmatch patterns.
+
+    Note ``._*`` also matches a directory literally named ``._`` -
+    acceptable, since that name only appears as AppleDouble spillage.
+    """
+    return (".DS_Store", "._*", "__MACOSX", "Thumbs.db", "desktop.ini")
 
 
 # Per-language artifact dirs. Keys are short language tags; consumers
@@ -142,6 +178,8 @@ def should_skip(
     Designed for use inside ``os.walk`` loops or against a relative
     path inside a zip-build loop. ``prefixes`` is checked with leading
     dots stripped (so ``nimcache`` matches ``.nimcache_example``).
+    OS metadata (``is_os_metadata``) is always skipped regardless of the
+    exclude sets passed in.
     """
     exclude_set = set(excludes)
     prefix_tuple = tuple(prefixes)
@@ -150,6 +188,8 @@ def should_skip(
         if not part:
             continue
         if part in exclude_set:
+            return True
+        if is_os_metadata(part):
             return True
         if prefix_tuple and _matches_prefix(part, prefix_tuple):
             return True
@@ -164,12 +204,14 @@ def filter_dirs(
     """Return a new list with excluded entries removed. Convenience
     wrapper for the common ``dirs[:] = filter_dirs(dirs, excludes)``
     pattern inside ``os.walk``. ``prefixes`` is checked with leading
-    dots stripped."""
+    dots stripped. OS metadata dirs (e.g. ``__MACOSX``) are always
+    removed."""
     exclude_set = set(excludes)
     prefix_tuple = tuple(prefixes)
     return [
         d for d in dirs
         if d not in exclude_set
+        and not is_os_metadata(d)
         and not (prefix_tuple and _matches_prefix(d, prefix_tuple))
     ]
 

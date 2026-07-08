@@ -10,6 +10,22 @@ import logging
 log = logging.getLogger("cartograph")
 
 
+def _is_os_metadata(name: str) -> bool:
+    """OS-scattered metadata (.DS_Store, AppleDouble `._*`, __MACOSX,
+    Thumbs.db). These appear behind the user's back (Finder, zip round
+    trips) and must never count as widget content - otherwise a stray
+    .DS_Store flips a widget to "locally modified" and `._*` forks get
+    hashed, diffed, and checked in."""
+    try:
+        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+            is_os_metadata,
+        )
+        return is_os_metadata(name)
+    except ImportError:
+        return name in (".DS_Store", "__MACOSX", "Thumbs.db",
+                        "desktop.ini") or name.startswith("._")
+
+
 def calculate_implementation_hash(path: str) -> str | None:
     """Stable MD5 over src/, tests/, examples/, and python/ bytes.
 
@@ -35,9 +51,10 @@ def calculate_implementation_hash(path: str) -> str | None:
             continue
         found_any = True
         for root, dirs, files in os.walk(sub_path):
-            dirs[:] = [d for d in dirs if d != '__pycache__']
+            dirs[:] = [d for d in dirs
+                       if d != '__pycache__' and not _is_os_metadata(d)]
             for name in sorted(files):
-                if name.endswith('.pyc'):
+                if name.endswith('.pyc') or _is_os_metadata(name):
                     continue
                 filepath = os.path.join(root, name)
                 with open(filepath, 'rb') as f:
@@ -312,9 +329,10 @@ class Cartograph:
                 if not os.path.exists(root_path):
                     continue
                 for root, dirs, files in os.walk(root_path):
-                    dirs[:] = [d for d in dirs if d != '__pycache__']
+                    dirs[:] = [d for d in dirs
+                               if d != '__pycache__' and not _is_os_metadata(d)]
                     for fname in files:
-                        if fname.endswith('.pyc'):
+                        if fname.endswith('.pyc') or _is_os_metadata(fname):
                             continue
                         full = os.path.join(root, fname)
                         rel = os.path.relpath(full, base)
