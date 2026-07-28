@@ -92,16 +92,134 @@ def _resolve_widget(path: str) -> str:
     resolved = os.path.abspath(path)
     if os.path.isfile(os.path.join(resolved, "widget.json")):
         return resolved
+    if os.path.isfile(os.path.join(resolved, "blueprint.json")):
+        return resolved
 
     # Try cg/<path>/ from cwd (handles bare widget_id like "logic-test-python")
     # Skip if path already starts with cg/ to avoid doubling
     from .engine import DEFAULT_INSTALL_DIR
     if not path.startswith(DEFAULT_INSTALL_DIR + os.sep) and not path.startswith(DEFAULT_INSTALL_DIR + "/"):
         candidate = os.path.join(os.getcwd(), DEFAULT_INSTALL_DIR, path)
-        if os.path.isfile(os.path.join(candidate, "widget.json")):
+        if (os.path.isfile(os.path.join(candidate, "widget.json"))
+                or os.path.isfile(os.path.join(candidate, "blueprint.json"))):
             return os.path.abspath(candidate)
+        # Also try underscored dir name from dashed id
+        underscored = path.replace("-", "_")
+        if underscored != path:
+            candidate2 = os.path.join(os.getcwd(), DEFAULT_INSTALL_DIR, underscored)
+            if (os.path.isfile(os.path.join(candidate2, "widget.json"))
+                    or os.path.isfile(os.path.join(candidate2, "blueprint.json"))):
+                return os.path.abspath(candidate2)
 
     return resolved
+
+
+def _publishable_dir(path: str) -> str:
+    """Return abs path if *path* is a widget/blueprint tree, else \"\"."""
+    resolved = _resolve_widget(path)
+    if (os.path.isfile(os.path.join(resolved, "widget.json"))
+            or os.path.isfile(os.path.join(resolved, "blueprint.json"))):
+        return resolved
+    return ""
+
+
+def _manifest_id_at(path: str) -> str:
+    """Canonical id from widget.json or blueprint.json at *path*."""
+    wj = os.path.join(path, "widget.json")
+    if os.path.isfile(wj):
+        try:
+            with open(wj, encoding="utf-8") as f:
+                data = json.load(f)
+            return (data.get("meta", {}).get("id") or data.get("id") or "")
+        except Exception:
+            return ""
+    bj = os.path.join(path, "blueprint.json")
+    if os.path.isfile(bj):
+        try:
+            with open(bj, encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("id") or ""
+        except Exception:
+            return ""
+    return ""
+
+
+def _is_blueprint_dir(path: str) -> bool:
+    return (os.path.isfile(os.path.join(path, "blueprint.json"))
+            and not os.path.isfile(os.path.join(path, "widget.json")))
+
+
+def _library_lookup(ident: str):
+    """Return (path, kind) from the local library, or (None, None)."""
+    carto = _carto()
+    widget = next((w for w in carto.widgets if w["id"] == ident), None)
+    if widget:
+        return widget["path"], "widget"
+    phantom = next(
+        (p for p in getattr(carto, "unstamped_widgets", [])
+         if p["id"] == ident),
+        None,
+    )
+    if phantom:
+        return phantom["path"], "widget"
+    bp = next((b for b in carto.blueprints if b["id"] == ident), None)
+    if bp:
+        return bp["path"], "blueprint"
+    return None, None
+
+
+def _resolve_module_ref(token: str | None = None, *, path: str | None = ".",
+                        lib: bool = False):
+    """CLI façade over universal-resource-ref-resolve-python.
+
+    Accepts the three standard locators:
+      * bare id (``backend-retry-python``)
+      * library id (``lib=True`` / ``--lib``)
+      * directory path (``cg/...``, ``.``, absolute)
+
+    Returns the widget's ResolveResult. On failure, callers should
+    ``err({...})`` with ``result.error``.
+    """
+    from cg.universal_resource_ref_resolve_python.src.resource_ref_resolve import (
+        ResolveFacts,
+        resolve_module_ref,
+    )
+
+    token_s = (token or "").strip() or None
+    path_s = path if path is not None else "."
+
+    # --lib always means library index, never a local cg/ collision.
+    token_dir = "" if lib else (
+        _publishable_dir(token_s) if token_s else "")
+    path_dir = _publishable_dir(path_s) if path_s else ""
+    cwd_dir = _publishable_dir(".") if path_s in (".", None) and not token_s else ""
+
+    lib_path, lib_kind = "", "widget"
+    if token_s:
+        lp, lk = _library_lookup(token_s)
+        if lp:
+            lib_path, lib_kind = lp, (lk or "widget")
+
+    def _mid(d: str) -> str:
+        return _manifest_id_at(d) if d else ""
+
+    facts = ResolveFacts(
+        token_dir=token_dir,
+        path_dir=path_dir,
+        cwd_dir=cwd_dir,
+        lib_path=lib_path,
+        lib_kind=lib_kind,
+        token_manifest_id=_mid(token_dir) or (
+            _mid(lib_path) if lib_path else ""),
+        path_manifest_id=_mid(path_dir),
+        cwd_manifest_id=_mid(cwd_dir),
+        token_is_blueprint=_is_blueprint_dir(token_dir) if token_dir else False,
+        path_is_blueprint=_is_blueprint_dir(path_dir) if path_dir else False,
+        cwd_is_blueprint=_is_blueprint_dir(cwd_dir) if cwd_dir else False,
+    )
+    return resolve_module_ref(
+        token_s, path=path_s, lib=lib, facts=facts,
+    )
 
 
 def _carto():
@@ -428,21 +546,27 @@ def cmd_search(args):
 
 
 def cmd_inspect(args):
-    widget_id = args.widget_id
+    token = args.widget_id
 
-    # Cloud widget: @owner/prefix-widget-name
-    if widget_id.startswith("@"):
-        parsed = _parse_registry_id(widget_id)
-        owner, registry_url, bare_id = parsed
+    # Cloud widget: @owner/prefix-widget-name (resolve classifies, we parse)
+    if token and str(token).startswith("@"):
+        owner, registry_url, bare_id = _parse_registry_id(token)
         from .cloud import inspect as cloud_inspect
-        result = cloud_inspect(owner, bare_id, source=args.source, registry_url=registry_url)
+        result = cloud_inspect(owner, bare_id, source=args.source,
+                               registry_url=registry_url)
         if "error" in result:
             err(result)
         out(result)
         return
 
+    result_ref = _resolve_module_ref(token, path=".", lib=False)
+    if result_ref.is_cloud:
+        err({"error": "cloud inspect requires @owner/widget-id form"})
+    if not result_ref.ok or not result_ref.id:
+        err({"error": result_ref.error or f"could not resolve '{token}'"})
+
     result = _carto().inspect(
-        widget_id=widget_id,
+        widget_id=result_ref.id,
         show_source=args.source,
         show_all_versions=args.all_versions,
         show_reviews=args.reviews,
@@ -473,68 +597,101 @@ def cmd_install(args):
     _cloud_install_note(result)
 
 
+def _project_install_dir(token: str, project_root: str) -> str:
+    """If *token* names an install under project_root/cg/, return its abs path."""
+    from .engine import DEFAULT_INSTALL_DIR, python_dir_name
+
+    project_root = os.path.abspath(project_root)
+    cg_dir = os.path.join(project_root, DEFAULT_INSTALL_DIR)
+    attempts = [
+        os.path.abspath(token),
+        os.path.abspath(os.path.join(cg_dir, token)),
+        os.path.abspath(os.path.join(cg_dir, python_dir_name(token))),
+        os.path.abspath(os.path.join(cg_dir, token.replace("-", "_"))),
+    ]
+    # De-dupe while preserving order
+    seen = set()
+    for attempt in attempts:
+        if attempt in seen:
+            continue
+        seen.add(attempt)
+        if not attempt.startswith(project_root + os.sep) and attempt != project_root:
+            # Absolute path outside project only ok if it is still under some cg/
+            # and user passed it explicitly as a path-like token.
+            if "/" not in token and "\\" not in token and token not in (".", ".."):
+                if not attempt.startswith(cg_dir + os.sep):
+                    continue
+        if (os.path.isdir(attempt)
+                and (os.path.isfile(os.path.join(attempt, "widget.json"))
+                     or os.path.isfile(os.path.join(attempt, "blueprint.json")))):
+            return attempt
+    return ""
+
+
 def _resolve_installed_widget(widget_dir: str, default_target: str):
-    """Resolve a widget directory into (widget_id, target_dir, dir_name).
+    """Resolve an *installed project* widget into (widget_id, target_dir, dir_name).
 
-    Accepts either:
-    - A path (relative or absolute) to an installed widget dir
-      (e.g. cg/infra_file_stamp_python), or
-    - A bare directory basename (e.g. cg_backend_xai_client_python),
-      which is auto-resolved under <default_target>/cg/.
+    Accepts the same three locator forms as the shared resolver:
+      - directory path (``cg/infra_file_stamp_python``)
+      - bare id (``infra-file-stamp-python``)
+      - basename under ``cg/``
 
-    widget_id is the prefixed form when the dir name carries a registry
-    prefix (e.g. cg_foo -> cg-foo), so callers that refetch (upgrade) hit
-    the right registry. dir_name is the actual directory basename, so
-    rmtree-style operations target the correct path.
-
-    Project root is derived as the parent-of-parent of the resolved dir.
+    Prefers the project install tree over the global library. widget_id is
+    the prefixed form when the dir name carries a registry prefix so upgrade
+    refetches the right registry.
     """
     from .engine import DEFAULT_INSTALL_DIR, python_dir_name
 
-    candidate = os.path.abspath(widget_dir)
-    if not os.path.isdir(candidate):
-        # Try, in order: bare basename under cg/, then widget_id form
-        # (hyphens) translated to its dir form (underscores for python/nim).
-        cg_dir = os.path.join(default_target, DEFAULT_INSTALL_DIR)
-        attempts = [
-            os.path.abspath(os.path.join(cg_dir, widget_dir)),
-            os.path.abspath(os.path.join(cg_dir, python_dir_name(widget_dir))),
-        ]
-        candidate = next((p for p in attempts if os.path.isdir(p)), None)
-        if candidate is None:
+    project_root = os.path.abspath(default_target)
+    token = (widget_dir or "").strip()
+    if not token:
+        err({"error": (
+            "Pass an installed widget's path (e.g. cg/<dirname>), "
+            "its dir basename, or its widget_id. "
+            "Run 'cartograph status --all' to list installed widgets."
+        )})
+
+    # 1) Project install first (dir / id under project/cg/).
+    candidate = _project_install_dir(token, project_root)
+
+    # 2) Fall back to shared three-form resolver (path / library / cwd).
+    if not candidate:
+        result = _resolve_module_ref(token, path=".", lib=False)
+        if result.is_cloud:
             err({"error": (
-                f"'{widget_dir}' not found. Pass an installed widget's path "
-                f"(e.g. cg/<dirname>), its dir basename, or its widget_id. "
-                f"Run 'cartograph status --all' to list installed widgets."
+                "cloud @owner/id refs are not valid here; "
+                "pass a local install path or id"
             )})
-    # Kind-aware: a directory is a widget OR a blueprint by manifest filename.
-    bp_manifest = os.path.join(candidate, "blueprint.json")
-    w_manifest = os.path.join(candidate, "widget.json")
-    if os.path.isfile(bp_manifest):
-        manifest = bp_manifest
-        try:
-            with open(manifest, encoding="utf-8") as f:
-                canonical_id = json.load(f).get("id", "")
-            if not canonical_id:
-                err({"error": f"blueprint.json at {manifest} is missing id"})
-        except Exception as e:
-            err({"error": f"Could not read blueprint.json at {manifest}: {e}"})
-    else:
-        manifest = w_manifest
-        try:
-            with open(manifest, encoding="utf-8") as f:
-                canonical_id = json.load(f).get("meta", {}).get("id", "")
-            if not canonical_id:
-                err({"error": f"widget.json at {manifest} is missing meta.id"})
-        except Exception as e:
-            err({"error": f"Could not read widget.json at {manifest}: {e}"})
+        if result.ok and result.path:
+            path = os.path.abspath(result.path)
+            cg_root = os.path.join(project_root, DEFAULT_INSTALL_DIR)
+            if path.startswith(cg_root + os.sep):
+                candidate = path
+            elif result.via == "dir":
+                # Explicit path outside this project still allowed if user
+                # pointed at a real module tree (e.g. absolute path).
+                candidate = path
+
+    if not candidate:
+        err({"error": (
+            f"'{widget_dir}' not found as an installed widget. "
+            f"Pass a path (e.g. cg/<dirname>), basename, or widget_id. "
+            f"Run 'cartograph status --all' to list installed widgets."
+        )})
+
+    canonical_id = _manifest_id_at(candidate)
+    if not canonical_id:
+        err({"error": f"no module id in manifest at {candidate}"})
 
     dir_name = os.path.basename(candidate)
-    target_dir = os.path.dirname(os.path.dirname(candidate))
+    # Project root = parent of cg/ when installed under cg/; else parent of dir.
+    parent = os.path.dirname(candidate)
+    if os.path.basename(parent) == DEFAULT_INSTALL_DIR:
+        target_dir = os.path.dirname(parent)
+    else:
+        target_dir = parent
 
-    # If the dir basename carries a registry prefix (cg-foo, myorg-foo),
-    # reconstruct the prefixed widget_id so refetch lands in the right
-    # registry. Otherwise the canonical meta.id is correct.
+    # Prefixed install dir (cg_foo_...) → prefixed widget_id for upgrade.
     canonical_dir = python_dir_name(canonical_id)
     widget_id = canonical_id
     if dir_name != canonical_dir and dir_name.endswith(canonical_dir):
@@ -567,8 +724,15 @@ def cmd_upgrade(args):
 
 
 def cmd_delete(args):
+    # Accept bare id, directory, or --lib-style library id (via path resolution).
+    ref = _resolve_module_ref(args.widget_id, path=".", lib=False)
+    if ref.is_cloud:
+        err({"error": "delete expects a local library module, not @owner/id; "
+                      "use 'cartograph cloud unpublish' for cloud-only removal"})
+    if not ref.ok or not ref.id:
+        err({"error": ref.error or f"could not resolve '{args.widget_id}'"})
     result = _carto().delete(
-        widget_id=args.widget_id,
+        widget_id=ref.id,
         confirm=args.confirm,
     )
     if result.get("status") == "error" or "error" in result:
@@ -644,11 +808,40 @@ def cmd_blueprint_create(args):
     out(result)
 
 
+def _resolve_blueprint_path(path_token: str) -> str:
+    """Resolve blueprint directory from id, path, or '.'."""
+    token = None if path_token in (None, ".") else path_token
+    ref = _resolve_module_ref(token, path=path_token or ".", lib=False)
+    if not ref.ok or not ref.path:
+        err({"error": ref.error or f"could not resolve blueprint '{path_token}'"})
+    if not _is_blueprint_dir(ref.path):
+        err({"error": f"'{path_token}' is not a blueprint directory"})
+    return ref.path
+
+
+def _resolve_leaf_widget_id(token: str, project_root: str | None = None) -> str:
+    """Resolve a dep leaf id for blueprint add-dep (installed project preferred)."""
+    project_root = project_root or os.getcwd()
+    # Prefer installed project copy so add-dep sees the pin version on disk.
+    # _resolve_installed_widget calls err() and exits on failure — probe first.
+    install = _project_install_dir(token, project_root)
+    if install:
+        wid, _, _ = _resolve_installed_widget(token, project_root)
+        return wid
+    ref = _resolve_module_ref(token, path=".", lib=False)
+    if ref.is_cloud:
+        err({"error": "blueprint deps must be local installed widgets, not @owner/id"})
+    if not ref.ok or not ref.id:
+        err({"error": ref.error or f"could not resolve leaf widget '{token}'"})
+    return ref.id
+
+
 def cmd_blueprint_add_dep(args):
-    bp_path = os.path.abspath(args.path)
+    bp_path = _resolve_blueprint_path(args.path)
+    leaf_id = _resolve_leaf_widget_id(args.widget_id)
     result = _carto().blueprint_add_dep(
         blueprint_path=bp_path,
-        widget_id=args.widget_id,
+        widget_id=leaf_id,
         validate=not args.no_validate,
     )
     if result.get("status") == "error" or "error" in result:
@@ -657,10 +850,11 @@ def cmd_blueprint_add_dep(args):
 
 
 def cmd_blueprint_remove_dep(args):
-    bp_path = os.path.abspath(args.path)
+    bp_path = _resolve_blueprint_path(args.path)
+    leaf_id = _resolve_leaf_widget_id(args.widget_id)
     result = _carto().blueprint_remove_dep(
         blueprint_path=bp_path,
-        widget_id=args.widget_id,
+        widget_id=leaf_id,
         validate=not args.no_validate,
     )
     if result.get("status") == "error" or "error" in result:
@@ -669,8 +863,13 @@ def cmd_blueprint_remove_dep(args):
 
 
 def cmd_rename(args):
+    ref = _resolve_module_ref(args.widget_id, path=".", lib=False)
+    if ref.is_cloud:
+        err({"error": "rename expects a local module id or directory"})
+    if not ref.ok or not ref.id:
+        err({"error": ref.error or f"could not resolve '{args.widget_id}'"})
     result = _carto().rename_widget(
-        old_id=args.widget_id,
+        old_id=ref.id,
         new_name=args.name,
         new_domain=args.domain,
         target_dir=os.path.abspath(args.target),
@@ -681,27 +880,28 @@ def cmd_rename(args):
 
 
 def _resolve_widget_path(args) -> str:
-    """Resolve a widget path from either --lib <widget_id> or a filesystem path.
+    """Resolve a widget/blueprint path from id, --lib id, or directory.
 
-    With --lib, the lookup checks the index first (the normal case). If the
-    widget isn't in the index, fall back to the unstamped-widgets list so
-    `validate --lib <id>` can reach phantom entries — library dirs that
-    exist on disk but have no validation stamp and are filtered out by the
-    integrity gate. Re-validating a phantom writes a fresh stamp on success
-    (see validator.py write_stamp), which restores the entry to the index.
+    Uses universal-resource-ref-resolve-python so validate/checkin/publish
+    share one locator policy. For validate/checkin the single positional
+    lives on ``args.path`` (historical); cloud publish uses ``widget_id``.
     """
-    if getattr(args, "lib", False):
-        carto = _carto()
-        widget = next((w for w in carto.widgets if w["id"] == args.path), None)
-        if widget:
-            return widget["path"]
-        phantom = next(
-            (p for p in carto.unstamped_widgets if p["id"] == args.path), None,
-        )
-        if phantom:
-            return phantom["path"]
-        err({"error": f"Widget '{args.path}' not found in library. Use 'cartograph search' to browse."})
-    return _resolve_widget(args.path)
+    lib = bool(getattr(args, "lib", False))
+    # Prefer explicit widget_id when present (cloud publish); else path token.
+    token = getattr(args, "widget_id", None)
+    path = getattr(args, "path", ".")
+    if token is None:
+        # Single positional on path: id, directory, or "."
+        token = None if path in (None, ".") and not lib else path
+        path = "."
+        if lib:
+            token = getattr(args, "path", None)
+    result = _resolve_module_ref(token, path=path, lib=lib)
+    if not result.ok:
+        err({"error": result.error or "could not resolve module reference"})
+    if result.is_cloud:
+        err({"error": "cloud @owner/id refs are not valid for this command"})
+    return result.path
 
 
 def _check_cg_namespace_hygiene(root: str) -> str | None:
@@ -905,7 +1105,24 @@ def _force_push(checkin_result: dict, install_path: str | None = None,
 
 
 def cmd_checkin(args):
-    install_path = _resolve_widget(args.path)
+    # Same three locators as validate/publish: id, --lib id, or directory.
+    lib = getattr(args, "lib", False)
+    token = getattr(args, "widget_id", None)
+    path_arg = getattr(args, "path", ".")
+    if token is None:
+        # Historical single positional is args.path (dir or, with --lib, id).
+        if lib:
+            result = _resolve_module_ref(path_arg, path=".", lib=True)
+        else:
+            result = _resolve_module_ref(path_arg if path_arg != "." else None,
+                                         path=path_arg, lib=False)
+    else:
+        result = _resolve_module_ref(token, path=path_arg, lib=lib)
+    if not result.ok:
+        err({"error": result.error or "could not resolve module for checkin"})
+    if result.is_cloud:
+        err({"error": "checkin expects a local module, not @owner/id"})
+    install_path = result.path
     _preflight_from_path(install_path)
     # Kind-aware dispatch: blueprints have their own checkin path.
     from .manifest import detect_kind, KIND_BLUEPRINT, ManifestError
@@ -1426,62 +1643,35 @@ def cmd_cloud_publish(args):
     if not is_authenticated():
         err({"error": "Not authenticated. Run: cartograph login"})
 
-    if getattr(args, "lib", False):
-        # Resolve path from library by id. Could be a widget OR a blueprint —
-        # check both lists; the type drives the publish flow below.
-        ident = args.widget_id
-        if not ident:
-            err({"error": "Usage: cartograph cloud publish <id> --lib"})
-        carto = _carto()
-        widget = next((w for w in carto.widgets if w["id"] == ident), None)
-        bp = next((b for b in carto.blueprints if b["id"] == ident), None)
-        if widget:
-            path = widget["path"]
-            widget_id = ident
-        elif bp:
-            return _cloud_publish_blueprint(bp["path"], args)
-        else:
-            err({"error": f"'{ident}' not found in library (widget or blueprint)."})
-    else:
-        path = _resolve_widget(args.path)
-        widget_id = args.widget_id
+    # Preferred: --lib <id>. Also accepts bare id or directory path.
+    # argparse: first positional → widget_id, second → path (default ".").
+    lib = getattr(args, "lib", False)
+    token = args.widget_id
+    path_arg = args.path if args.path is not None else "."
+    if lib and not token:
+        err({"error": "Usage: cartograph cloud publish <id> --lib"})
 
-        # Blueprint dispatch: a directory containing blueprint.json (and no
-        # widget.json) is a blueprint, not a widget. Branch before the
-        # widget-only resolution heuristics that follow.
-        if (os.path.isfile(os.path.join(path, "blueprint.json"))
-                and not os.path.isfile(os.path.join(path, "widget.json"))):
-            return _cloud_publish_blueprint(path, args)
+    result = _resolve_module_ref(token, path=path_arg, lib=lib)
+    if not result.ok:
+        err({"error": result.error or "could not resolve module to publish"})
+    if result.is_cloud:
+        err({"error": "cloud publish expects a local module, not @owner/id"})
 
-        # Try blueprint lookup by id when called with `cloud publish bp-...`
-        # from outside a widget dir.
-        if widget_id and args.path == "." and not os.path.isfile(os.path.join(path, "widget.json")):
-            carto = _carto()
-            lib_bp = next((b for b in carto.blueprints if b["id"] == widget_id), None)
-            if lib_bp:
-                return _cloud_publish_blueprint(lib_bp["path"], args)
+    path = result.path
+    widget_id = result.id
 
-        # If widget_id was given but path is default ".", the user likely
-        # ran `cartograph cloud publish <widget_id>` from outside the widget
-        # dir. Try resolving the widget_id as a path or library lookup.
-        if widget_id and args.path == "." and not os.path.isfile(os.path.join(path, "widget.json")):
-            candidate = _resolve_widget(widget_id)
-            if os.path.isfile(os.path.join(candidate, "widget.json")):
-                path = candidate
-            else:
-                carto = _carto()
-                lib_widget = next((w for w in carto.widgets if w["id"] == widget_id), None)
-                if lib_widget:
-                    path = lib_widget["path"]
-        if not widget_id:
-            try:
-                with open(os.path.join(path, "widget.json"), encoding="utf-8") as f:
-                    data = json.load(f)
-                widget_id = data.get("meta", {}).get("id") or data.get("id")
-            except Exception:
-                pass
-        if not widget_id:
-            err({"error": "Could not determine widget_id. Pass it explicitly or use --lib."})
+    # Blueprint dispatch
+    if result.kind == "blueprint" or (
+        path and os.path.isfile(os.path.join(path, "blueprint.json"))
+        and not os.path.isfile(os.path.join(path, "widget.json"))
+    ):
+        return _cloud_publish_blueprint(path, args)
+
+    if not path or not widget_id:
+        err({
+            "error": "Could not determine widget_id. "
+                     "Pass a widget id, a widget directory, or use --lib.",
+        })
 
     _preflight_from_path(path)
 
@@ -1493,7 +1683,6 @@ def cmd_cloud_publish(args):
         widget_data = {}
     tech_stack = widget_data.get("tech_stack", {})
     language = tech_stack.get("language", "python")
-
     # Ensure a valid stamp exists — run validation if not
     from .validation_stamp import is_stamp_valid
     from .languages import get_engine
@@ -1549,23 +1738,26 @@ def cmd_cloud_publish(args):
 
 
 def cmd_rate(args):
-    widget_id = args.widget_id
+    token = args.widget_id
+    ref = _resolve_module_ref(token, path=".", lib=False)
 
     # Cloud widget (@owner/prefix-widget-name)
-    if widget_id.startswith("@"):
+    if ref.is_cloud or (token and str(token).startswith("@")):
         from . import cloud, auth
         if not auth.is_authenticated():
             err({"error": "Not authenticated. Run: cartograph login"})
-        owner, registry_url, bare_id = _parse_registry_id(widget_id)
+        if not str(token).startswith("@"):
+            err({"error": "cloud rate requires @owner/widget-id"})
+        owner, registry_url, bare_id = _parse_registry_id(token)
         result = cloud.rate_widget(owner, bare_id, args.score, args.comment,
                                    registry_url=registry_url)
         if "error" in result:
             err(result)
-        out({"status": "success", "widget_id": widget_id, "score": args.score})
+        out({"status": "success", "widget_id": token, "score": args.score})
         return
 
-    # Local widget — requires dir path
-    widget_id, target_dir, _ = _resolve_installed_widget(widget_id, os.getcwd())
+    # Local installed widget — id, basename, or cg/ path
+    widget_id, target_dir, _ = _resolve_installed_widget(token, os.getcwd())
     result = _carto().add_review(
         widget_id=widget_id,
         target_dir=target_dir,
@@ -1583,12 +1775,20 @@ def cmd_cloud_adopt(args):
     if not auth.is_authenticated():
         err({"error": "Not authenticated. Run: cartograph login"})
 
-    local_id = args.local_id
+    local_ref = _resolve_module_ref(args.local_id, path=".", lib=False)
+    if local_ref.is_cloud:
+        err({"error": "local_id must be a local library module, not @owner/id"})
+    if not local_ref.ok or not local_ref.id:
+        err({"error": local_ref.error or f"Local widget '{args.local_id}' not found."})
+    local_id = local_ref.id
     cloud_ref = args.cloud_id  # @owner/prefix-widget-name
 
     # Resolve local widget in library
     carto = _carto()
     widget = next((w for w in carto.widgets if w["id"] == local_id), None)
+    if not widget and local_ref.path:
+        # Path resolved but not under library index — still require library entry
+        err({"error": f"Local widget '{local_id}' not found in library. Check it in first."})
     if not widget:
         err({"error": f"Local widget '{local_id}' not found in library."})
 
@@ -1730,19 +1930,26 @@ def cmd_rollback(args):
     from . import cloud, auth
     from .checkin import restore
 
-    widget_id = args.widget_id
+    token = args.widget_id
     version = args.version
 
     # Determine if this is a cloud widget (@owner/prefix-id) or local
     owner_handle = None
     registry_url = None
-    base_id = widget_id
-    if widget_id.startswith("@"):
-        parsed = _parse_registry_id(widget_id)
+    base_id = token
+    if token and str(token).startswith("@"):
+        parsed = _parse_registry_id(token)
         if parsed:
             owner_handle, registry_url, base_id = parsed
         else:
-            err({"error": f"Invalid format: '{widget_id}'. Use @owner/prefix-widget-id."})
+            err({"error": f"Invalid format: '{token}'. Use @owner/prefix-widget-id."})
+        widget_id = token
+    else:
+        ref = _resolve_module_ref(token, path=".", lib=False)
+        if not ref.ok or not ref.id:
+            err({"error": ref.error or f"could not resolve '{token}'"})
+        widget_id = ref.id
+        base_id = ref.id
 
     carto = _carto()
 
@@ -2347,6 +2554,43 @@ def _domain_lines() -> str:
     )
 
 
+# Shared by full and MCP setup appends. Keep short: always-on agent memory, not
+# a second skill body. Deep authoring lives in the cg-rules skill / CLI help.
+_CUSTOM_RULES_SECTION = """
+### Custom rules (project memory)
+
+`.cartograph/rules/` is the project's **hard memory** for shipping bars.
+Per-language scripts run on every `validate` / `checkin`. Soft notes (chat,
+AGENTS.md) forget; rules re-assert for every future agent session.
+
+When you learn a durable "never ship X" or "always require Y" for this repo:
+1. Encode it as a **project** rule (default for team/repo standards), or
+2. Explicitly decide it is one-off only (fix this widget; do not pretend
+   the next session will remember).
+
+Prefer rules over hoping the next session remembers. Treat rule updates as
+part of finishing the work when a durable bar appeared — not optional polish.
+
+**When to update rules (mid-work, not only when asked):**
+- The user corrects a convention once ("we don't use X", "always do Y")
+- You fix a pattern that must not recur on future widgets/checkins
+- Plan / create / extract / blueprint makes a repo-wide bar clear
+- Validate fails for something that is really project policy, not a one-off bug
+
+**What belongs:** anything durable and mechanical the next session would
+otherwise forget — banned APIs, required metadata/examples shape, if-A-then-B
+policies, cross-file widget contracts, and when needed **app/project**
+companions (call sites, config, co-requirements). Rules are an open program,
+not a small ban-list. **What does not:** taste nits, one-widget bugs, or
+trying to lower Cartograph's built-in floor (rules only tighten: `blocks` =
+hard fail, `warnings` = soft).
+
+**How:** skill **cg-rules** (or `cartograph rules` from project root) for
+reach, authoring, and proof. Inventory project/global/org layers first; merge
+new checks; prove with validate. Layers stack — they do not replace each other.
+"""
+
+
 def _build_setup_instructions() -> str:
     domain_lines = _domain_lines()
 
@@ -2375,7 +2619,7 @@ creates `backend-retry-backoff-python`.
 ### Domains
 
 {domain_lines}
-
+{_CUSTOM_RULES_SECTION}
 ### Config keys  (set with: cartograph config <key> <value>)
 
 {config_lines}"""
@@ -2489,6 +2733,9 @@ Only project specific wiring should not be made into widgets.
 4. Install widgets, then write glue code to connect them. Don't edit widget source directly for this step.
 5. If you do edit a widget, only do so if you intend to check it back in as an improvement for the general logic of the widget.
 6. Validate before checking in, check in before publishing
+7. When work teaches a durable never/always for this repo, encode it as a
+   custom rule (see ### Custom rules) so the next session cannot forget —
+   soft notes are not enough
 
 Definition of reusable code: Any code that would be written for another project. A lot of code may look "project specific" but if you peel back the logic you will realize it can be used across many projects. These are the widgets that need to be extracted, or made.
 """
@@ -2556,12 +2803,14 @@ carry the command mechanics; this section carries what they don't.
 ### Domains
 
 {_domain_lines()}
-
+{_CUSTOM_RULES_SECTION}
 ### Beyond the MCP surface
 
 The MCP is intentionally not the full CLI. Cloud publishing and sync,
 rollback, login, and registry management run via the shell. The CLI is the
 source of truth for the complete command surface: `cartograph --help`.
+Authoring custom rules (`rules get` / `rules write`) is also CLI today —
+MCP `cg_rules` covers list/init/reset; use the shell for full-file updates.
 """
 
 
@@ -3495,7 +3744,8 @@ def _build_cli() -> AgentCLI:
             "help": "Show widget details",
             "handler": cmd_inspect,
             "args": [
-                {"name": "widget_id"},
+                {"name": "widget_id",
+                 "help": "Module id, directory path, or @owner/id (cloud)"},
                 {"name": "--source", "action": "store_true", "default": False, "help": "Include source files"},
                 {"name": "--all-versions", "action": "store_true", "default": False, "dest": "all_versions"},
                 {"name": "--reviews", "action": "store_true", "default": False},
@@ -3517,7 +3767,8 @@ def _build_cli() -> AgentCLI:
             "help": "Remove a widget from your project",
             "handler": cmd_uninstall,
             "args": [
-                {"name": "widget_dir", "help": "Path to installed widget dir (e.g. cg/infra_foo_python)"},
+                {"name": "widget_dir",
+                 "help": "Installed widget id, cg/ path, or basename"},
             ],
         },
         {
@@ -3525,7 +3776,8 @@ def _build_cli() -> AgentCLI:
             "help": "Upgrade an installed widget to the latest version",
             "handler": cmd_upgrade,
             "args": [
-                {"name": "widget_dir", "help": "Path to installed widget dir (e.g. cg/infra_foo_python)"},
+                {"name": "widget_dir",
+                 "help": "Installed widget id, cg/ path, or basename"},
                 {"name": "--version", "default": None},
             ],
         },
@@ -3535,7 +3787,7 @@ def _build_cli() -> AgentCLI:
             "handler": cmd_status,
             "args": [
                 {"name": "widget_dir", "nargs": "?", "default": None,
-                 "help": "Path to installed widget dir, or omit to scan all"},
+                 "help": "Installed widget id, cg/ path, or basename; omit to scan all"},
                 {"name": "--page", "type": int, "default": 1,
                  "help": "1-indexed page for aggregate listing (default: 1)"},
                 {"name": "--size", "type": int, "default": 20,
@@ -3546,10 +3798,11 @@ def _build_cli() -> AgentCLI:
         },
         {
             "name": "rate",
-            "help": "Rate a widget (local dir path or @handle/widget-id for cloud)",
+            "help": "Rate a widget (local id/path or @handle/widget-id for cloud)",
             "handler": cmd_rate,
             "args": [
-                {"name": "widget_id", "help": "Widget dir path or @handle/widget-id for cloud"},
+                {"name": "widget_id",
+                 "help": "Local id, cg/ path, or @handle/widget-id (cloud)"},
                 {"name": "score", "type": float, "help": "Score from 1.0 to 5.0"},
                 {"name": "--comment", "default": None},
             ],
@@ -3583,7 +3836,8 @@ def _build_cli() -> AgentCLI:
             "help": "Rename a scaffolded widget's slug or domain (pre-checkin, Python-only)",
             "handler": cmd_rename,
             "args": [
-                {"name": "widget_id", "help": "Current widget ID (e.g. 'infra-urllib-client-python')"},
+                {"name": "widget_id",
+                 "help": "Current module id or directory path"},
                 {"name": "--name", "default": None,
                  "help": "New slug segment (e.g. 'http-client'). Just the middle part, not the full ID."},
                 {"name": "--domain", "default": None,
@@ -3598,8 +3852,11 @@ def _build_cli() -> AgentCLI:
             "help": "Run the validation pipeline on a widget",
             "handler": cmd_validate,
             "args": [
-                {"name": "path", "nargs": "?", "default": ".", "help": "Widget directory or widget_id with --lib"},
-                {"name": "--lib", "action": "store_true", "default": False, "help": "Treat path as a library widget_id"},
+                {"name": "path", "nargs": "?", "default": ".",
+                 "help": "Module id, directory path, or '.' "
+                         "(with --lib: library id)"},
+                {"name": "--lib", "action": "store_true", "default": False,
+                 "help": "Treat path as a library module id"},
             ],
         },
         {
@@ -3607,7 +3864,11 @@ def _build_cli() -> AgentCLI:
             "help": "Check a widget into the library (--publish to also publish)",
             "handler": cmd_checkin,
             "args": [
-                {"name": "path", "nargs": "?", "default": ".", "help": "Widget directory (default: .)"},
+                {"name": "path", "nargs": "?", "default": ".",
+                 "help": "Module id, directory path, or '.' "
+                         "(with --lib: library id)"},
+                {"name": "--lib", "action": "store_true", "default": False,
+                 "help": "Treat path as a library module id"},
                 {"name": "--reason", "required": True, "help": "What changed and why"},
                 {"name": "--bump", "default": "minor", "choices": ["major", "minor", "patch"],
                  "help": "Version bump type (default: minor)"},
@@ -3635,7 +3896,8 @@ def _build_cli() -> AgentCLI:
             "help": "Remove a widget from the library (and cloud if published)",
             "handler": cmd_delete,
             "args": [
-                {"name": "widget_id"},
+                {"name": "widget_id",
+                 "help": "Library module id or directory path"},
                 {"name": "--confirm", "action": "store_true", "default": False,
                  "help": "Actually delete (irreversible)"},
             ],
@@ -3663,9 +3925,9 @@ def _build_cli() -> AgentCLI:
             "handler": cmd_blueprint_add_dep,
             "args": [
                 {"name": "widget_id",
-                 "help": "Widget id to add as a dep (must be installed under <project>/cg/)."},
+                 "help": "Leaf widget id, cg/ path, or basename (installed under project/cg/)"},
                 {"name": "--path", "default": ".",
-                 "help": "Blueprint directory (default: .). Must be inside a project's cg/."},
+                 "help": "Blueprint id, directory, or '.' (default: .)"},
                 {"name": "--no-validate", "action": "store_true", "default": False,
                  "dest": "no_validate",
                  "help": "Skip re-validation after the edit. Use only for fast iteration; "
@@ -3694,9 +3956,14 @@ def _build_cli() -> AgentCLI:
             "handler": cmd_cloud_publish,
             "args": [
                 {"name": "widget_id", "nargs": "?", "default": None,
-                 "help": "Widget or blueprint ID (required with --lib, inferred otherwise)"},
-                {"name": "path", "nargs": "?", "default": ".", "help": "Widget or blueprint directory (default: .)"},
-                {"name": "--lib", "action": "store_true", "default": False},
+                 "help": "Widget/blueprint id, or a widget directory path "
+                         "(e.g. cg/backend-retry-python). Required with --lib."},
+                {"name": "path", "nargs": "?", "default": ".",
+                 "help": "Optional second form: explicit directory when the "
+                         "first arg is an id (default: .)"},
+                {"name": "--lib", "action": "store_true", "default": False,
+                 "help": "Resolve from the local library by id "
+                         "(preferred: cloud publish --lib <id>)"},
                 {"name": "--visibility", "default": None, "choices": ["public", "private"],
                  "help": "Override default visibility (widgets only)"},
                 {"name": "--governance", "default": None, "choices": ["open", "protected"],

@@ -111,6 +111,36 @@ def test_engine_widgets_excludes_blueprints(lib_with_both):
     assert "bp-auth-flow-python" not in widget_ids
 
 
+def test_engine_loads_widget_id_containing_history_and_skips_history_archive(tmp_path):
+    lib = tmp_path / "history_enabled_library"
+    lib.mkdir()
+    _plant_widget(str(lib), "universal-reversible-state-history-python")
+    archived = lib / "ordinary_widget" / "history" / "0.9.0"
+    archived.mkdir(parents=True)
+    _plant_widget(str(archived), "backend-archived-python")
+
+    carto = Cartograph(library_path=str(lib))
+
+    widget_ids = {widget["id"] for widget in carto.widgets}
+    assert "universal-reversible-state-history-python" in widget_ids
+    assert "backend-archived-python" not in widget_ids
+
+
+def test_engine_loads_blueprint_id_containing_history_and_skips_history_archive(tmp_path):
+    lib = tmp_path / "history_enabled_library"
+    lib.mkdir()
+    _plant_blueprint(str(lib), name="state-history")
+    archived = lib / "ordinary_blueprint" / "history" / "0.9.0"
+    archived.mkdir(parents=True)
+    _plant_blueprint(str(archived), name="archived-history")
+
+    carto = Cartograph(library_path=str(lib))
+
+    blueprint_ids = {blueprint["id"] for blueprint in carto.blueprints}
+    assert "bp-state-history-python" in blueprint_ids
+    assert "bp-archived-history-python" not in blueprint_ids
+
+
 # --- search ---------------------------------------------------------------
 
 
