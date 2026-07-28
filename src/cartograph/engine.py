@@ -250,6 +250,20 @@ def find_installed_widget_dir(cg_root: str, canonical_id: str) -> str | None:
     return None
 
 
+def _is_internal_history_manifest(manifest_path: str, library_path: str) -> bool:
+    """Return whether a manifest is nested under Cartograph's history archive.
+
+    ``history`` is a reserved directory component beneath a checked-in
+    component.  Compare components relative to the library root so component
+    IDs (and parent directories) that merely contain the word remain visible.
+    """
+    try:
+        relative_parts = os.path.relpath(manifest_path, library_path).split(os.sep)
+    except (OSError, ValueError):
+        return False
+    return "history" in relative_parts[:-1]
+
+
 def widget_path(widget_id: str, project_root: str = None) -> str:
     """Return the absolute path to an installed widget's directory.
 
@@ -556,7 +570,10 @@ class Cartograph:
         cache_dirty = False
 
         search_pattern = os.path.join(self.library_path, "**", "widget.json")
-        found = [p for p in glob.glob(search_pattern, recursive=True) if "history" not in p]
+        found = [
+            p for p in glob.glob(search_pattern, recursive=True)
+            if not _is_internal_history_manifest(p, self.library_path)
+        ]
         for manifest_path in found:
             try:
                 with open(manifest_path, 'r', encoding="utf-8") as f:
@@ -697,8 +714,10 @@ class Cartograph:
         if not os.path.exists(self.library_path):
             return
         search_pattern = os.path.join(self.library_path, "**", "blueprint.json")
-        found = [p for p in glob.glob(search_pattern, recursive=True)
-                 if "history" not in p]
+        found = [
+            p for p in glob.glob(search_pattern, recursive=True)
+            if not _is_internal_history_manifest(p, self.library_path)
+        ]
         for manifest_path in found:
             try:
                 with open(manifest_path, 'r', encoding="utf-8") as f:

@@ -349,9 +349,24 @@ def test_mcp_instructions_are_trimmed():
     content = _build_setup_instructions_mcp()
     assert "## Cartograph" in content
     assert "### Domains" in content
+    assert "### Custom rules (project memory)" in content
     assert "Beyond the MCP surface" in content
     assert "### Commands" not in content
     assert "### Config keys" not in content
+
+
+def test_full_and_mcp_setup_both_include_custom_rules():
+    """Custom rules are ambient project memory — present in both setup modes."""
+    from cartograph.cli import _build_setup_instructions, _build_setup_instructions_mcp
+    full = _build_setup_instructions()
+    mcp = _build_setup_instructions_mcp()
+    for content in (full, mcp):
+        assert "### Custom rules (project memory)" in content
+        assert "hard memory" in content
+        assert "cg-rules" in content
+    # Full still carries command catalog; MCP stays trimmed
+    assert "### Config keys" in full
+    assert "### Config keys" not in mcp
 
 
 def test_setup_mcp_flag_writes_trimmed(tmp_path):
