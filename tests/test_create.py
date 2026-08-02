@@ -394,3 +394,33 @@ def test_create_accepts_reordered_name(carto, tmp_path):
     )
     assert result.get("status") == "success"
     _assert_scaffold(result["path"], ["widget.json", "src", "tests"])
+
+
+def test_create_lean_widget(carto, tmp_path, monkeypatch):
+    # Lean ships supported=False until its cross-platform CI proves the
+    # elan toolchain; the scaffold itself is testable regardless.
+    from cartograph.languages.lean import LeanEngine
+    monkeypatch.setattr(LeanEngine, "supported", True)
+    result = carto.create(
+        "my-widget",
+        language="lean",
+        name="My Widget",
+        domain="formal",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "lakefile.toml",
+        "src/my_widget.lean",
+        "tests/test_my_widget.lean",
+        "examples/example_usage.lean",
+    ])
+    # The lake lib name must match the module the test/example import.
+    with open(f"{result['path']}/lakefile.toml") as f:
+        assert 'name = "my_widget"' in f.read()
+    with open(f"{result['path']}/tests/test_my_widget.lean") as f:
+        assert "import my_widget" in f.read()
+    with open(f"{result['path']}/examples/example_usage.lean") as f:
+        assert "import my_widget" in f.read()

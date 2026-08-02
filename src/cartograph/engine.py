@@ -184,6 +184,7 @@ LANGUAGE_ALIASES = {
     "ang": "angular", "ng": "angular",
     "tf": "terraform", "hcl": "terraform",
     "ngspice": "spice", "cir": "spice",
+    "lean4": "lean",
 }
 
 def normalize_language(lang):

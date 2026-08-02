@@ -23,6 +23,7 @@ creates `backend-retry-backoff-python`.
     rtl        register-transfer level hardware design (SystemVerilog)
     devops     infrastructure-as-code, deployment, ops tooling (Terraform)
     analog     analog/mixed-signal circuits, SPICE simulation (ngspice)
+    formal     formally verified code, machine-checked proofs (Lean 4)
     universal  language-agnostic, cross-domain
 
 ### Commands

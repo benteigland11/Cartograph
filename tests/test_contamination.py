@@ -33,6 +33,7 @@ from cartograph.languages.go import GoEngine
 from cartograph.languages.rust import RustEngine
 from cartograph.languages.gdscript import GDScriptEngine
 from cartograph.languages.java import JavaEngine
+from cartograph.languages.lean import LeanEngine
 from cartograph.languages.spice import SpiceEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
@@ -94,6 +95,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "rust": RustEngine,
         "gdscript": GDScriptEngine,
         "java": JavaEngine,
+        "lean": LeanEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -128,6 +130,7 @@ CLEAN = {
     "rust":       ('/// Hello returns a greeting.\npub fn hello() -> String { String::from("world") }\n', "", None),
     "java":       ('/** Clean module. */\npublic final class Module {\n    private Module() {}\n\n    /** Returns a greeting. */\n    public static String hello() { return "world"; }\n}\n', "", None),
     "gdscript":   ('func hello() -> String:\n\treturn "world"\n', "", None),
+    "lean":       ('/-- Returns a greeting. -/\ndef hello : String := "world"\n', "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -143,6 +146,7 @@ ABS_PATH_SRC = {
     "rust":       'pub fn log_path() -> &\'static str { "/home/user/logs/app.log" }\n',
     "java":       'public final class Module {\n    public static String logPath() { return "/home/user/logs/app.log"; }\n}\n',
     "gdscript":   'var log_path: String = "/home/user/logs/app.log"\n',
+    "lean":       'def logPath : String := "/home/user/logs/app.log"\n',
 }
 
 # Check 2: Credentials in src/ -> block
@@ -158,6 +162,7 @@ CREDENTIAL_SRC = {
     "rust":       'pub fn key() -> String {\n    let api_key = "sk-abc123verylongkey";\n    api_key.to_string()\n}\n',
     "java":       'public final class Module {\n    public static String key() {\n        String api_key = "sk-abc123verylongkey";\n        return api_key;\n    }\n}\n',
     "gdscript":   'var api_key: String = "sk-abc123verylongkey"\n',
+    "lean":       'def api_key := "sk-abc123verylongkey"\n',
 }
 
 # Check 2b: Credentials in tests/ -> warning (not block)
@@ -173,6 +178,7 @@ CREDENTIAL_TEST = {
     "rust":       'fn fake_cred() -> String {\n    let password = "fake_test_password_123";\n    password.to_string()\n}\n',
     "java":       'class ModuleTest {\n    String fakeCred() {\n        String password = "fake_test_password_123";\n        return password;\n    }\n}\n',
     "gdscript":   'var password: String = "fake_test_password_123"\n',
+    "lean":       'def password := "fake_test_password_123"\n',
 }
 
 # Check 3: Hardcoded URLs -> block
@@ -188,6 +194,7 @@ URL_SRC = {
     "rust":       'pub fn api() -> &\'static str { "https://api.mycompany.com/v1" }\n',
     "java":       'public final class Module {\n    public static String api() { return "https://api.mycompany.com/v1"; }\n}\n',
     "gdscript":   'var api: String = "https://api.mycompany.com/v1"\n',
+    "lean":       'def api : String := "https://api.mycompany.com/v1"\n',
 }
 
 # Check 3b: localhost/example.com URLs -> allowed
@@ -203,6 +210,7 @@ URL_ALLOWED = {
     "rust":       'pub fn api() -> &\'static str { "http://localhost:8080/api" }\n',
     "java":       'public final class Module {\n    public static String api() { return "http://localhost:8080/api"; }\n}\n',
     "gdscript":   'var api: String = "http://localhost:8080/api"\n',
+    "lean":       'def api : String := "http://localhost:8080/api"\n',
 }
 
 # Check 4: Hardcoded IPs -> block
@@ -218,6 +226,7 @@ IP_SRC = {
     "rust":       'pub fn host() -> &\'static str { "192.168.1.100" }\n',
     "java":       'public final class Module {\n    public static String host() { return "192.168.1.100"; }\n}\n',
     "gdscript":   'var host: String = "192.168.1.100"\n',
+    "lean":       'def host : String := "192.168.1.100"\n',
 }
 
 # Check 5: Sleep in src/ -> block
@@ -230,6 +239,7 @@ SLEEP_SRC = {
     "go":         'package module\n\nimport "time"\n\nfunc Wait() { time.Sleep(1 * time.Second) }\n',
     "java":       'public final class Module {\n    public static void pause() throws InterruptedException { Thread.sleep(1000); }\n}\n',
     "rust":       'use std::thread;\nuse std::time::Duration;\n\npub fn wait() { thread::sleep(Duration::from_secs(1)); }\n',
+    "lean":       'def wait : IO Unit := IO.sleep 1000\n',
 }
 
 # Check 5b: Sleep in tests/ with small duration -> no warning
@@ -242,6 +252,7 @@ SLEEP_TEST_SMALL = {
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(500 * time.Millisecond) }\n',
     "java":       'class ModuleTest {\n    void pause() throws InterruptedException { Thread.sleep(500); }\n}\n',
     "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_millis(500)); }\n',
+    "lean":       'def wait : IO Unit := IO.sleep 500\n',
 }
 
 # Check 5c: Sleep in tests/ with large duration -> warning
@@ -254,6 +265,7 @@ SLEEP_TEST_LARGE = {
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(5 * time.Second) }\n',
     "java":       'class ModuleTest {\n    void pause() throws InterruptedException { Thread.sleep(5000); }\n}\n',
     "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_secs(5)); }\n',
+    "lean":       'def wait : IO Unit := IO.sleep 5000\n',
 }
 
 # Check 6: Hardcoded values -> warning
@@ -266,6 +278,7 @@ HARDCODED_VALUE = {
     "go":         'package module\n\nconst Timeout = 30\n',
     "java":       'public final class Module {\n    static final int TIMEOUT = 30;\n    private Module() {}\n}\n',
     "rust":       'pub const TIMEOUT: u64 = 30;\n',
+    "lean":       'def timeout := 30\n',
 }
 
 # Check 7: Env var access -> warning
@@ -278,6 +291,7 @@ ENV_VAR = {
     "go":         'package module\n\nimport "os"\n\nfunc Cfg() string { return os.Getenv("KEY") }\n',
     "java":       'public final class Module {\n    public static String cfg() { return System.getenv("KEY"); }\n}\n',
     "rust":       'pub fn cfg() -> Option<String> { std::env::var("KEY").ok() }\n',
+    "lean":       'def cfg : IO (Option String) := IO.getEnv "KEY"\n',
 }
 
 # Check 8: Unlisted imports -> warning
@@ -290,6 +304,7 @@ UNLISTED_IMPORT = {
     "go":         'package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n',
     "java":       'import com.google.gson.Gson;\n\npublic final class Module {\n    public static String js(Object o) { return new Gson().toJson(o); }\n}\n',
     "rust":       'use some_unregistered_crate::Thing;\n',
+    "lean":       'import Somepkg\n',
 }
 
 # Check 8b: Listed imports -> no warning
@@ -302,6 +317,7 @@ LISTED_IMPORT = {
     "go":         ('package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n', ["github.com/google/uuid>=1.6.0"]),
     "java":       ('import com.google.gson.Gson;\n\npublic final class Module {\n    public static String js(Object o) { return new Gson().toJson(o); }\n}\n', ["com.google.code.gson:gson>=2.11.0"]),
     "rust":       ('use some_registered_pkg::Thing;\n', ["some-registered-pkg>=1.0.0"]),
+    "lean":       ('import Somepkg\n', ["Somepkg>=1.0.0"]),
 }
 
 # Check 8c: Stdlib imports -> no warning
@@ -315,13 +331,14 @@ STDLIB_IMPORT = {
     "go":         'package module\n\nimport "encoding/json"\n\nvar _ = json.Marshal\n',
     "java":       'import java.util.List;\n\npublic final class Module {\n    public static int size(List<String> xs) { return xs.size(); }\n}\n',
     "rust":       'use std::collections::HashMap;\n\npub fn f() -> HashMap<u8, u8> { HashMap::new() }\n',
+    "lean":       'import Std\n',
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java", "lean": "lean"}
 
 # Which languages need external tools to run their scanners
-NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot", "java": "java"}
+NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot", "java": "java", "lean": "lean"}
 
 
 # ---------------------------------------------------------------------------
@@ -329,10 +346,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java", "lean"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java", "lean"]
 
 
 def _skip_if_missing(lang):
@@ -346,6 +363,17 @@ def _skip_if_missing(lang):
         from cartograph.languages import get_engine
         if get_engine("java").runtime_version() is None:
             pytest.skip("java on PATH is not a working JDK (macOS no-JDK stub)")
+        # A JRE (or partial JDK) reports a version but lacks jdk.compiler,
+        # which single-file source mode needs to run the native scanner.
+        import subprocess
+        try:
+            mods = subprocess.run(["java", "--list-modules"],
+                                  capture_output=True, text=True, timeout=30)
+            if "jdk.compiler" not in (mods.stdout or ""):
+                pytest.skip("java on PATH has no jdk.compiler module (JRE, "
+                            "not a JDK) - scanner single-file mode unavailable")
+        except Exception:
+            pytest.skip("java on PATH could not be probed")
 
 
 class TestContaminationStandard:
@@ -2755,3 +2783,97 @@ class TestJavaStubDetection:
                             lambda self: (True, ""))
         ok, msg = engine.check_available()
         assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# Lean-specific checks
+# ---------------------------------------------------------------------------
+
+class TestLeanSpecific:
+    """Lean's headline guarantee: checked-in means proven. The compiler only
+    warns on `sorry` and silently accepts `axiom`, so the scanner must hard-
+    block both - and its lexer must not trip on the same tokens inside
+    strings, line comments, or (nested) block comments."""
+
+    def _lean_scan(self, tmp_path, src, test_code=""):
+        return _scan(tmp_path, "lean", "lean", src, test_code)
+
+    def test_sorry_in_src_blocks(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path, "theorem t (n : Nat) : n = n := by sorry\n")
+        assert any("sorry" in b.lower() for b in result["blocks"]), result
+
+    def test_sorry_in_tests_blocks(self, tmp_path):
+        # Unlike credentials/IPs, an unproven test is a failed validation,
+        # not fake data - sorry blocks everywhere.
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path, CLEAN["lean"][0],
+            test_code="example : 1 = 1 := by sorry\n")
+        assert any("sorry" in b.lower() for b in result["blocks"]), result
+
+    def test_admit_blocks(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path, "theorem t (n : Nat) : n = n := by admit\n")
+        assert any("sorry" in b.lower() or "admit" in b.lower()
+                   for b in result["blocks"]), result
+
+    def test_axiom_in_src_blocks(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(tmp_path, "axiom cheat : 1 = 2\n")
+        assert any("axiom" in b.lower() for b in result["blocks"]), result
+
+    def test_println_in_src_blocks(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path, 'def log : IO Unit := IO.println "hi"\n')
+        assert any("console output" in b.lower()
+                   for b in result["blocks"]), result
+
+    def test_partial_def_warns(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path, "partial def spin (n : Nat) : Nat := spin n\n")
+        assert any("partial" in w.lower() for w in result["warnings"]), result
+
+    def test_native_decide_warns(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path,
+            "theorem t : 2 + 2 = 4 := by native_decide\n")
+        assert any("native_decide" in w.lower()
+                   for w in result["warnings"]), result
+
+    # -- lexer negatives: banned tokens in strings/comments must NOT trip --
+
+    def test_sorry_in_string_clean(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path, 'def msg : String := "we are sorry about that"\n')
+        assert result["blocks"] == [], result
+
+    def test_sorry_in_line_comment_clean(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path,
+            "-- sorry axiom IO.println all fine here\n"
+            'def hello : String := "world"\n')
+        assert result["blocks"] == [], result
+
+    def test_sorry_in_nested_block_comment_clean(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path,
+            "/- outer sorry /- nested axiom -/ still comment sorry -/\n"
+            'def hello : String := "world"\n')
+        assert result["blocks"] == [], result
+
+    def test_doc_comment_clean(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path,
+            "/-- Doc mentioning sorry, axiom, IO.println. -/\n"
+            'def hello : String := "world"\n')
+        assert result["blocks"] == [], result

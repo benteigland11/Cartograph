@@ -97,6 +97,7 @@ _BY_LANGUAGE: dict[str, frozenset[str]] = {
     "swift": frozenset({".build", ".swiftpm", "Pods"}),
     "dart": frozenset({".dart_tool", "build"}),
     "terraform": frozenset({".terraform"}),
+    "lean": frozenset({".lake", "lake-manifest.json"}),
 }
 
 

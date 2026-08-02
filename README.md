@@ -114,7 +114,11 @@ what the tool actually supports.
 - **PHP**: Composer + PHPUnit 11, Xdebug or PCOV for coverage, 80% threshold via `--min-coverage`. PSR-4 autoloading under `Cartograph\` namespace. Contamination scanner blocks WordPress globals (`wp_*`, `add_action`, `$wpdb`, etc.) and `echo` in src/ to enforce pure PHP utility widgets.
 - **Terraform**: `terraform validate` against src/, tests/, and examples/ (shape-only - no test runner, no coverage; modules harden through use). Blocks provider/backend blocks in src/, real AWS account IDs, and credential-shaped assignments. Providers cached via `TF_PLUGIN_CACHE_DIR`.
 - **Go**: `go test` with built-in coverage (80% via `-coverpkg`), `go vet` + build check, native `go/ast` contamination scanner. Single-binary toolchain. Widgets are libraries: console output, `os.Exit`, and `panic` in `init()` are blocked in src/.
+- **SPICE**: ngspice batch simulation (`analog` domain). A testbench must drive the block, simulate to convergence, and assert measured quantities with `.meas` + ASSERT_PASS/ASSERT_FAIL echo sentinels - ngspice's exit code alone is unreliable, so the engine parses output. Every component value in a `.subckt` must be a `{param}`; hardcoded values warn. Machine-specific `.include` paths blocked; device-model libraries are declared dependencies the consumer supplies.
+- **Rust**: cargo + cargo-llvm-cov line coverage (80%, tests/ and examples/ excluded from the denominator), `cargo fmt --check` as a hard gate, native raw-string-aware scanner. `println!`/`process::exit`/`unsafe` blocked in src/. Blueprints compose via Cargo path deps. Requires the cargo-llvm-cov subcommand and llvm-tools-preview component.
+- **GDScript**: Godot 4 headless (`gamedev` domain) - single `godot` binary, never opens the editor. Every script parse-checked with `--check-only`; tests are `extends SceneTree` scripts asserting via ASSERT_PASS/quit-code contract. Deprecated Godot 3 syntax is hard-blocked by the native scanner (the headline check - LLMs constantly emit Godot 3 into Godot 4 projects). No coverage floor (no tool exists).
 - **Java**: Gradle + JUnit 5, JaCoCo line coverage (80%, Gradle core plugin - the whole toolchain is JDK 21+ plus Gradle), native comment/string/text-block-aware scanner run in JDK single-file mode. Widgets own their full build.gradle including plugins (build-time plugins like Fabric Loom work); the engine only requires a JaCoCo XML report from `test` and a `runExample` task. `System.out/err`, `System.exit`, and `Thread.sleep` are blocked in src/.
+- **Lean 4**: elan + lake, `lake build` kernel-checks every theorem - checked-in means *proven*. Native Lean scanner hard-blocks unproven `sorry`/`admit` (the compiler only warns) and custom `axiom` declarations in src/. ASSERT_PASS runtime test contract on top of proof checking; no coverage floor (the kernel is a stronger floor than coverage for proof code). Dependency-free v1 - Lean core library only, no Mathlib yet.
 
 Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD and SystemVerilog use Python-based scanners since neither language has general-purpose file I/O suitable for static analysis tooling.
 
@@ -146,7 +150,7 @@ pytest
 
 The widget library lives in your platform's user data directory. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
-Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, terraform, go, cargo, cargo-llvm-cov, ngspice, godot, java, gradle) are installed correctly.
+Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, ng, php, composer, terraform, go, cargo, cargo-llvm-cov, ngspice, godot, java, gradle, lean, lake) are installed correctly.
 
 ### Pre-push checks and release preflight
 

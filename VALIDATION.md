@@ -43,7 +43,15 @@ These are requirements. Validation fails if any are not met.
 | Nim | No | N/A | No stdlib coverage tool exists |
 | OpenSCAD | No | N/A | Render passes = validation passes |
 | SystemVerilog | No | N/A | Testbench `$finish` exit code = pass; no per-line coverage |
+| Angular | Yes | 80% | karma.conf.js `check.global` thresholds |
+| PHP | Yes | 80% | PHPUnit `--min-coverage` via Xdebug or PCOV |
+| Terraform | No | N/A | Shape-only validation (`terraform validate`); modules harden through use |
 | Go | Yes | 80% | go test -coverpkg=./src/... (built into the toolchain) |
+| Rust | Yes | 80% | cargo-llvm-cov (tests/ and examples/ excluded from denominator) |
+| SPICE | No | N/A | Simulation + `.meas` assertions = validation; no line-coverage concept for netlists |
+| GDScript | No | N/A | No coverage tool exists; ASSERT_PASS contract instead |
+| Java | Yes | 80% | JaCoCo XML report from `gradle test` |
+| Lean | No | N/A | No coverage tool exists; the kernel proof-checks every theorem on every build - a stronger floor than coverage for proof code |
 
 Nim coverage would require compiling via `--debugger:native` and running `gcov`/`lcov` on the generated C code. This produces C-level line coverage, not Nim source-level coverage. Decided it was too unreliable and confusing to impose on widget authors.
 
@@ -487,6 +495,78 @@ component values inside a `.subckt` (every R/L/C/source value should be a
 of the dependency's `.subckt`, instantiated with `X` cards. ngspice resolves
 nested includes relative to the including file, so the same relative path
 works in the validator sandbox.
+
+### Lean 4
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| lakefile.toml exists | missing | file check |
+| Native Lean scanner passes on src/ | issues found | lean_scanner.lean (`lean --run`) |
+| All declared dependencies are version-pinned | unpinned dep found | dep pinning check (v1 rejects all deps - see Dependencies) |
+| src/ builds and every proof is kernel-checked | build error or `sorry` warning | `lake build` + output parse |
+| Each test asserts and exits cleanly | non-zero exit, ASSERT_FAIL, no ASSERT_PASS, or `sorry` | `lake env lean --run tests/<t>.lean` |
+| Example runs and exits cleanly | non-zero exit or `sorry` | `lake env lean --run examples/example_usage.lean` |
+
+**Layout:** `lakefile.toml` at the widget root declares a single `[[lean_lib]]`
+with `srcDir = "src"` and the widget slug (underscored) as the lib/module name.
+`src/<slug>.lean` holds definitions AND theorems; `tests/test_<slug>.lean` and
+`examples/example_usage.lean` import the module by name and define `main`. The
+toolchain is elan + lake + lean, all from one installer. Widgets do NOT carry a
+`lean-toolchain` pin - the library validates against the machine's default elan
+toolchain (same policy as GDScript not pinning a Godot version), and the
+toolchain version is stamped into widget.json at checkin.
+
+**The build is the validator:** `lake build` kernel-checks every theorem in
+src/ - when it succeeds, the widget's stated properties are *proven*, not
+sampled. That makes Lean the one engine where the validation floor is stronger
+than any coverage number. Two escape hatches would silently undermine that
+guarantee, and both are closed explicitly:
+
+- `sorry`/`admit` compile with only a warning. The native scanner hard-blocks
+  the tokens (everywhere - an unproven test theorem is a failed validation,
+  not fake data), and the engine additionally fails on the
+  ``declaration uses `sorry` `` warning in build/test/example output, which
+  catches anything token-level scanning could miss (e.g. a tactic that
+  elaborates to sorry).
+- `axiom` declarations are accepted silently by the compiler and can prove
+  anything. Hard-blocked in src/ by the scanner.
+
+**Coverage:** none. No line-coverage tool exists for Lean, and for proof code
+the kernel check is a stronger floor than coverage. Runtime behavior is
+covered by the ASSERT_PASS contract (mirrors GDScript/SPICE): a test's `main`
+must print `ASSERT_PASS` per verified property, produce no `ASSERT_FAIL`, and
+exit 0 - a clean exit with no `ASSERT_PASS` is rejected. Proof-level
+assertions (`example : f x = y := rfl` in the test file) are kernel-checked
+during elaboration before `main` runs, so both layers ride the same command.
+
+**Dependencies:** v1 is deliberately dependency-free - widgets build against
+the Lean core library only, and `install_deps` rejects any declared dependency
+with a clear error. Mathlib support is a deliberate future decision: it is
+multi-gigabyte, tightly pinned to toolchain versions, and needs a
+pre-installed-cache policy like the ML frameworks (never auto-installed).
+
+**Scanner:** native `lean_scanner.lean`, run via `lean --run` (no lake project
+needed - it uses only the core `Lean.Data.Json`). A hand-written lexer
+classifies every character as code, string, or comment - handling nested block
+comments (`/- /- -/ -/`), doc comments, line comments, multi-line strings with
+escapes, interpolated strings, and char literals - so `sorry` in a docstring
+or an IP in a comment never trips. Blocks: `sorry`/`admit` (everywhere),
+`axiom` (src/), `IO.println`/`dbg_trace` (src/), `IO.sleep` (src/), absolute
+paths, credentials, hardcoded IPs (src/; warnings in tests/). Warnings:
+`native_decide` (trusts the compiled evaluator instead of the kernel),
+`unsafe` and `partial` defs in src/ (totality is the point of a Lean widget),
+`IO.getEnv`, hardcoded URLs (localhost/example.* allowlisted), top-level
+numeric constants, unlisted imports (declared deps read from widget.json;
+`Init`/`Std`/`Lean`/`Lake` and the widget's own modules allowlisted). The
+scanner filters its own basename from the target list, so the self-scan trap
+is structurally avoided.
+
+**Blueprints:** Lean composition uses lake path-requires: `blueprint add-dep`
+appends `[[require]] name = "<dep-lib>" path = "cg/<dep-widget>"` to the
+blueprint's lakefile.toml (the layout the validator sandbox populates), so
+`lake build` builds the composed widget's lib as part of the blueprint
+workspace and `import <dep-module>` resolves - same shape as Rust's Cargo
+path deps.
 
 ## Contamination Scanning
 

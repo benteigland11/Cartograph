@@ -1889,3 +1889,113 @@ def test_java_blueprint_validates_end_to_end(carto, project):
     res = carto.validate_blueprint(bp)
     assert res.get("status") == "success", res
     assert res["id"] == "bp-shouter-java"
+
+
+# ---------------------------------------------------------------------------
+# Lean
+# ---------------------------------------------------------------------------
+
+_LEAN_GREET_SRC = """\
+/-- Builds a greeting for `who`. -/
+def greeting (who : String) : String := s!"hello, {who}"
+"""
+
+_LEAN_SHOUTER_SRC = """\
+import greet
+
+/-- Uppercases a greeting via the greet widget. -/
+def shout (who : String) : String := (greeting who).toUpper
+"""
+
+_LEAN_SHOUTER_TEST = """\
+import shouter
+
+def main : IO UInt32 := do
+  if shout "test" != "HELLO, TEST" then
+    IO.eprintln "ASSERT_FAIL shout"
+    return 1
+  IO.println "ASSERT_PASS shout"
+  return 0
+"""
+
+_LEAN_SHOUTER_EXAMPLE = """\
+import shouter
+
+def main : IO Unit := IO.println (shout "world")
+"""
+
+
+def _write_lean_widget(project_dir: str) -> str:
+    wdir = os.path.join(project_dir, "cg", "formal-greet-lean")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(wdir, d))
+    manifest = {
+        "meta": {
+            "id": "formal-greet-lean", "name": "greet", "version": "1.0.0",
+            "domain": "formal", "tags": ["greeting", "demo", "test"],
+        },
+        "tech_stack": {"language": "lean", "dependencies": []},
+        "description": "Builds a greeting string.",
+    }
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(wdir, "lakefile.toml"), "w") as f:
+        f.write('name = "greet"\ndefaultTargets = ["greet"]\n\n'
+                '[[lean_lib]]\nname = "greet"\nsrcDir = "src"\n')
+    with open(os.path.join(wdir, "src", "greet.lean"), "w") as f:
+        f.write(_LEAN_GREET_SRC)
+    return wdir
+
+
+def _write_lean_blueprint(project_dir: str) -> str:
+    bp = os.path.join(project_dir, "cg", "bp-shouter-lean")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(bp, d))
+    manifest = {
+        "id": "bp-shouter-lean",
+        "name": "shouter",
+        "language": "lean",
+        "version": "0.1.0",
+        "description": "Uppercases a greeting via the greet widget.",
+        "tags": ["greeting", "demo", "blueprint"],
+        "dependencies": [
+            {"id": "formal-greet-lean", "version": "1.0.0"},
+        ],
+        "domains": [],
+    }
+    with open(os.path.join(bp, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(bp, "lakefile.toml"), "w") as f:
+        f.write('name = "shouter"\ndefaultTargets = ["shouter"]\n\n'
+                '[[lean_lib]]\nname = "shouter"\nsrcDir = "src"\n')
+    with open(os.path.join(bp, "src", "shouter.lean"), "w") as f:
+        f.write(_LEAN_SHOUTER_SRC)
+    with open(os.path.join(bp, "tests", "test_shouter.lean"), "w") as f:
+        f.write(_LEAN_SHOUTER_TEST)
+    with open(os.path.join(bp, "examples", "example_usage.lean"), "w") as f:
+        f.write(_LEAN_SHOUTER_EXAMPLE)
+    # Wire the composed widget the way `blueprint add-dep` would.
+    engine = get_engine("lean")
+    engine.wire_blueprint_dep(
+        bp, "formal-greet-lean",
+        os.path.join(project_dir, "cg", "formal-greet-lean"))
+    return bp
+
+
+@pytest.mark.slow
+def test_lean_blueprint_validates_end_to_end(carto, project):
+    if not shutil.which("lake"):
+        pytest.skip("lake not available")
+    engine = get_engine("lean")
+    if engine is None or not engine.supported:
+        pytest.skip("lean engine not available")
+    ok, msg = engine.check_available()
+    if not ok:
+        pytest.skip(f"lean engine not ready: {msg}")
+
+    _write_lean_widget(str(project))
+    bp = _write_lean_blueprint(str(project))
+
+    res = carto.validate_blueprint(bp)
+    assert res.get("status") == "success", res
+    assert res["id"] == "bp-shouter-lean"
