@@ -118,7 +118,7 @@ class LeanEngine(LanguageEngine):
         "lake": "Install Lean 4 via elan - lean-lang.org/install "
                 "(lake ships with the toolchain)",
     }
-    supported = False
+    supported = True
 
     manifest_patterns = ["lakefile.toml"]
     # lean/lake are real executables (not .cmd shims) - keep args unparsed

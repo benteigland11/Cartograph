@@ -43,8 +43,8 @@ jobs:
           python -c "
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
-          expected = {'angular', 'gdscript', 'go', 'java', 'javascript', 'nim',
-                      'openscad', 'php', 'python', 'rust', 'spice',
+          expected = {'angular', 'gdscript', 'go', 'java', 'javascript', 'lean',
+                      'nim', 'openscad', 'php', 'python', 'rust', 'spice',
                       'systemverilog', 'terraform', 'typescript'}
           missing = expected - langs
           assert not missing, f'engines missing from wheel install: {missing}'
