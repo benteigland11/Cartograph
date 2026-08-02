@@ -76,6 +76,9 @@ jobs:
             java:
               - 'src/cartograph/languages/java.py'
               - 'src/cartograph/languages/scanners/java_scanner.java'
+            lean:
+              - 'src/cartograph/languages/lean.py'
+              - 'src/cartograph/languages/scanners/lean_scanner.lean'
 
       - uses: actions/setup-python@v6
         with:
@@ -171,6 +174,27 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14'
+
+      # Lean's whole toolchain (elan + lean + lake) comes from the single
+      # official elan installer; `stable` resolves the current Lean 4
+      # release. The retry guards flaky release-server downloads.
+      - name: Install Lean (Linux/macOS)
+        if: matrix.os != 'windows-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.lean == 'true')
+        shell: bash
+        run: |
+          curl -sSf https://elan.lean-lang.org/elan-init.sh -o elan-init.sh
+          sh elan-init.sh -y --default-toolchain stable || (sleep 15 && sh elan-init.sh -y --default-toolchain stable)
+          rm elan-init.sh
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Install Lean (Windows)
+        if: matrix.os == 'windows-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.lean == 'true')
+        shell: pwsh
+        run: |
+          curl -sSf -o elan-init.ps1 https://elan.lean-lang.org/elan-init.ps1
+          powershell -ExecutionPolicy Bypass -f elan-init.ps1 -NoPrompt $true -DefaultToolchain stable
+          Remove-Item elan-init.ps1
+          Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.elan\bin"
 
       - name: Install dependencies
         run: pip install -e . && pip install pytest pytest-cov

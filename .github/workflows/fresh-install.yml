@@ -209,5 +209,24 @@ jobs:
           test -d "$WIDGET_DIR/tests"
           test -d "$WIDGET_DIR/examples"
 
+      - name: Install Lean
+        run: |
+          curl -sSf https://elan.lean-lang.org/elan-init.sh -o elan-init.sh
+          sh elan-init.sh -y --default-toolchain stable || (sleep 15 && sh elan-init.sh -y --default-toolchain stable)
+          rm elan-init.sh
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: cartograph create (lean)
+        run: cartograph create formal-ci-test-lean --language lean --domain formal --name "CI Lean Test"
+
+      - name: Verify lean widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "lakefile.toml" -printf "%h" -quit)
+          echo "Lean widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/lakefile.toml"
+          test -d "$WIDGET_DIR/src"
+          test -d "$WIDGET_DIR/tests"
+          test -d "$WIDGET_DIR/examples"
+
       - name: cartograph stats
         run: cartograph stats
