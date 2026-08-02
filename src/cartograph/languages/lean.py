@@ -345,6 +345,54 @@ class LeanEngine(LanguageEngine):
                               "unproven `sorry`.")
         return self._ok()
 
+    def wire_blueprint_dep(self, blueprint_dir, dep_id, dep_dir):
+        """Add a lake path-require for a composed widget.
+
+        Lake resolves `import <slug>` through [[require]] entries; a path
+        require pointing at cg/<dep_id>/ (the layout the validator sandbox
+        populates) makes the composed widget's lib build as part of the
+        blueprint workspace - same shape as Rust's Cargo path deps.
+        """
+        lakefile = os.path.join(blueprint_dir, "lakefile.toml")
+        if not os.path.isfile(lakefile):
+            return
+        dep_name = self._lakefile_name(dep_dir) or dep_id.replace("-", "_")
+        rel_path = f"cg/{dep_id}"
+        with open(lakefile, encoding="utf-8") as f:
+            content = f.read()
+        if f'path = "{rel_path}"' in content:
+            return
+        entry = (f'\n[[require]]\nname = "{dep_name}"\n'
+                 f'path = "{rel_path}"\n')
+        with open(lakefile, "a", newline="\n", encoding="utf-8") as f:
+            f.write(entry)
+
+    def unwire_blueprint_dep(self, blueprint_dir, dep_id):
+        lakefile = os.path.join(blueprint_dir, "lakefile.toml")
+        if not os.path.isfile(lakefile):
+            return
+        with open(lakefile, encoding="utf-8") as f:
+            content = f.read()
+        rel_path = f"cg/{dep_id}"
+        blocks = content.split("\n[[require]]")
+        kept = [blocks[0]] + [b for b in blocks[1:]
+                              if f'path = "{rel_path}"' not in b]
+        new = "\n[[require]]".join(kept)
+        if new != content:
+            with open(lakefile, "w", newline="\n", encoding="utf-8") as f:
+                f.write(new)
+
+    @staticmethod
+    def _lakefile_name(widget_dir):
+        """Package name from a widget's lakefile.toml, or None."""
+        lakefile = os.path.join(widget_dir, "lakefile.toml")
+        try:
+            import tomllib
+            with open(lakefile, "rb") as f:
+                return tomllib.load(f).get("name")
+        except Exception:
+            return None
+
     def run_blueprint_example(self, sandbox, example_file):
         """Blueprint sandboxes are shaped like widget roots; delegate to the
         engine's own runner (base would invoke python on the file)."""
