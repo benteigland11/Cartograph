@@ -363,6 +363,17 @@ def _skip_if_missing(lang):
         from cartograph.languages import get_engine
         if get_engine("java").runtime_version() is None:
             pytest.skip("java on PATH is not a working JDK (macOS no-JDK stub)")
+        # A JRE (or partial JDK) reports a version but lacks jdk.compiler,
+        # which single-file source mode needs to run the native scanner.
+        import subprocess
+        try:
+            mods = subprocess.run(["java", "--list-modules"],
+                                  capture_output=True, text=True, timeout=30)
+            if "jdk.compiler" not in (mods.stdout or ""):
+                pytest.skip("java on PATH has no jdk.compiler module (JRE, "
+                            "not a JDK) - scanner single-file mode unavailable")
+        except Exception:
+            pytest.skip("java on PATH could not be probed")
 
 
 class TestContaminationStandard:
