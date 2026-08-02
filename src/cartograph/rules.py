@@ -54,6 +54,7 @@ _LANGUAGE_RULES = {
     "rust":          ("rules.rust.py",       [sys.executable]),
     "gdscript":      ("rules.gdscript.py",   [sys.executable]),
     "java":          ("rules.java.py",       [sys.executable]),
+    "lean":          ("rules.lean.py",       [sys.executable]),
 }
 
 
@@ -1599,6 +1600,92 @@ if __name__ == "__main__":
     main()
 """
 
+_TEMPLATE_LEAN = """\
+\"\"\"
+Custom validation rules for Lean 4 widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+LEAN-SPECIFIC CHECKS TO CONSIDER
+--------------------------------
+The engine already hard-blocks sorry/admit, custom axioms in src/, console
+output, and IO.sleep, and warns on native_decide/unsafe/partial. Teams
+often want more on top:
+
+  - Theorem density: require at least one theorem per public def (the
+    "definition + theorem" house style, enforced).
+  - Naming: theorems named after the property (encode_decode), defs in
+    lowerCamelCase, no thm1/lemma2/aux3.
+  - Doc comments: every public def and theorem gets a /-- ... -/ doc.
+  - Proof hygiene: ban `native_decide` outright (the engine only warns),
+    or cap tactic-block length to keep proofs reviewable.
+  - Namespace discipline: everything under a namespace matching the
+    widget slug.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      lakefile.toml
+      src/        definitions + theorems
+      tests/      test_*.lean (main + ASSERT_PASS, proofs elaborate)
+      examples/   example_usage.lean
+      widget.json
+
+This is a Python script - use any stdlib module you want.
+EXAMPLE
+-------
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def main() -> None:
+    widget_path = sys.argv[1] if len(sys.argv) > 1 else "."
+    blocks: list[str] = []
+    warnings: list[str] = []
+
+    src_dir = os.path.join(widget_path, "src")
+    for root, _dirs, files in os.walk(src_dir):
+        for fname in files:
+            if not fname.endswith(".lean"):
+                continue
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, widget_path)
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            # [TODO] Replace with your team's checks. Example: a src file
+            # should state at least one theorem about its definitions.
+            if not re.search(r"^\\s*(theorem|example)\\b", text, re.MULTILINE):
+                warnings.append(
+                    f"{rel}: no theorem - state at least one machine-checked "
+                    f"property about the public API"
+                )
+
+    print(json.dumps({"blocks": blocks, "warnings": warnings}))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 _TEMPLATES = {
     "python":        _TEMPLATE_PYTHON,
     "javascript":    _TEMPLATE_JAVASCRIPT,
@@ -1615,6 +1702,7 @@ _TEMPLATES = {
     "rust":          _TEMPLATE_RUST,
     "gdscript":      _TEMPLATE_GDSCRIPT,
     "java":          _TEMPLATE_JAVA,
+    "lean":          _TEMPLATE_LEAN,
 }
 
 
