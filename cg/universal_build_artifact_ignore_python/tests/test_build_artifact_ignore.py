@@ -241,3 +241,9 @@ def test_should_skip_os_metadata_without_explicit_excludes():
 def test_filter_dirs_removes_os_metadata():
     result = filter_dirs(["src", "__MACOSX", "._junk"], excludes=())
     assert result == ["src"]
+
+
+def test_excludes_for_lean_includes_lake_outputs():
+    result = excludes_for(language="lean")
+    assert ".lake" in result
+    assert "lake-manifest.json" in result

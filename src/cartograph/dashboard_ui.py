@@ -234,6 +234,7 @@ _HTML = r"""<!DOCTYPE html>
   .lang-text-rust       { color: #dea584; }
   .lang-text-gdscript   { color: #478cbf; }
   .lang-text-java       { color: #b07219; }
+  .lang-text-lean       { color: #83579a; }
   .widget-owner { font-size: 13px; color: var(--muted); }
   .widget-version { font-size: 12px; color: var(--muted); background: var(--surface2); padding: 1px 6px; border-radius: 4px; }
   .widget-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; max-width: 700px; }
@@ -254,6 +255,7 @@ _HTML = r"""<!DOCTYPE html>
   .lang-rust       { background: #dea584; }
   .lang-gdscript   { background: #478cbf; }
   .lang-java       { background: #b07219; }
+  .lang-lean       { background: #83579a; }
   .lang-unknown    { background: var(--muted); }
 
   .domain-tag {
@@ -589,6 +591,7 @@ function langClass(lang) {
   if (l === 'rust' || l === 'rs') return 'lang-rust';
   if (l === 'gdscript' || l === 'gd' || l === 'godot') return 'lang-gdscript';
   if (l === 'java' || l === 'jdk' || l === 'openjdk') return 'lang-java';
+  if (l === 'lean' || l === 'lean4') return 'lang-lean';
   return 'lang-unknown';
 }
 
