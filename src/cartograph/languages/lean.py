@@ -236,8 +236,47 @@ class LeanEngine(LanguageEngine):
             out["warnings"] = result["warnings"]
         return out
 
+    def _sync_lakefile_globs(self, path):
+        """Keep the lean_lib's module list in sync with src/**/*.lean.
+
+        Lake builds only the declared module roots, so a second src module
+        would silently not build (and its imports would fail) unless listed.
+        There is no wildcard glob, so - like Java's validator-managed
+        cartograph-deps.gradle - the validator owns this line: the `globs`
+        entry after `srcDir = "src"` is regenerated on every build.
+        Idempotent; leaves the rest of the lakefile untouched.
+        """
+        lakefile = os.path.join(path, "lakefile.toml")
+        src_files = _glob.glob(os.path.join(path, "src", "**", "*.lean"),
+                               recursive=True)
+        if not os.path.isfile(lakefile) or not src_files:
+            return
+        modules = sorted(
+            os.path.splitext(os.path.relpath(f, os.path.join(path, "src")))[0]
+            .replace(os.sep, ".").replace("/", ".")
+            for f in src_files)
+        globs_line = ("globs = ["
+                      + ", ".join(f'"{m}"' for m in modules)
+                      + "]  # managed by cartograph - one entry per src module")
+        with open(lakefile, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        out = []
+        synced = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("globs =") and "managed by cartograph" in line:
+                continue
+            out.append(line)
+            if not synced and stripped == 'srcDir = "src"':
+                out.append(globs_line)
+                synced = True
+        if synced:
+            with open(lakefile, "w", newline="\n", encoding="utf-8") as f:
+                f.write("\n".join(out) + "\n")
+
     def _lake_build(self, path):
         """Run lake build; return an error string or None on success."""
+        self._sync_lakefile_globs(path)
         try:
             res = self._run(["lake", "build"], cwd=path, timeout=300)
         except FileNotFoundError:
