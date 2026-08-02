@@ -159,6 +159,8 @@ def test_base_engine_runtime_version_is_none():
 @pytest.mark.openscad
 def test_openscad_resolver_uses_path(monkeypatch):
     from cartograph.languages import openscad as scad_mod
+    monkeypatch.setattr("cartograph.config.get_path_override",
+                        lambda name: None)  # hermetic vs resident config
     monkeypatch.setattr(scad_mod.shutil, "which",
                         lambda name: "/usr/bin/openscad" if name == "openscad" else None)
     monkeypatch.delenv("OPENSCAD_BINARY", raising=False)
@@ -191,6 +193,8 @@ def test_openscad_resolver_windows_install_dir_fallback(monkeypatch):
 def test_openscad_resolver_honors_env_override(monkeypatch, tmp_path):
     """OPENSCAD_BINARY env var lets users point at a nonstandard install."""
     from cartograph.languages import openscad as scad_mod
+    monkeypatch.setattr("cartograph.config.get_path_override",
+                        lambda name: None)  # hermetic vs resident config
     fake = tmp_path / "openscad"
     fake.write_text("")
     monkeypatch.setattr(scad_mod.shutil, "which", lambda name: None)
