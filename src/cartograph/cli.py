@@ -1455,10 +1455,38 @@ def cmd_login(args):
         err({"error": "Provide a token with --token or set CARTOGRAPH_TOKEN"})
 
     import http.server
+    import json as _json
     import webbrowser
     from .auth import get_registry_url, save_credentials
 
     received = {}
+
+    _SUCCESS_HTML = (
+        b"<!DOCTYPE html><html><head><meta charset=utf-8>"
+        b"<meta name=viewport content=\"width=device-width, initial-scale=1\">"
+        b"<title>Cartograph - signed in</title>"
+        b"<style>"
+        b"body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:28rem;"
+        b"margin:4rem auto;padding:0 1.25rem;background:#14161C;color:#E8E6E3}"
+        b"h1{font-size:1.35rem;font-weight:600;color:#F4F2EF;margin:0 0 .75rem}"
+        b"p{color:#A8A49C;line-height:1.55;margin:0}"
+        b".ok{color:#E0701B;font-family:ui-monospace,monospace;font-size:.75rem;"
+        b"letter-spacing:.12em;text-transform:uppercase;margin:0 0 .5rem}"
+        b"</style></head><body>"
+        b"<p class=ok>Signed in</p>"
+        b"<h1>You can close this tab</h1>"
+        b"<p>Return to your terminal - Cartograph finished logging you in.</p>"
+        b"</body></html>"
+    )
+    _ERROR_HTML = (
+        b"<!DOCTYPE html><html><head><meta charset=utf-8>"
+        b"<title>Cartograph - login error</title></head>"
+        b"<body style='font-family:system-ui;background:#14161C;color:#E8E6E3;"
+        b"max-width:28rem;margin:4rem auto;padding:0 1.25rem'>"
+        b"<h1>Login failed</h1>"
+        b"<p>Close this tab and try <code>cartograph login</code> again.</p>"
+        b"</body></html>"
+    )
 
     class _Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -1469,26 +1497,24 @@ def cmd_login(args):
                 if isinstance(val, list):
                     return val[0] if val else ""
                 return val or ""
+            # Preferred: opaque one-time code (no secrets in the address bar).
+            code = _first("code")
+            # Legacy fallback for older registry deploys that still query-dump tokens.
             id_token = _first("id_token")
-            if id_token:
+            ok = False
+            if code:
+                received["code"] = code
+                ok = True
+            elif id_token:
                 received["id_token"] = id_token
                 received["refresh_token"] = _first("refresh_token")
                 received["signing_key"] = _first("signing_key")
                 received["handle"] = _first("handle")
-                received["client_id"] = _first("client_id")
-                received["client_secret"] = _first("client_secret")
+                ok = True
             self.send_response(200)
-            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            if id_token:
-                self.wfile.write(
-                    b"<html><body style='font-family:monospace;background:#0d1117;color:#e6edf3;"
-                    b"max-width:500px;margin:60px auto;padding:20px'>"
-                    b"<h2 style='color:#58a6ff'>Logged in</h2>"
-                    b"<p>You can close this tab and return to your terminal.</p></body></html>"
-                )
-            else:
-                self.wfile.write(b"")
+            self.wfile.write(_SUCCESS_HTML if ok else _ERROR_HTML)
 
         def log_message(self, *args):
             pass
@@ -1506,8 +1532,8 @@ def cmd_login(args):
 
     webbrowser.open(login_url)
 
-    # Keep serving until we get credentials or timeout
-    while "id_token" not in received:
+    # Keep serving until we get a code (or legacy tokens) or timeout
+    while "code" not in received and "id_token" not in received:
         server.handle_request()
         if server.timeout and not received:
             break
@@ -1515,16 +1541,37 @@ def cmd_login(args):
 
     id_token = received.get("id_token", "")
     handle = received.get("handle", "")
+    refresh_token = received.get("refresh_token", "")
+    signing_key = received.get("signing_key", "")
+
+    if received.get("code"):
+        # Exchange one-time code with the registry — secrets never hit the browser.
+        try:
+            req = urllib.request.Request(
+                f"{registry}/v1/auth/cli/complete",
+                data=_json.dumps({"code": received["code"]}).encode(),
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                method="POST",
+            )
+            from .net_tls import registry_ssl_context
+            with urllib.request.urlopen(req, timeout=15, context=registry_ssl_context()) as resp:
+                payload = _json.loads(resp.read())
+        except Exception as e:
+            err({"error": f"Login code exchange failed: {e}"})
+        id_token = payload.get("id_token") or ""
+        refresh_token = payload.get("refresh_token") or ""
+        signing_key = payload.get("signing_key") or ""
+        handle = payload.get("handle") or handle
+
     if not id_token:
         err({"error": "Authentication timed out or was cancelled."})
 
+    # Never persist OAuth client secrets. Refresh goes through the registry.
     save_credentials(
         id_token,
-        received.get("refresh_token", ""),
-        received.get("signing_key", ""),
-        client_id=received.get("client_id", ""),
-        client_secret=received.get("client_secret", ""),
-        token_url=received.get("token_url", ""),
+        refresh_token,
+        signing_key,
+        token_url=f"{registry}/v1/auth/refresh",
     )
     print(f"  Logged in as @{handle}\n")
 
