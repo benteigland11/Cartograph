@@ -192,7 +192,9 @@ jobs:
         shell: pwsh
         run: |
           curl -sSf -o elan-init.ps1 https://elan.lean-lang.org/elan-init.ps1
-          powershell -ExecutionPolicy Bypass -f elan-init.ps1 -NoPrompt $true -DefaultToolchain stable
+          # In-session invocation: -File passes args as strings, which cannot
+          # bind to the installer's [bool] parameters.
+          & ./elan-init.ps1 -NoPrompt $true -NoModifyPath $true -DefaultToolchain stable
           Remove-Item elan-init.ps1
           Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.elan\bin"
 
