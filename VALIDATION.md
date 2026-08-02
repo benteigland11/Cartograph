@@ -43,7 +43,14 @@ These are requirements. Validation fails if any are not met.
 | Nim | No | N/A | No stdlib coverage tool exists |
 | OpenSCAD | No | N/A | Render passes = validation passes |
 | SystemVerilog | No | N/A | Testbench `$finish` exit code = pass; no per-line coverage |
+| Angular | Yes | 80% | karma.conf.js `check.global` thresholds |
+| PHP | Yes | 80% | PHPUnit `--min-coverage` via Xdebug or PCOV |
+| Terraform | No | N/A | Shape-only validation (`terraform validate`); modules harden through use |
 | Go | Yes | 80% | go test -coverpkg=./src/... (built into the toolchain) |
+| Rust | Yes | 80% | cargo-llvm-cov (tests/ and examples/ excluded from denominator) |
+| SPICE | No | N/A | Simulation + `.meas` assertions = validation; no line-coverage concept for netlists |
+| GDScript | No | N/A | No coverage tool exists; ASSERT_PASS contract instead |
+| Java | Yes | 80% | JaCoCo XML report from `gradle test` |
 | Lean | No | N/A | No coverage tool exists; the kernel proof-checks every theorem on every build - a stronger floor than coverage for proof code |
 
 Nim coverage would require compiling via `--debugger:native` and running `gcov`/`lcov` on the generated C code. This produces C-level line coverage, not Nim source-level coverage. Decided it was too unreliable and confusing to impose on widget authors.
