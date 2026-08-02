@@ -125,11 +125,11 @@ def _is_token_expired(token: str) -> bool:
 
 
 def _refresh_id_token(refresh_token: str) -> str | None:
-    """Use a refresh token to get a new ID token from the identity provider.
+    """Use a refresh token to get a new ID token.
 
-    The token endpoint comes from stored credentials (handed back by the
-    registry at login - any OIDC issuer), falling back to Google for
-    credentials saved before token_url existed.
+    Preferred path: POST JSON to the Cartograph registry ``/v1/auth/refresh``
+    so the OAuth client secret never lives on the workstation. Legacy path:
+    form-POST to a stored IdP token_url with client_id/secret (old logins).
 
     Returns the new id_token, or None on failure.
     """
@@ -137,37 +137,64 @@ def _refresh_id_token(refresh_token: str) -> str | None:
         return None
 
     creds = _read_credentials()
-    token_url = creds.get("token_url") or _GOOGLE_TOKEN_URL
-    if not token_url.startswith("https://"):
-        log.debug("Refusing token refresh against non-https endpoint")
-        return None
+    token_url = (creds.get("token_url") or "").strip()
+    registry = get_registry_url().rstrip("/")
+    # New logins point token_url at the registry refresh endpoint. If empty
+    # or missing a client secret, always go through the registry.
+    use_registry = (
+        not token_url
+        or token_url.rstrip("/").endswith("/v1/auth/refresh")
+        or not _google_client_secret()
+    )
+    if use_registry:
+        refresh_url = (
+            token_url if token_url.rstrip("/").endswith("/v1/auth/refresh")
+            else f"{registry}/v1/auth/refresh"
+        )
+        if not refresh_url.startswith("https://") and not refresh_url.startswith("http://127.0.0.1"):
+            log.debug("Refusing token refresh against non-https endpoint")
+            return None
+        body = json.dumps({"refresh_token": refresh_token}).encode()
+        req = urllib.request.Request(
+            refresh_url, data=body, method="POST",
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+    else:
+        # Legacy: direct IdP refresh with secrets stored from an older login.
+        if not token_url.startswith("https://"):
+            token_url = _GOOGLE_TOKEN_URL
+        client_id = _google_client_id()
+        client_secret = _google_client_secret()
+        if not client_id:
+            log.debug("Cannot refresh token: no client_id stored")
+            return None
+        form = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+        }
+        if client_secret:
+            form["client_secret"] = client_secret
+        req = urllib.request.Request(
+            token_url,
+            data=urllib.parse.urlencode(form).encode(),
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
 
-    # Need client_id (and usually client_secret) for refresh
-    client_id = _google_client_id()
-    client_secret = _google_client_secret()
-    if not client_id:
-        log.debug("Cannot refresh token: no client_id stored")
-        return None
-
-    form = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": client_id,
-    }
-    if client_secret:  # public OIDC clients have no secret
-        form["client_secret"] = client_secret
-    data = urllib.parse.urlencode(form).encode()
-
-    req = urllib.request.Request(token_url, data=data, method="POST")
     try:
         from .net_tls import registry_ssl_context
         with urllib.request.urlopen(req, timeout=10, context=registry_ssl_context()) as resp:
             result = json.loads(resp.read())
         new_id_token = result.get("id_token")
         if new_id_token:
-            # Update stored credentials with new id_token
             creds = _read_credentials()
             creds["id_token"] = new_id_token
+            # Drop any legacy secret once registry-mediated refresh works.
+            if use_registry:
+                creds.pop("client_secret", None)
+                if not creds.get("token_url"):
+                    creds["token_url"] = f"{registry}/v1/auth/refresh"
             _write_credentials(creds)
             log.debug("ID token refreshed successfully")
             return new_id_token
