@@ -166,6 +166,74 @@ def test_cleanup_strips_transient_wiring(engine, data_dir, tmp_path):
     assert not (root / "lean-toolchain").exists()
 
 
+def workspace_with_packages(data_dir):
+    """Simulate a provisioned workspace with a resolved manifest + packages."""
+    provision_ready(data_dir)
+    ws = mathlib_setup.mathlib_root() + "/" + PIN
+    os.makedirs(os.path.join(ws, ".lake", "packages", "batteries"))
+    with open(os.path.join(ws, ".lake", "packages", "batteries",
+                           "marker.txt"), "w", encoding="utf-8") as f:
+        f.write("seeded\n")
+    manifest = {
+        "version": "1.2.0", "packagesDir": ".lake/packages",
+        "packages": [
+            {"url": "https://example.org/batteries", "type": "git",
+             "rev": "abc123", "name": "batteries",
+             "manifestFile": "lake-manifest.json", "inherited": True,
+             "configFile": "lakefile.toml"},
+            {"url": "https://example.org/mathlib", "type": "git",
+             "rev": "def456", "name": "mathlib",
+             "manifestFile": "lake-manifest.json", "inherited": False,
+             "configFile": "lakefile.lean"},
+        ],
+    }
+    with open(os.path.join(ws, "lake-manifest.json"), "w",
+              encoding="utf-8") as f:
+        json.dump(manifest, f)
+    return ws
+
+
+def test_seed_copies_packages_and_writes_manifest(engine, data_dir,
+                                                  tmp_path):
+    workspace_with_packages(data_dir)
+    root = make_widget(tmp_path, ["mathlib"])
+    assert engine._sync_mathlib_require(str(root)) is None
+    assert (root / ".lake" / "packages" / "batteries"
+            / "marker.txt").is_file()
+    manifest = json.loads((root / "lake-manifest.json").read_text(
+        encoding="utf-8"))
+    entries = {e["name"]: e for e in manifest["packages"]}
+    assert entries["mathlib"]["type"] == "path"
+    assert entries["batteries"]["rev"] == "abc123"
+
+
+def test_seed_skipped_when_manifest_exists(engine, data_dir, tmp_path):
+    workspace_with_packages(data_dir)
+    root = make_widget(tmp_path, ["mathlib"])
+    (root / "lake-manifest.json").write_text("{}", encoding="utf-8")
+    engine._sync_mathlib_require(str(root))
+    assert (root / "lake-manifest.json").read_text(
+        encoding="utf-8") == "{}"
+    assert not (root / ".lake").exists()
+
+
+def test_seed_best_effort_without_workspace_manifest(engine, data_dir,
+                                                     tmp_path):
+    provision_ready(data_dir)  # ready stamp but no resolved manifest
+    root = make_widget(tmp_path, ["mathlib"])
+    assert engine._sync_mathlib_require(str(root)) is None
+    assert not (root / "lake-manifest.json").exists()
+
+
+def test_cleanup_removes_seeded_manifest(engine, data_dir, tmp_path):
+    workspace_with_packages(data_dir)
+    root = make_widget(tmp_path, ["mathlib"])
+    engine._sync_mathlib_require(str(root))
+    engine.cleanup(str(root))
+    assert not (root / "lake-manifest.json").exists()
+    assert not (root / ".lake").exists()
+
+
 def test_cleanup_preserves_blueprint_requires(engine, data_dir, tmp_path):
     provision_ready(data_dir)
     root = make_widget(tmp_path, ["mathlib"])

@@ -13,6 +13,7 @@ from src.mathlib_workspace import (
     STATE_STALE,
     provision,
     provision_steps,
+    seed_manifest,
     status,
     workspace_path,
     write_workspace_files,
@@ -137,6 +138,54 @@ def test_reprovision_after_failure_recovers(tmp_path):
     calls = []
     result = provision(tmp_path, PIN, TOOLCHAIN, ok_runner(calls))
     assert result.status.ready
+
+
+WORKSPACE_MANIFEST = json.dumps({
+    "version": "1.2.0",
+    "packagesDir": ".lake/packages",
+    "packages": [
+        {"url": "https://example.org/helper-lib", "type": "git",
+         "rev": "abc123", "name": "helper_lib",
+         "manifestFile": "lake-manifest.json", "inherited": True,
+         "configFile": "lakefile.toml"},
+        {"url": "https://example.org/mathlib", "type": "git",
+         "rev": "def456", "name": "mathlib",
+         "manifestFile": "lake-manifest.json", "inherited": False,
+         "configFile": "lakefile.lean"},
+    ],
+})
+
+
+def test_seed_manifest_rewrites_mathlib_to_path():
+    plan = seed_manifest(WORKSPACE_MANIFEST, "/data/ws/pkg/mathlib")
+    result = json.loads(plan.manifest_text)
+    entries = {e["name"]: e for e in result["packages"]}
+    assert entries["mathlib"]["type"] == "path"
+    assert entries["mathlib"]["dir"] == "/data/ws/pkg/mathlib"
+    assert entries["mathlib"]["configFile"] == "lakefile.lean"
+    assert entries["mathlib"]["inherited"] is False
+    assert "url" not in entries["mathlib"]
+    # transitive deps keep their exact pinned revisions
+    assert entries["helper_lib"]["rev"] == "abc123"
+    assert plan.package_names == ["helper_lib"]
+
+
+def test_seed_manifest_normalizes_backslashes():
+    plan = seed_manifest(WORKSPACE_MANIFEST, "ws\\pkg\\mathlib")
+    entries = {e["name"]: e
+               for e in json.loads(plan.manifest_text)["packages"]}
+    assert entries["mathlib"]["dir"] == "ws/pkg/mathlib"
+
+
+def test_seed_manifest_rejects_missing_mathlib():
+    bad = json.dumps({"version": "1.2.0", "packages": []})
+    with pytest.raises(ValueError, match="no mathlib entry"):
+        seed_manifest(bad, "/x")
+
+
+def test_seed_manifest_rejects_missing_packages():
+    with pytest.raises(ValueError, match="packages"):
+        seed_manifest(json.dumps({"version": "1.2.0"}), "/x")
 
 
 def test_two_pins_coexist(tmp_path):

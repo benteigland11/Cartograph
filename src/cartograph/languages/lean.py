@@ -411,7 +411,47 @@ class LeanEngine(LanguageEngine):
         with open(os.path.join(path, "lean-toolchain"), "w",
                   newline="\n", encoding="utf-8") as f:
             f.write(MATHLIB_TOOLCHAIN + "\n")
+        self._seed_mathlib_packages(path)
         return None
+
+    def _seed_mathlib_packages(self, path):
+        """Pre-seed the widget's lockfile and packages from the workspace.
+
+        Without this, the widget's first `lake build` git-clones Mathlib's
+        transitive dependencies (batteries, aesop, proofwidgets, ...) even
+        though identical pinned checkouts already sit in the shared
+        workspace - a per-widget network fetch. Copying the workspace's
+        resolved packages plus a rewritten lockfile (mathlib flipped to a
+        path entry) lets Lake resolve everything from disk. Best-effort: on
+        any failure the seed is skipped and Lake falls back to fetching.
+        """
+        from ..mathlib_setup import MATHLIB_PIN, mathlib_package_dir, \
+            mathlib_root
+        from cg.infra_mathlib_workspace_python.src.mathlib_workspace import (
+            seed_manifest, workspace_path)
+        widget_manifest = os.path.join(path, "lake-manifest.json")
+        if os.path.isfile(widget_manifest):
+            return
+        ws = str(workspace_path(mathlib_root(), MATHLIB_PIN))
+        try:
+            with open(os.path.join(ws, "lake-manifest.json"),
+                      encoding="utf-8") as f:
+                plan = seed_manifest(f.read(), mathlib_package_dir())
+        except (OSError, ValueError):
+            return
+        pkg_src = os.path.join(ws, ".lake", "packages")
+        pkg_dst = os.path.join(path, ".lake", "packages")
+        for name in plan.package_names:
+            src = os.path.join(pkg_src, name)
+            dst = os.path.join(pkg_dst, name)
+            if os.path.isdir(src) and not os.path.isdir(dst):
+                try:
+                    _shutil.copytree(src, dst, symlinks=True)
+                except OSError:
+                    return
+        with open(widget_manifest, "w", newline="\n",
+                  encoding="utf-8") as f:
+            f.write(plan.manifest_text)
 
     # ---- tests + example ---------------------------------------------------
 

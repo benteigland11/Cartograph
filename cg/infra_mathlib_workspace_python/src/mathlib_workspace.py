@@ -180,6 +180,58 @@ def provision(root: Union[str, Path], pin: str, toolchain: str,
                            steps_run=steps_run)
 
 
+@dataclass(frozen=True)
+class SeedPlan:
+    """How to pre-seed a consumer project from a provisioned workspace:
+    the rewritten lockfile text plus the package dir names to copy."""
+
+    manifest_text: str
+    package_names: List[str]
+
+
+def seed_manifest(workspace_manifest_text: str, mathlib_dir: str) -> SeedPlan:
+    """Rewrite a workspace lockfile for a consumer that path-requires mathlib.
+
+    The workspace resolves ``mathlib`` as a registry/git dependency; a
+    consumer project requires it by path instead. This replaces the mathlib
+    entry with a path entry pointing at ``mathlib_dir`` (all other entries -
+    mathlib's transitive dependencies - keep their exact pinned revisions)
+    and lists the package dir names the caller must copy from the
+    workspace's packages dir into the consumer's, so a subsequent build
+    resolves fully from disk with no network fetches.
+    """
+    manifest = json.loads(workspace_manifest_text)
+    packages = manifest.get("packages")
+    if not isinstance(packages, list):
+        raise ValueError("workspace manifest has no packages list - "
+                         "was the workspace provisioned?")
+    names: List[str] = []
+    rewritten = []
+    found = False
+    for entry in packages:
+        name = entry.get("name")
+        if name == "mathlib":
+            found = True
+            rewritten.append({
+                "type": "path",
+                "name": "mathlib",
+                "manifestFile": entry.get("manifestFile",
+                                          "lake-manifest.json"),
+                "configFile": entry.get("configFile", "lakefile.toml"),
+                "inherited": False,
+                "dir": str(mathlib_dir).replace("\\", "/"),
+            })
+        else:
+            rewritten.append(dict(entry))
+            if name:
+                names.append(name)
+    if not found:
+        raise ValueError("workspace manifest has no mathlib entry")
+    manifest["packages"] = rewritten
+    return SeedPlan(manifest_text=json.dumps(manifest, indent=1) + "\n",
+                    package_names=names)
+
+
 def _validate_pin(pin: str) -> None:
     if (not pin or any(c in pin for c in "/\\") or pin in (".", "..")
             or pin.strip() != pin):

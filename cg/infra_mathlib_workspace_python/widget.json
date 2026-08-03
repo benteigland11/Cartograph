@@ -2,7 +2,7 @@
   "meta": {
     "id": "infra-mathlib-workspace-python",
     "name": "Mathlib Workspace",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "domain": "infra",
     "tags": [
       "lean",
@@ -12,7 +12,7 @@
       "provisioning"
     ]
   },
-  "description": "Manage a shared, version-pinned Mathlib Lake workspace under a caller-supplied root: deterministic per-pin layout, readiness status (missing/corrupt/stale/ready) from a JSON stamp written only after a fully successful provision, and provisioning that executes lake commands solely through a caller-injected runner. Never spawns processes or touches the network itself; callers own locking and atomic placement.",
+  "description": "Manage a shared, version-pinned Mathlib Lake workspace under a caller-supplied root: deterministic per-pin layout, readiness status (missing/corrupt/stale/ready) from a JSON stamp written only after a fully successful provision, and provisioning that executes lake commands solely through a caller-injected runner. Never spawns processes or touches the network itself; callers own locking and atomic placement. seed_manifest rewrites the workspace lockfile for consumer projects that path-require the big dependency, enabling fully offline downstream builds.",
   "tech_stack": {
     "language": "python",
     "dependencies": []
@@ -25,7 +25,7 @@
   },
   "validation": {
     "engine_version": 1,
-    "validated_at": "2026-08-02T23:36:41.815606+00:00",
+    "validated_at": "2026-08-03T01:42:12.604361+00:00",
     "runtime": "python 3.14.6"
   }
 }
