@@ -306,8 +306,12 @@ def scanFile (path : String) (ownModules deps : List String)
       let t := strip code
       if t.startsWith "import " then
         let root := strip ((strip (dropStr t 7)).splitOn ".").head!
+        -- Dep names are package names (lowercase, e.g. "mathlib"); import
+        -- roots are module names (capitalized, e.g. "Mathlib") - match
+        -- case-insensitively.
         if root.length > 0 && !stdlibRoots.contains root
-            && !ownModules.contains root && !deps.contains root then
+            && !ownModules.contains root
+            && !deps.any (fun d => d.toLower == root.toLower) then
           fs := fs.push (add "unlisted_import"
             s!"import {root} not in widget.json dependencies" "warning")
   return fs
