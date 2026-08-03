@@ -353,6 +353,17 @@ class LeanEngine(LanguageEngine):
                 raise RuntimeError(missing_workspace_error(state.reason))
 
     @staticmethod
+    def _check_dep_pinning(dependencies):
+        # `mathlib` is engine-pinned (one workspace pin per Cartograph
+        # release), so the generic version-floor rule does not apply to it -
+        # a widget-level pin would be ignored and only mislead.
+        from .base import LanguageEngine
+        rest = [d for d in dependencies
+                if (d if isinstance(d, str)
+                    else (d or {}).get("name")) != "mathlib"]
+        return LanguageEngine._check_dep_pinning(rest)
+
+    @staticmethod
     def _wants_mathlib(path):
         """True when the widget declares a mathlib dependency."""
         try:
