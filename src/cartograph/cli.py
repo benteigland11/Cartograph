@@ -2448,6 +2448,32 @@ def cmd_workflow(args):
         print(f"\n{f.read()}")
 
 
+def cmd_setup_mathlib(args):
+    from .mathlib_setup import (MATHLIB_PIN, MATHLIB_TOOLCHAIN,
+                                mathlib_status, setup_mathlib)
+
+    state = mathlib_status()
+    print(f"\n  Mathlib workspace: {state.state} ({state.reason})")
+    print(f"  Pin: {MATHLIB_PIN}   Toolchain: {MATHLIB_TOOLCHAIN}")
+    print(f"  Path: {state.path}\n")
+    if args.status_only or state.ready:
+        return
+    print("  Provisioning - this downloads several GB of prebuilt Mathlib "
+          "binaries.\n")
+    try:
+        result = setup_mathlib(progress=lambda line: print(f"  {line}"))
+    except FileNotFoundError:
+        err({"error": "lake not found - install Lean 4 via elan "
+                      "(lean-lang.org/install), then re-run "
+                      "`cartograph setup-mathlib`."})
+        return
+    if result.status.ready:
+        print("\n  Mathlib workspace ready - Lean widgets may now declare "
+              "a `mathlib` dependency.\n")
+    else:
+        err({"error": f"provisioning failed: {result.status.reason}"})
+
+
 def cmd_doctor(args):
     import shutil
     import subprocess
@@ -4265,6 +4291,17 @@ def _build_cli() -> AgentCLI:
             "help": "Check language engine dependencies",
             "handler": cmd_doctor,
             "args": [],
+        },
+        {
+            "name": "setup-mathlib",
+            "help": "Provision the shared Mathlib workspace for Lean widgets "
+                    "(multi-GB, one-time)",
+            "handler": cmd_setup_mathlib,
+            "args": [
+                {"name": "--status", "action": "store_true", "default": False,
+                 "dest": "status_only",
+                 "help": "Report workspace readiness without provisioning"},
+            ],
         },
     ])
 

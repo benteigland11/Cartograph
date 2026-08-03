@@ -20,10 +20,13 @@ verified property, and exits non-zero on failure. Theorems in test files are
 kernel-checked during elaboration before main runs, so proof-style assertions
 (`example : f x = y := rfl`) piggyback on the same run.
 
-v1 is dependency-free by design (no Mathlib): widgets build against the Lean
-core library only. Mathlib support is a deliberate future decision - it is
-multi-gigabyte, tightly pinned to toolchain versions, and needs a
-pre-installed-cache policy like the ML frameworks.
+Dependencies: `mathlib` is the only supported external dependency, served
+from one shared, version-pinned workspace under the platform data dir
+(provisioned explicitly via `cartograph setup-mathlib` - never fetched
+automatically, per the ML-frameworks policy). All other widgets build
+against the Lean core library only. The workspace wiring (a path require +
+lean-toolchain pin) is injected per build and stripped by cleanup, so
+checked-in widgets stay machine-independent.
 
 Layout
 ------
@@ -36,10 +39,13 @@ Layout
 Widgets do NOT carry a lean-toolchain pin - the library validates against the
 machine's default elan toolchain (like GDScript widgets don't pin a Godot
 version), and the toolchain version is stamped into widget.json at checkin
-via runtime_version().
+via runtime_version(). Exception: mathlib widgets build under the engine's
+pinned toolchain (written transiently, removed at cleanup) because .olean
+compatibility requires the exact workspace toolchain.
 """
 
 import glob as _glob
+import json as _json
 import os
 import re as _re
 import shutil as _shutil
@@ -47,6 +53,15 @@ import shutil as _shutil
 from .base import LanguageEngine
 
 _SORRY_WARNING = "declaration uses `sorry`"
+
+# Build timeouts. Mathlib widgets elaborate against a multi-GB dependency;
+# even with prebuilt .oleans, imports like Mathlib.Analysis take real time.
+_BUILD_TIMEOUT = 300
+_BUILD_TIMEOUT_MATHLIB = 1800
+_RUN_TIMEOUT = 180
+_RUN_TIMEOUT_MATHLIB = 600
+
+_MATHLIB_REQUIRE_MARK = "# managed by cartograph - mathlib workspace require"
 
 _LAKEFILE = """\
 name = "{slug}"
@@ -277,8 +292,13 @@ class LeanEngine(LanguageEngine):
     def _lake_build(self, path):
         """Run lake build; return an error string or None on success."""
         self._sync_lakefile_globs(path)
+        mathlib_err = self._sync_mathlib_require(path)
+        if mathlib_err is not None:
+            return mathlib_err
+        timeout = (_BUILD_TIMEOUT_MATHLIB if self._wants_mathlib(path)
+                   else _BUILD_TIMEOUT)
         try:
-            res = self._run(["lake", "build"], cwd=path, timeout=300)
+            res = self._run(["lake", "build"], cwd=path, timeout=timeout)
         except FileNotFoundError:
             return ("lake not found - install Lean 4 via elan "
                     "(lean-lang.org/install).")
@@ -312,17 +332,126 @@ class LeanEngine(LanguageEngine):
     # ---- dependencies ------------------------------------------------------
 
     def install_deps(self, path, dependencies):
-        # v1 is deliberately dependency-free: no lake package fetching, no
-        # Mathlib. The Lean core library covers verified data structures,
-        # parsers, and algorithms; Mathlib needs a pre-installed-cache
-        # policy (like the ML frameworks) and is a separate decision.
-        if dependencies:
+        # The only supported external dependency is `mathlib`, served from
+        # the shared pinned workspace (never fetched per-widget, never
+        # auto-installed - ML-frameworks policy). Everything else builds
+        # against the Lean core library only.
+        names = [d if isinstance(d, str) else (d or {}).get("name")
+                 for d in (dependencies or [])]
+        others = [n for n in names if n != "mathlib"]
+        if others:
             raise RuntimeError(
-                "The Lean engine does not support external dependencies yet "
-                "- widgets build against the Lean core library only. "
-                f"Remove {[d if isinstance(d, str) else d.get('name') for d in dependencies]} "
-                "from widget.json (Mathlib support is planned)."
+                "The Lean engine supports only `mathlib` as an external "
+                f"dependency - remove {others} from widget.json. Widgets "
+                "otherwise build against the Lean core library only."
             )
+        if "mathlib" in names:
+            from ..mathlib_setup import mathlib_status, \
+                missing_workspace_error
+            state = mathlib_status()
+            if not state.ready:
+                raise RuntimeError(missing_workspace_error(state.reason))
+
+    @staticmethod
+    def _check_dep_pinning(dependencies):
+        # `mathlib` is engine-pinned (one workspace pin per Cartograph
+        # release), so the generic version-floor rule does not apply to it -
+        # a widget-level pin would be ignored and only mislead.
+        from .base import LanguageEngine
+        rest = [d for d in dependencies
+                if (d if isinstance(d, str)
+                    else (d or {}).get("name")) != "mathlib"]
+        return LanguageEngine._check_dep_pinning(rest)
+
+    @staticmethod
+    def _wants_mathlib(path):
+        """True when the widget declares a mathlib dependency."""
+        try:
+            with open(os.path.join(path, "widget.json"),
+                      encoding="utf-8") as f:
+                deps = _json.load(f).get("tech_stack", {}).get(
+                    "dependencies", [])
+        except (OSError, ValueError):
+            return False
+        return any((d if isinstance(d, str) else (d or {}).get("name"))
+                   == "mathlib" for d in deps)
+
+    def _sync_mathlib_require(self, path):
+        """Point a mathlib widget at the shared workspace for this build.
+
+        Injects a managed [[require]] path entry into lakefile.toml and a
+        matching lean-toolchain file. Both carry machine-specific state
+        (an absolute path; a pin the engine owns), so they are transient:
+        regenerated before every build, stripped by cleanup() so neither
+        is ever checked in. Returns an error string, or None.
+        """
+        lakefile = os.path.join(path, "lakefile.toml")
+        wants = self._wants_mathlib(path)
+        with open(lakefile, encoding="utf-8") as f:
+            content = f.read()
+        blocks = content.split("\n[[require]]")
+        kept = [blocks[0]] + [b for b in blocks[1:]
+                              if _MATHLIB_REQUIRE_MARK not in b]
+        content = "\n[[require]]".join(kept)
+        if not wants:
+            with open(lakefile, "w", newline="\n", encoding="utf-8") as f:
+                f.write(content)
+            return None
+        from ..mathlib_setup import (MATHLIB_TOOLCHAIN, mathlib_package_dir,
+                                     mathlib_status,
+                                     missing_workspace_error)
+        state = mathlib_status()
+        if not state.ready:
+            return missing_workspace_error(state.reason)
+        pkg = mathlib_package_dir().replace("\\", "/")
+        content += (f"\n[[require]]\n{_MATHLIB_REQUIRE_MARK}\n"
+                    f'name = "mathlib"\npath = "{pkg}"\n')
+        with open(lakefile, "w", newline="\n", encoding="utf-8") as f:
+            f.write(content)
+        with open(os.path.join(path, "lean-toolchain"), "w",
+                  newline="\n", encoding="utf-8") as f:
+            f.write(MATHLIB_TOOLCHAIN + "\n")
+        self._seed_mathlib_packages(path)
+        return None
+
+    def _seed_mathlib_packages(self, path):
+        """Pre-seed the widget's lockfile and packages from the workspace.
+
+        Without this, the widget's first `lake build` git-clones Mathlib's
+        transitive dependencies (batteries, aesop, proofwidgets, ...) even
+        though identical pinned checkouts already sit in the shared
+        workspace - a per-widget network fetch. Copying the workspace's
+        resolved packages plus a rewritten lockfile (mathlib flipped to a
+        path entry) lets Lake resolve everything from disk. Best-effort: on
+        any failure the seed is skipped and Lake falls back to fetching.
+        """
+        from ..mathlib_setup import MATHLIB_PIN, mathlib_package_dir, \
+            mathlib_root
+        from cg.infra_mathlib_workspace_python.src.mathlib_workspace import (
+            seed_manifest, workspace_path)
+        widget_manifest = os.path.join(path, "lake-manifest.json")
+        if os.path.isfile(widget_manifest):
+            return
+        ws = str(workspace_path(mathlib_root(), MATHLIB_PIN))
+        try:
+            with open(os.path.join(ws, "lake-manifest.json"),
+                      encoding="utf-8") as f:
+                plan = seed_manifest(f.read(), mathlib_package_dir())
+        except (OSError, ValueError):
+            return
+        pkg_src = os.path.join(ws, ".lake", "packages")
+        pkg_dst = os.path.join(path, ".lake", "packages")
+        for name in plan.package_names:
+            src = os.path.join(pkg_src, name)
+            dst = os.path.join(pkg_dst, name)
+            if os.path.isdir(src) and not os.path.isdir(dst):
+                try:
+                    _shutil.copytree(src, dst, symlinks=True)
+                except OSError:
+                    return
+        with open(widget_manifest, "w", newline="\n",
+                  encoding="utf-8") as f:
+            f.write(plan.manifest_text)
 
     # ---- tests + example ---------------------------------------------------
 
@@ -335,11 +464,13 @@ class LeanEngine(LanguageEngine):
         build = self._lake_build(path)
         if build is not None:
             return self._fail(build)
+        run_timeout = (_RUN_TIMEOUT_MATHLIB if self._wants_mathlib(path)
+                       else _RUN_TIMEOUT)
         for tf in sorted(tests):
             rel = os.path.relpath(tf, path)
             try:
                 res = self._run(["lake", "env", "lean", "--run", tf],
-                                cwd=path, timeout=180)
+                                cwd=path, timeout=run_timeout)
             except FileNotFoundError:
                 return self._fail("lake not found - install Lean 4 via elan "
                                   "(lean-lang.org/install).")
@@ -370,9 +501,11 @@ class LeanEngine(LanguageEngine):
         build = self._lake_build(path)
         if build is not None:
             return self._fail(build)
+        run_timeout = (_RUN_TIMEOUT_MATHLIB if self._wants_mathlib(path)
+                       else _RUN_TIMEOUT)
         try:
             res = self._run(["lake", "env", "lean", "--run", ex],
-                            cwd=path, timeout=180)
+                            cwd=path, timeout=run_timeout)
         except FileNotFoundError:
             return self._fail("lake not found - install Lean 4 via elan "
                               "(lean-lang.org/install).")
@@ -443,11 +576,31 @@ class LeanEngine(LanguageEngine):
 
     def cleanup(self, path):
         # .lake holds the entire build output; widgets carry sources only.
-        # lake-manifest.json is the dep lockfile - contentless while the
-        # engine is dependency-free, so it's build noise, not source.
+        # lake-manifest.json is the dep lockfile - the mathlib require is
+        # injected per-machine, so the lockfile is build noise, not source.
         _shutil.rmtree(os.path.join(path, ".lake"), ignore_errors=True)
         try:
             os.remove(os.path.join(path, "lake-manifest.json"))
         except OSError:
             pass
+        # Strip the transient mathlib wiring: the managed require carries an
+        # absolute machine path and lean-toolchain carries the engine-owned
+        # pin - neither belongs in a checked-in widget.
+        lakefile = os.path.join(path, "lakefile.toml")
+        if os.path.isfile(lakefile):
+            with open(lakefile, encoding="utf-8") as f:
+                content = f.read()
+            blocks = content.split("\n[[require]]")
+            kept = [blocks[0]] + [b for b in blocks[1:]
+                                  if _MATHLIB_REQUIRE_MARK not in b]
+            new = "\n[[require]]".join(kept)
+            if new != content:
+                with open(lakefile, "w", newline="\n",
+                          encoding="utf-8") as f:
+                    f.write(new)
+        if self._wants_mathlib(path):
+            try:
+                os.remove(os.path.join(path, "lean-toolchain"))
+            except OSError:
+                pass
         self._cleanup_artifact_dirs(path)
