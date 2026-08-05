@@ -178,7 +178,7 @@ class CSharpEngine(LanguageEngine):
     toolchain = {
         "dotnet": "Install the .NET SDK 10+ - dotnet.microsoft.com/download",
     }
-    supported = False
+    supported = True
 
     scanner_runner = ["dotnet", "run"]
     scanner_messages = {
