@@ -249,6 +249,41 @@ def test_create_java_widget(carto, tmp_path, monkeypatch):
         assert "rootProject.name = 'my_widget'" in f.read()
 
 
+def test_create_csharp_widget(carto, tmp_path, monkeypatch):
+    # C# ships supported=False until its cross-platform CI proves the
+    # .NET toolchain; the scaffold itself is testable regardless.
+    from cartograph.languages.csharp import CSharpEngine
+    monkeypatch.setattr(CSharpEngine, "supported", True)
+    result = carto.create(
+        "my-widget",
+        language="csharp",
+        name="My Widget",
+        domain="backend",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "cartograph-deps.props",
+        "src/my_widget.csproj",
+        "src/MyWidget.cs",
+        "tests/Tests.csproj",
+        "tests/MyWidgetTests.cs",
+        "examples/Examples.csproj",
+        "examples/ExampleUsage.cs",
+    ])
+    # The source namespace must match what the test/example import.
+    with open(f"{result['path']}/src/MyWidget.cs") as f:
+        assert "namespace MyWidgetWidget;" in f.read()
+    with open(f"{result['path']}/tests/MyWidgetTests.cs") as f:
+        assert "using MyWidgetWidget;" in f.read()
+    with open(f"{result['path']}/tests/Tests.csproj") as f:
+        assert "../src/my_widget.csproj" in f.read()
+    with open(f"{result['path']}/examples/ExampleUsage.cs") as f:
+        assert "using MyWidgetWidget;" in f.read()
+
+
 def test_create_nim_widget(carto, tmp_path):
     result = carto.create(
         "my-nim-widget",
