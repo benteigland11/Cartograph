@@ -178,7 +178,7 @@ LANGUAGE_ALIASES = {
     "gd": "gdscript", "godot": "gdscript", "godot4": "gdscript",
     "jdk": "java", "openjdk": "java",
     "c++": "cpp", "cxx": "cpp",
-    "c#": "csharp",
+    "c#": "csharp", "cs": "csharp", "dotnet": "csharp",
     "hipc++": "hip", "hip c++": "hip",
     "sv": "systemverilog", "verilog": "systemverilog",
     "ang": "angular", "ng": "angular",

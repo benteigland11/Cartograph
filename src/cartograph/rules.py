@@ -55,6 +55,7 @@ _LANGUAGE_RULES = {
     "gdscript":      ("rules.gdscript.py",   [sys.executable]),
     "java":          ("rules.java.py",       [sys.executable]),
     "lean":          ("rules.lean.py",       [sys.executable]),
+    "csharp":        ("rules.csharp.py",     [sys.executable]),
 }
 
 
@@ -1686,6 +1687,93 @@ if __name__ == "__main__":
     main()
 """
 
+_TEMPLATE_CSHARP = """\
+\"\"\"
+Custom validation rules for C# widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+              Use for things that must never ship.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+C#-SPECIFIC CHECKS TO CONSIDER
+------------------------------
+The engine already blocks Console printing, Environment.Exit/FailFast,
+and Thread.Sleep in src/, and enforces 80% coverlet line coverage. Teams
+often want more:
+
+  - Async policy: forbid `.Result`/`.Wait()` on Tasks in src/ (deadlock
+    bait) - require await.
+  - Forbidden deps: block a dependency your team bans by inspecting
+    cartograph-deps.props or widget.json.
+  - Nullability floor: require `<Nullable>enable</Nullable>` to stay in
+    the src csproj.
+  - Formatting floor: shell out to `dotnet format --verify-no-changes`
+    and block on any diff.
+  - Reflection ban: flag Activator.CreateInstance/Type.GetType in src/.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      cartograph-deps.props    generated from widget.json deps
+      src/        class library (the widget owns its csproj)
+      tests/      xUnit tests (*Tests.cs)
+      examples/   ExampleUsage.cs
+      widget.json
+
+This is a Python script - use any stdlib module you want.
+EXAMPLE
+-------
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def main() -> None:
+    widget_path = sys.argv[1] if len(sys.argv) > 1 else "."
+    blocks: list[str] = []
+    warnings: list[str] = []
+
+    src_dir = os.path.join(widget_path, "src")
+    for root, _dirs, files in os.walk(src_dir):
+        for fname in files:
+            if not fname.endswith(".cs"):
+                continue
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, widget_path)
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                for lineno, line in enumerate(f, 1):
+                    # [TODO] Replace with your team's checks. Example:
+                    # blocking on a Task hides deadlocks until production.
+                    if re.search(r"\\.(?:Result|Wait\\(\\))", line):
+                        warnings.append(
+                            f"{rel}:{lineno}: blocking Task access - "
+                            f"prefer await on the public API"
+                        )
+
+    print(json.dumps({"blocks": blocks, "warnings": warnings}))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 _TEMPLATES = {
     "python":        _TEMPLATE_PYTHON,
     "javascript":    _TEMPLATE_JAVASCRIPT,
@@ -1703,6 +1791,7 @@ _TEMPLATES = {
     "gdscript":      _TEMPLATE_GDSCRIPT,
     "java":          _TEMPLATE_JAVA,
     "lean":          _TEMPLATE_LEAN,
+    "csharp":        _TEMPLATE_CSHARP,
 }
 
 
