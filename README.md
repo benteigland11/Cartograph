@@ -119,6 +119,7 @@ what the tool actually supports.
 - **GDScript**: Godot 4 headless (`gamedev` domain) - single `godot` binary, never opens the editor. Every script parse-checked with `--check-only`; tests are `extends SceneTree` scripts asserting via ASSERT_PASS/quit-code contract. Deprecated Godot 3 syntax is hard-blocked by the native scanner (the headline check - LLMs constantly emit Godot 3 into Godot 4 projects). No coverage floor (no tool exists).
 - **Java**: Gradle + JUnit 5, JaCoCo line coverage (80%, Gradle core plugin - the whole toolchain is JDK 21+ plus Gradle), native comment/string/text-block-aware scanner run in JDK single-file mode. Widgets own their full build.gradle including plugins (build-time plugins like Fabric Loom work); the engine only requires a JaCoCo XML report from `test` and a `runExample` task. `System.out/err`, `System.exit`, and `Thread.sleep` are blocked in src/.
 - **Lean 4**: elan + lake, `lake build` kernel-checks every theorem - checked-in means *proven*. Native Lean scanner hard-blocks unproven `sorry`/`admit` (the compiler only warns) and custom `axiom` declarations in src/. ASSERT_PASS runtime test contract on top of proof checking; no coverage floor (the kernel is a stronger floor than coverage for proof code). Widgets may declare a `mathlib` dependency, served from one shared version-pinned workspace (`cartograph setup-mathlib`, explicit multi-GB provision - never automatic); everything else builds against the Lean core library only.
+- **C#**: .NET SDK 10+ (the whole toolchain - xUnit and coverlet are fetched from NuGet by the scaffolded test project), `dotnet test` with coverlet line coverage (80%), native comment/string/verbatim/raw-string-aware scanner run via file-based `dotnet run`. Widgets own their csproj files (analyzers and source generators work); the engine only requires a Cobertura report from tests and a runnable examples project. `Console` printing, `Environment.Exit/FailFast`, and `Thread.Sleep` are blocked in src/.
 
 Each language has its own validation engine. The contamination scanners are written in the target language itself where possible (Python uses AST, JS uses a token-based parser, Nim uses a line-based scanner). OpenSCAD and SystemVerilog use Python-based scanners since neither language has general-purpose file I/O suitable for static analysis tooling.
 
@@ -150,7 +151,7 @@ pytest
 
 The widget library lives in your platform's user data directory. To override the location, set `WIDGET_LIBRARY_PATH`. When running from source, a `Widget_Library/` directory alongside this repo takes precedence so local edits work without configuration.
 
-Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, ng, php, composer, terraform, go, cargo, cargo-llvm-cov, ngspice, godot, java, gradle, lean, lake) are installed correctly.
+Run `cartograph doctor` to check that all language engine dependencies (pytest, coverage, node, npx, vitest, nim, nimble, openscad, iverilog, ng, php, composer, terraform, go, cargo, cargo-llvm-cov, ngspice, godot, java, gradle, lean, lake, dotnet) are installed correctly.
 
 ### Pre-push checks and release preflight
 
