@@ -87,6 +87,7 @@ _BY_LANGUAGE: dict[str, frozenset[str]] = {
     }),
     "rust": frozenset({"target"}),
     "java": frozenset({"target", "build", ".gradle"}),
+    "csharp": frozenset({"bin", "obj", "TestResults"}),
     "kotlin": frozenset({"build", ".gradle"}),
     "go": frozenset({"vendor", "bin"}),
     "nim": frozenset({"nimcache", "htmldocs", "nimble.paths", "nimble.develop"}),

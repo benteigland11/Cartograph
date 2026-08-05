@@ -457,6 +457,13 @@ class CSharpEngine(LanguageEngine):
         env.setdefault("DOTNET_NOLOGO", "1")
         env.setdefault("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "1")
         env.setdefault("DOTNET_CLI_UI_LANGUAGE", "en")
+        # Leave no daemons behind (the Gradle --no-daemon lesson): no
+        # MSBuild node reuse, no persistent MSBuild server, no shared
+        # Roslyn compiler server. MSBuild reads env vars as global
+        # properties, so UseSharedCompilation applies everywhere.
+        env.setdefault("MSBUILDDISABLENODEREUSE", "1")
+        env.setdefault("DOTNET_CLI_USE_MSBUILD_SERVER", "0")
+        env.setdefault("UseSharedCompilation", "false")
         return super()._run(cmd, cwd=cwd, timeout=timeout, env=env)
 
     @staticmethod
