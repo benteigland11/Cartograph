@@ -9,6 +9,7 @@ from src.file_stamp import (
     write_stamp,
     read_stamp,
     is_stamp_valid,
+    adopt_stamp,
     STAMP_FILE,
 )
 
@@ -174,3 +175,40 @@ def test_custom_stamp_name(tmp_path):
     assert os.path.exists(str(tmp_path / ".my_stamp.json"))
     assert is_stamp_valid(str(root), stamp_name=".my_stamp.json") is True
     assert is_stamp_valid(str(root)) is False  # default name doesn't exist
+
+
+def test_adopt_stamp_matching(tmp_path):
+    root = _make_tree(tmp_path)
+    stamp = write_stamp(str(root), metadata={"language": "python"})
+    os.remove(str(tmp_path / STAMP_FILE))
+    assert adopt_stamp(str(root), stamp) is True
+    adopted = read_stamp(str(root))
+    assert adopted == stamp  # verbatim, original stamped_at preserved
+    assert is_stamp_valid(str(root)) is True
+
+
+def test_adopt_stamp_mismatch_writes_nothing(tmp_path):
+    root = _make_tree(tmp_path)
+    stamp = write_stamp(str(root))
+    os.remove(str(tmp_path / STAMP_FILE))
+    (tmp_path / "src" / "main.py").write_text("print('tampered')")
+    assert adopt_stamp(str(root), stamp) is False
+    assert read_stamp(str(root)) is None
+
+
+def test_adopt_stamp_missing_fingerprint(tmp_path):
+    root = _make_tree(tmp_path)
+    assert adopt_stamp(str(root), {"language": "python"}) is False
+    assert adopt_stamp(str(root), None) is False
+    assert read_stamp(str(root)) is None
+
+
+def test_adopt_stamp_custom_name_and_kwargs(tmp_path):
+    root = _make_tree(tmp_path)
+    stamp = write_stamp(str(root), stamp_name=".other.json",
+                        patterns=[os.path.join(str(root), "src", "**", "*")])
+    os.remove(str(tmp_path / ".other.json"))
+    ok = adopt_stamp(str(root), stamp, stamp_name=".other.json",
+                     patterns=[os.path.join(str(root), "src", "**", "*")])
+    assert ok is True
+    assert os.path.exists(str(tmp_path / ".other.json"))

@@ -390,6 +390,7 @@ def inspect(owner_handle: str, widget_id: str, source: bool = False,
                   "headers": {
                       "X-Widget-Version": {"schema": {"type": "string"}},
                       "X-Widget-Governance": {"schema": {"type": "string"}},
+                      "X-Widget-Stamp": {"schema": {"type": "string"}, "description": "Signed validation stamp (compact JSON) stored at publish time"},
                   },
               },
               404: {"description": "Widget not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
@@ -416,10 +417,18 @@ def download_widget(owner_handle: str, widget_id: str,
     if "error" in r:
         return r
     headers = r["headers"]
+    stamp = None
+    raw_stamp = headers.get("X-Widget-Stamp")
+    if raw_stamp:
+        try:
+            stamp = json.loads(raw_stamp)
+        except ValueError:
+            stamp = None  # malformed header: fall back to unstamped install
     return {
         "zip_bytes": r["body"],
         "version": headers.get("X-Widget-Version", "0.0.0"),
         "governance": headers.get("X-Widget-Governance"),
+        "stamp": stamp,
     }
 
 

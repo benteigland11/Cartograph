@@ -19,6 +19,7 @@ from cg.infra_file_stamp_python.src.file_stamp import (
     write_stamp as _write_stamp,
     read_stamp as _read_stamp,
     is_stamp_valid as _is_stamp_valid,
+    adopt_stamp as _adopt_stamp,
 )
 
 log = logging.getLogger("cartograph")
@@ -65,6 +66,75 @@ def is_stamp_valid(widget_path: str, language: str, engine) -> bool:
     if not valid:
         log.debug("Validation stamp is stale or missing")
     return valid
+
+
+def adopt_stamp(widget_path: str, stamp: dict, language: str) -> bool:
+    """Adopt a stamp transported from a registry, if it matches local files.
+
+    The registry stores the signed stamp uploaded at publish time; download
+    returns it alongside the zip. Adopting it re-fingerprints the extracted
+    files with the local engine's watched_patterns and writes the stamp only
+    on an exact match - proving these bytes are the ones that passed
+    validation at publish. Signature policy is the caller's concern (sync
+    verifies the HMAC for own-account widgets; install cannot, since keys
+    are per-user symmetric).
+
+    Returns True if the stamp was verified and written.
+    """
+    if not isinstance(stamp, dict) or not stamp.get("fingerprint"):
+        return False
+    try:
+        from .languages import get_engine
+        engine = get_engine(language)
+        if engine is None:
+            return False
+        patterns = engine.watched_patterns(widget_path)
+    except Exception:
+        return False
+    return _adopt_stamp(widget_path, stamp, stamp_name=STAMP_FILE,
+                        patterns=patterns)
+
+
+def adopt_registry_stamp(widget_path: str, stamp: dict | None,
+                         require_signature: bool = False) -> bool:
+    """Adopt a registry-transported validation stamp after extraction.
+
+    Verifies the stamp's fingerprint against the extracted files (always)
+    and its HMAC signature against our signing key (when require_signature -
+    sync pulls are own-account widgets, so the signature must check out;
+    installs of other owners' widgets can't be HMAC-verified with a
+    symmetric per-user key and rely on the fingerprint + TLS).
+
+    Returns True if a stamp was adopted. Never raises: an unadoptable stamp
+    just leaves the widget unstamped, which is today's behavior.
+    """
+    if not stamp:
+        return False
+    if require_signature:
+        from .trust import verify_stamp, MissingSigningKeyError
+        try:
+            if not verify_stamp(stamp):
+                log.warning(
+                    "Registry stamp signature mismatch at %s - not adopting",
+                    widget_path,
+                )
+                return False
+        except MissingSigningKeyError:
+            # No local key (e.g. token-only session): fingerprint still gates.
+            pass
+    import json
+    import os
+    try:
+        with open(os.path.join(widget_path, "widget.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        language = manifest.get("tech_stack", {}).get("language", "")
+        if isinstance(language, list):
+            language = language[0] if language else ""
+    except Exception:
+        return False
+    # Strip the signature so the adopted stamp matches locally-minted shape.
+    stamp = {k: v for k, v in stamp.items() if k != "signature"}
+    return adopt_stamp(widget_path, stamp, language)
 
 
 def has_valid_stamp(widget_path: str, language: str) -> bool:
