@@ -43,9 +43,9 @@ jobs:
           python -c "
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
-          expected = {'angular', 'gdscript', 'go', 'java', 'javascript', 'lean',
-                      'nim', 'openscad', 'php', 'python', 'rust', 'spice',
-                      'systemverilog', 'terraform', 'typescript'}
+          expected = {'angular', 'csharp', 'gdscript', 'go', 'java', 'javascript',
+                      'lean', 'nim', 'openscad', 'php', 'python', 'rust',
+                      'spice', 'systemverilog', 'terraform', 'typescript'}
           missing = expected - langs
           assert not missing, f'engines missing from wheel install: {missing}'
           print('all engines registered:', sorted(langs))
@@ -224,6 +224,26 @@ jobs:
           WIDGET_DIR=$(find cg -maxdepth 2 -name "lakefile.toml" -printf "%h" -quit)
           echo "Lean widget at: $WIDGET_DIR"
           test -f "$WIDGET_DIR/lakefile.toml"
+          test -d "$WIDGET_DIR/src"
+          test -d "$WIDGET_DIR/tests"
+          test -d "$WIDGET_DIR/examples"
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: cartograph create (csharp)
+        run: cartograph create universal-ci-test-csharp --language csharp --domain universal --name "CI CSharp Test"
+
+      - name: Verify csharp widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "cartograph-deps.props" -printf "%h" -quit)
+          echo "CSharp widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/cartograph-deps.props"
+          test -n "$(find "$WIDGET_DIR/src" -name '*.csproj')"
+          test -f "$WIDGET_DIR/tests/Tests.csproj"
+          test -f "$WIDGET_DIR/examples/Examples.csproj"
           test -d "$WIDGET_DIR/src"
           test -d "$WIDGET_DIR/tests"
           test -d "$WIDGET_DIR/examples"

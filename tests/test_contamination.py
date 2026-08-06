@@ -34,6 +34,7 @@ from cartograph.languages.rust import RustEngine
 from cartograph.languages.gdscript import GDScriptEngine
 from cartograph.languages.java import JavaEngine
 from cartograph.languages.lean import LeanEngine
+from cartograph.languages.csharp import CSharpEngine
 from cartograph.languages.spice import SpiceEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
@@ -96,6 +97,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "gdscript": GDScriptEngine,
         "java": JavaEngine,
         "lean": LeanEngine,
+        "csharp": CSharpEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -131,6 +133,7 @@ CLEAN = {
     "java":       ('/** Clean module. */\npublic final class Module {\n    private Module() {}\n\n    /** Returns a greeting. */\n    public static String hello() { return "world"; }\n}\n', "", None),
     "gdscript":   ('func hello() -> String:\n\treturn "world"\n', "", None),
     "lean":       ('/-- Returns a greeting. -/\ndef hello : String := "world"\n', "", None),
+    "csharp":     ('/// <summary>Clean module.</summary>\npublic static class Module\n{\n    /// <summary>Returns a greeting.</summary>\n    public static string Hello() { return "world"; }\n}\n', "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -145,6 +148,7 @@ ABS_PATH_SRC = {
     "go":         'package module\n\nfunc LogPath() string { return "/home/user/logs/app.log" }\n',
     "rust":       'pub fn log_path() -> &\'static str { "/home/user/logs/app.log" }\n',
     "java":       'public final class Module {\n    public static String logPath() { return "/home/user/logs/app.log"; }\n}\n',
+    "csharp":     'public static class Module\n{\n    public static string LogPath() { return "/home/user/logs/app.log"; }\n}\n',
     "gdscript":   'var log_path: String = "/home/user/logs/app.log"\n',
     "lean":       'def logPath : String := "/home/user/logs/app.log"\n',
 }
@@ -161,6 +165,7 @@ CREDENTIAL_SRC = {
     "go":         'package module\n\nfunc Key() string {\n\tapiKey := "sk-abc123verylongkey"\n\treturn apiKey\n}\n',
     "rust":       'pub fn key() -> String {\n    let api_key = "sk-abc123verylongkey";\n    api_key.to_string()\n}\n',
     "java":       'public final class Module {\n    public static String key() {\n        String api_key = "sk-abc123verylongkey";\n        return api_key;\n    }\n}\n',
+    "csharp":     'public static class Module\n{\n    public static string Key()\n    {\n        string api_key = "sk-abc123verylongkey";\n        return api_key;\n    }\n}\n',
     "gdscript":   'var api_key: String = "sk-abc123verylongkey"\n',
     "lean":       'def api_key := "sk-abc123verylongkey"\n',
 }
@@ -177,6 +182,7 @@ CREDENTIAL_TEST = {
     "go":         'package tests\n\nfunc fakeCred() string {\n\tpassword := "fake_test_password_123"\n\treturn password\n}\n',
     "rust":       'fn fake_cred() -> String {\n    let password = "fake_test_password_123";\n    password.to_string()\n}\n',
     "java":       'class ModuleTest {\n    String fakeCred() {\n        String password = "fake_test_password_123";\n        return password;\n    }\n}\n',
+    "csharp":     'public class ModuleTests\n{\n    public string FakeCred()\n    {\n        string password = "fake_test_password_123";\n        return password;\n    }\n}\n',
     "gdscript":   'var password: String = "fake_test_password_123"\n',
     "lean":       'def password := "fake_test_password_123"\n',
 }
@@ -193,6 +199,7 @@ URL_SRC = {
     "go":         'package module\n\nfunc API() string { return "https://api.mycompany.com/v1" }\n',
     "rust":       'pub fn api() -> &\'static str { "https://api.mycompany.com/v1" }\n',
     "java":       'public final class Module {\n    public static String api() { return "https://api.mycompany.com/v1"; }\n}\n',
+    "csharp":     'public static class Module\n{\n    public static string Api() { return "https://api.mycompany.com/v1"; }\n}\n',
     "gdscript":   'var api: String = "https://api.mycompany.com/v1"\n',
     "lean":       'def api : String := "https://api.mycompany.com/v1"\n',
 }
@@ -209,6 +216,7 @@ URL_ALLOWED = {
     "go":         'package module\n\nfunc API() string { return "http://localhost:8080/api" }\n',
     "rust":       'pub fn api() -> &\'static str { "http://localhost:8080/api" }\n',
     "java":       'public final class Module {\n    public static String api() { return "http://localhost:8080/api"; }\n}\n',
+    "csharp":     'public static class Module\n{\n    public static string Api() { return "http://localhost:8080/api"; }\n}\n',
     "gdscript":   'var api: String = "http://localhost:8080/api"\n',
     "lean":       'def api : String := "http://localhost:8080/api"\n',
 }
@@ -225,6 +233,7 @@ IP_SRC = {
     "go":         'package module\n\nfunc Host() string { return "192.168.1.100" }\n',
     "rust":       'pub fn host() -> &\'static str { "192.168.1.100" }\n',
     "java":       'public final class Module {\n    public static String host() { return "192.168.1.100"; }\n}\n',
+    "csharp":     'public static class Module\n{\n    public static string Host() { return "192.168.1.100"; }\n}\n',
     "gdscript":   'var host: String = "192.168.1.100"\n',
     "lean":       'def host : String := "192.168.1.100"\n',
 }
@@ -238,6 +247,7 @@ SLEEP_SRC = {
     "php":        "<?php\nsleep(1);\n",
     "go":         'package module\n\nimport "time"\n\nfunc Wait() { time.Sleep(1 * time.Second) }\n',
     "java":       'public final class Module {\n    public static void pause() throws InterruptedException { Thread.sleep(1000); }\n}\n',
+    "csharp":     'public static class Module\n{\n    public static void Pause() { Thread.Sleep(1000); }\n}\n',
     "rust":       'use std::thread;\nuse std::time::Duration;\n\npub fn wait() { thread::sleep(Duration::from_secs(1)); }\n',
     "lean":       'def wait : IO Unit := IO.sleep 1000\n',
 }
@@ -251,6 +261,7 @@ SLEEP_TEST_SMALL = {
     "php":        "<?php\nsleep(1);\n",  # 1 second - not > 1, no warning
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(500 * time.Millisecond) }\n',
     "java":       'class ModuleTest {\n    void pause() throws InterruptedException { Thread.sleep(500); }\n}\n',
+    "csharp":     'public class ModuleTests\n{\n    public void Pause() { Thread.Sleep(500); }\n}\n',
     "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_millis(500)); }\n',
     "lean":       'def wait : IO Unit := IO.sleep 500\n',
 }
@@ -264,6 +275,7 @@ SLEEP_TEST_LARGE = {
     "php":        "<?php\nsleep(5);\n",
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(5 * time.Second) }\n',
     "java":       'class ModuleTest {\n    void pause() throws InterruptedException { Thread.sleep(5000); }\n}\n',
+    "csharp":     'public class ModuleTests\n{\n    public void Pause() { Thread.Sleep(5000); }\n}\n',
     "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_secs(5)); }\n',
     "lean":       'def wait : IO Unit := IO.sleep 5000\n',
 }
@@ -277,6 +289,7 @@ HARDCODED_VALUE = {
     "php":        "<?php\nclass Item { private $TIMEOUT = 30; }\n",
     "go":         'package module\n\nconst Timeout = 30\n',
     "java":       'public final class Module {\n    static final int TIMEOUT = 30;\n    private Module() {}\n}\n',
+    "csharp":     'public static class Module\n{\n    public const int Timeout = 30;\n}\n',
     "rust":       'pub const TIMEOUT: u64 = 30;\n',
     "lean":       'def timeout := 30\n',
 }
@@ -290,6 +303,7 @@ ENV_VAR = {
     "php":        "<?php\n$v = getenv('KEY');\n",
     "go":         'package module\n\nimport "os"\n\nfunc Cfg() string { return os.Getenv("KEY") }\n',
     "java":       'public final class Module {\n    public static String cfg() { return System.getenv("KEY"); }\n}\n',
+    "csharp":     'public static class Module\n{\n    public static string? Cfg() { return Environment.GetEnvironmentVariable("KEY"); }\n}\n',
     "rust":       'pub fn cfg() -> Option<String> { std::env::var("KEY").ok() }\n',
     "lean":       'def cfg : IO (Option String) := IO.getEnv "KEY"\n',
 }
@@ -303,6 +317,7 @@ UNLISTED_IMPORT = {
     "php":        "<?php\nuse GuzzleHttp\\Client;\n",
     "go":         'package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n',
     "java":       'import com.google.gson.Gson;\n\npublic final class Module {\n    public static String js(Object o) { return new Gson().toJson(o); }\n}\n',
+    "csharp":     'using Newtonsoft.Json;\n\npublic static class Module\n{\n    public static string Js(object o) { return JsonConvert.SerializeObject(o); }\n}\n',
     "rust":       'use some_unregistered_crate::Thing;\n',
     "lean":       'import Somepkg\n',
 }
@@ -316,6 +331,7 @@ LISTED_IMPORT = {
     "php":        ("<?php\nuse GuzzleHttp\\Client;\n", ["guzzlehttp/guzzle>=7.0.0"]),
     "go":         ('package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n', ["github.com/google/uuid>=1.6.0"]),
     "java":       ('import com.google.gson.Gson;\n\npublic final class Module {\n    public static String js(Object o) { return new Gson().toJson(o); }\n}\n', ["com.google.code.gson:gson>=2.11.0"]),
+    "csharp":     ('using Newtonsoft.Json;\n\npublic static class Module\n{\n    public static string Js(object o) { return JsonConvert.SerializeObject(o); }\n}\n', ["Newtonsoft.Json>=13.0.3"]),
     "rust":       ('use some_registered_pkg::Thing;\n', ["some-registered-pkg>=1.0.0"]),
     "lean":       ('import Somepkg\n', ["Somepkg>=1.0.0"]),
 }
@@ -330,15 +346,16 @@ STDLIB_IMPORT = {
     "php":        "<?php\nclass Item { public function run(): void { strlen('test'); } }\n",
     "go":         'package module\n\nimport "encoding/json"\n\nvar _ = json.Marshal\n',
     "java":       'import java.util.List;\n\npublic final class Module {\n    public static int size(List<String> xs) { return xs.size(); }\n}\n',
+    "csharp":     'using System.Text;\n\npublic static class Module\n{\n    public static int Size(StringBuilder b) { return b.Length; }\n}\n',
     "rust":       'use std::collections::HashMap;\n\npub fn f() -> HashMap<u8, u8> { HashMap::new() }\n',
     "lean":       'import Std\n',
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java", "lean": "lean"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java", "lean": "lean", "csharp": "cs"}
 
 # Which languages need external tools to run their scanners
-NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot", "java": "java", "lean": "lean"}
+NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot", "java": "java", "lean": "lean", "csharp": "dotnet"}
 
 
 # ---------------------------------------------------------------------------
@@ -346,10 +363,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java", "lean"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java", "lean", "csharp"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java", "lean"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java", "lean", "csharp"]
 
 
 def _skip_if_missing(lang):
@@ -374,6 +391,13 @@ def _skip_if_missing(lang):
                             "not a JDK) - scanner single-file mode unavailable")
         except Exception:
             pytest.skip("java on PATH could not be probed")
+    if lang == "csharp":
+        # The native scanner runs via file-based `dotnet run`, which needs
+        # SDK 10+ - check_available probes the SDK major.
+        from cartograph.languages import get_engine
+        ok, msg = get_engine("csharp").check_available()
+        if not ok:
+            pytest.skip(f"csharp engine not ready: {msg}")
 
 
 class TestContaminationStandard:
@@ -2877,3 +2901,127 @@ class TestLeanSpecific:
             "/-- Doc mentioning sorry, axiom, IO.println. -/\n"
             'def hello : String := "world"\n')
         assert result["blocks"] == [], result
+
+
+@pytest.mark.csharp
+class TestCSharpSpecific:
+    """Checks unique to the C# engine's native scanner, including the
+    comment/string/verbatim/raw-string awareness regex can't do reliably."""
+
+    def _cs_scan(self, tmp_path, src_code, **kw):
+        _skip_if_missing("csharp")
+        return _scan(tmp_path, "csharp", "cs", src_code, **kw)
+
+    def test_console_write_in_src_blocks(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'public static class Module\n'
+            '{\n'
+            '    public static void Hello() { Console.WriteLine("debug"); }\n'
+            '}\n')
+        assert any("console output" in b for b in result["blocks"]), \
+            f"Console.WriteLine in src must block: {result}"
+
+    def test_console_error_in_src_blocks(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'public static class Module\n'
+            '{\n'
+            '    public static void Hello() { Console.Error.Write("oops"); }\n'
+            '}\n')
+        assert any("console output" in b for b in result["blocks"]), \
+            f"Console.Error.Write in src must block: {result}"
+
+    def test_environment_exit_in_src_blocks(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'public static class Module\n'
+            '{\n'
+            '    public static void Die() { Environment.Exit(1); }\n'
+            '}\n')
+        assert any("exit" in b.lower() for b in result["blocks"]), \
+            f"Environment.Exit in src must block: {result}"
+
+    def test_console_write_in_string_not_flagged(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'public static class Module\n'
+            '{\n'
+            '    public static string Doc() { return '
+            '"call Console.WriteLine(x) to print"; }\n'
+            '}\n')
+        assert result["blocks"] == [], \
+            f"Console.WriteLine inside a string must not trip: {result}"
+
+    def test_console_write_in_comment_not_flagged(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            '/// <summary>Never call Console.WriteLine("x") here.</summary>\n'
+            'public static class Module\n'
+            '{\n'
+            '    // Console.WriteLine("also fine in a comment");\n'
+            '    /* Environment.Exit(1) in a block comment */\n'
+            '    public static string Hello() { return "world"; }\n'
+            '}\n')
+        assert result["blocks"] == [], \
+            f"banned tokens in comments must not trip: {result}"
+
+    def test_console_write_in_verbatim_string_not_flagged(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'public static class Module\n'
+            '{\n'
+            '    public static string Doc() { return '
+            '@"use Console.WriteLine(""x"") like this"; }\n'
+            '}\n')
+        assert result["blocks"] == [], \
+            f"verbatim string contents must not trip: {result}"
+
+    def test_console_write_in_raw_string_not_flagged(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'public static class Module\n'
+            '{\n'
+            '    public static string Doc() { return """\n'
+            '        Console.WriteLine("x") and Thread.Sleep(99) are words\n'
+            '        """; }\n'
+            '}\n')
+        assert result["blocks"] == [], \
+            f"raw string contents must not trip: {result}"
+
+    def test_url_not_flagged_as_abs_path(self, tmp_path):
+        # "https://..." must not match the drive-letter branch of the
+        # abs-path pattern via "s://" - it is a URL warning, never a block.
+        result = self._cs_scan(tmp_path,
+            'public static class Module\n'
+            '{\n'
+            '    public static string Api() '
+            '{ return "https://api.mycompany.com/v1"; }\n'
+            '}\n')
+        assert not any("path" in b.lower() for b in result["blocks"]), \
+            f"URL must not block as an absolute path: {result['blocks']}"
+
+    def test_windows_drive_path_blocks(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'public static class Module\n'
+            '{\n'
+            '    public static string P() { return @"C:\\Users\\ben\\data"; }\n'
+            '}\n')
+        assert any("path" in b.lower() for b in result["blocks"]), \
+            f"drive-letter path must block: {result}"
+
+    def test_mutable_static_warns_readonly_does_not(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'public static class Module\n'
+            '{\n'
+            '    public static int counter = 0;\n'
+            '    public static readonly int Limit = 1;\n'
+            '}\n')
+        joined = "\n".join(result["warnings"])
+        assert "counter" in joined, \
+            f"mutable static field must warn: {result}"
+        assert "Limit" not in joined, \
+            f"static readonly must not warn: {result}"
+
+    def test_sleep_non_literal_in_test_warns(self, tmp_path):
+        clean_src = CLEAN["csharp"][0]
+        result = self._cs_scan(tmp_path, clean_src,
+            test_code='public class ModuleTests\n'
+                      '{\n'
+                      '    public void Pause(int ms) { Thread.Sleep(ms); }\n'
+                      '}\n')
+        assert any("sleep" in w.lower() for w in result["warnings"]), \
+            f"non-literal sleep in tests must warn (unknown duration): {result}"

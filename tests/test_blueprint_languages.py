@@ -1999,3 +1999,181 @@ def test_lean_blueprint_validates_end_to_end(carto, project):
     res = carto.validate_blueprint(bp)
     assert res.get("status") == "success", res
     assert res["id"] == "bp-shouter-lean"
+
+
+# ---------------------------------------------------------------------------
+# C#
+# ---------------------------------------------------------------------------
+
+_CS_SRC_CSPROJ = """\
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>{name}</AssemblyName>
+  </PropertyGroup>
+{extra}</Project>
+"""
+
+_CS_TESTS_CSPROJ = """\
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../src/{name}.csproj" />
+  </ItemGroup>
+</Project>
+"""
+
+_CS_EXAMPLES_CSPROJ = """\
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../src/{name}.csproj" />
+  </ItemGroup>
+</Project>
+"""
+
+_CS_GREET_SRC = """\
+namespace GreetWidget;
+
+/// <summary>Builds a greeting string.</summary>
+public static class Greet
+{
+    /// <summary>Returns a greeting for the given name.</summary>
+    public static string Greeting(string who) => "hello, " + who;
+}
+"""
+
+# The blueprint's src csproj references the composed widget's csproj inside
+# cg/ - the same hand-written path wiring Cargo path deps use for Rust
+# blueprints. The validator sandbox copies each dep to cg/<dep-id>/, so the
+# relative path resolves there.
+_CS_SHOUTER_SRC = """\
+using GreetWidget;
+
+namespace ShouterWidget;
+
+/// <summary>Uppercases a greeting via the greet widget.</summary>
+public static class Shouter
+{
+    /// <summary>Returns the greeting, shouted.</summary>
+    public static string Shout(string who) => Greet.Greeting(who).ToUpper();
+}
+"""
+
+_CS_SHOUTER_TEST = """\
+using Xunit;
+using ShouterWidget;
+
+namespace Tests;
+
+public class ShouterTests
+{
+    [Fact]
+    public void Shouts()
+    {
+        Assert.Equal("HELLO, TEST", Shouter.Shout("test"));
+    }
+}
+"""
+
+_CS_SHOUTER_EXAMPLE = """\
+using ShouterWidget;
+
+Console.WriteLine(Shouter.Shout("world"));
+"""
+
+
+def _write_csharp_widget(project_dir: str) -> str:
+    wdir = os.path.join(project_dir, "cg", "universal-greet-csharp")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(wdir, d))
+    manifest = {
+        "meta": {
+            "id": "universal-greet-csharp", "name": "greet",
+            "version": "1.0.0",
+            "domain": "universal", "tags": ["greeting", "demo", "test"],
+        },
+        "tech_stack": {"language": "csharp", "dependencies": []},
+        "description": "Builds a greeting string.",
+    }
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(wdir, "src", "greet.csproj"), "w") as f:
+        f.write(_CS_SRC_CSPROJ.format(name="greet", extra=""))
+    with open(os.path.join(wdir, "src", "Greet.cs"), "w") as f:
+        f.write(_CS_GREET_SRC)
+    return wdir
+
+
+def _write_csharp_blueprint(project_dir: str) -> str:
+    bp = os.path.join(project_dir, "cg", "bp-shouter-csharp")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(bp, d))
+    manifest = {
+        "id": "bp-shouter-csharp",
+        "name": "shouter",
+        "language": "csharp",
+        "version": "0.1.0",
+        "description": "Uppercases a greeting via the greet widget.",
+        "tags": ["greeting", "demo", "blueprint"],
+        "dependencies": [
+            {"id": "universal-greet-csharp", "version": "1.0.0"},
+        ],
+        "domains": [],
+    }
+    with open(os.path.join(bp, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    dep_ref = ('  <ItemGroup>\n'
+               '    <ProjectReference Include='
+               '"../cg/universal-greet-csharp/src/greet.csproj" />\n'
+               '  </ItemGroup>\n')
+    with open(os.path.join(bp, "src", "shouter.csproj"), "w") as f:
+        f.write(_CS_SRC_CSPROJ.format(name="shouter", extra=dep_ref))
+    with open(os.path.join(bp, "src", "Shouter.cs"), "w") as f:
+        f.write(_CS_SHOUTER_SRC)
+    with open(os.path.join(bp, "tests", "Tests.csproj"), "w") as f:
+        f.write(_CS_TESTS_CSPROJ.format(name="shouter"))
+    with open(os.path.join(bp, "tests", "ShouterTests.cs"), "w") as f:
+        f.write(_CS_SHOUTER_TEST)
+    with open(os.path.join(bp, "examples", "Examples.csproj"), "w") as f:
+        f.write(_CS_EXAMPLES_CSPROJ.format(name="shouter"))
+    with open(os.path.join(bp, "examples", "ExampleUsage.cs"), "w") as f:
+        f.write(_CS_SHOUTER_EXAMPLE)
+    return bp
+
+
+@pytest.mark.slow
+def test_csharp_blueprint_validates_end_to_end(carto, project):
+    if not shutil.which("dotnet"):
+        pytest.skip("dotnet not available")
+    engine = get_engine("csharp")
+    if engine is None or not engine.supported:
+        pytest.skip("csharp engine not available")
+    ok, msg = engine.check_available()
+    if not ok:
+        pytest.skip(f"csharp engine not ready: {msg}")
+
+    _write_csharp_widget(str(project))
+    bp = _write_csharp_blueprint(str(project))
+
+    res = carto.validate_blueprint(bp)
+    assert res.get("status") == "success", res
+    assert res["id"] == "bp-shouter-csharp"

@@ -52,6 +52,7 @@ These are requirements. Validation fails if any are not met.
 | GDScript | No | N/A | No coverage tool exists; ASSERT_PASS contract instead |
 | Java | Yes | 80% | JaCoCo XML report from `gradle test` |
 | Lean | No | N/A | No coverage tool exists; the kernel proof-checks every theorem on every build - a stronger floor than coverage for proof code |
+| C# | Yes | 80% | coverlet Cobertura report from `dotnet test` |
 
 Nim coverage would require compiling via `--debugger:native` and running `gcov`/`lcov` on the generated C code. This produces C-level line coverage, not Nim source-level coverage. Decided it was too unreliable and confusing to impose on widget authors.
 
@@ -567,6 +568,87 @@ blueprint's lakefile.toml (the layout the validator sandbox populates), so
 `lake build` builds the composed widget's lib as part of the blueprint
 workspace and `import <dep-module>` resolves - same shape as Rust's Cargo
 path deps.
+
+### C#
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| src/, tests/, examples/ each have a .csproj | missing | file check |
+| src/ has .cs files | missing | file check |
+| dotnet build src passes | compile/type errors | subprocess (library only) |
+| Native C# scanner passes on src/ | issues found | csharp_scanner.cs |
+| All declared dependencies are version-pinned | unpinned dep found | dep pinning check |
+| dotnet test passes | any test fails | subprocess (xUnit) |
+| Coverage meets threshold | below 80% | coverlet Cobertura line-rate |
+| Example runs and exits cleanly | non-zero exit | dotnet run --project examples |
+
+**Layout:** three small projects, no solution file: `src/<slug>.csproj` (class
+library, sources in namespace `<PascalCaseSlug>Widget`), `tests/Tests.csproj`
+(xUnit, `*Tests.cs` filenames, black-box - imports the widget by namespace
+exactly as a consumer would, references `../src`), and
+`examples/Examples.csproj` (executable, `ExampleUsage.cs` with top-level
+statements, references `../src`). `cartograph-deps.props` sits at the widget
+root, generated from widget.json deps.
+
+**The widget owns its csproj files.** Analyzers, source generators, and extra
+build properties work without engine changes. The engine's whole contract
+with the build is: `dotnet test tests` must produce a Cobertura coverage
+report (keep the `coverlet.collector` package), and `dotnet run --project
+examples` must run the example. Break either and validation says so
+explicitly.
+
+**Toolchain:** the .NET SDK alone, floor SDK 10 (file-based `dotnet run`
+executes the native scanner; the availability check probes the SDK major and
+reports an older SDK as a toolchain error, not a widget failure). xUnit and
+coverlet are fetched from NuGet by the scaffolded test project - same
+posture as Java's JUnit-from-Maven-Central.
+
+**Coverage:** 80% enforced via coverlet (`--collect "XPlat Code Coverage"`).
+The engine parses the Cobertura report's document-level `line-rate`; only the
+src assembly is in the denominator because coverlet excludes the test
+assembly automatically and the examples project isn't built by `dotnet test`.
+
+**Dependencies:** declared in widget.json as `PackageId>=version` (e.g.
+`Newtonsoft.Json>=13.0.3`). The validator writes them to the generated
+`cartograph-deps.props` (which the scaffolded src csproj imports) and runs
+`dotnet restore src` - it never edits the user-owned csproj files. NuGet
+`PackageReference` versions are floors natively, so the declared floor maps
+1:1. The shared NuGet cache is package-addressed and checksummed, so no
+per-validation isolation is needed.
+
+**Scanner:** native `csharp_scanner.cs`, stdlib-only, run via .NET 10
+file-based mode (`dotnet run csharp_scanner.cs <files...>`) - no self-scan
+trap, since file-based mode consumes the scanner source as the program and
+passes the rest as argv (it skips its own basename anyway, mirroring
+go/rust/java). It is comment- and string-aware by construction - a
+hand-written lexer that blanks `//` and `/* */` comments, regular strings,
+verbatim strings (`@"..."` with `""` escapes), raw string literals
+(`"""..."""`), and char literals before applying code checks, while keeping
+string contents visible to the checks that look inside strings (paths, URLs,
+IPs, credentials). Interpolated strings are treated as plain strings
+(interpolation holes count as string content - acceptable for warning-grade
+checks). Blocks in src/: `Console` printing (`Write`/`WriteLine` on
+`Console`, `Console.Out`, `Console.Error`), `Environment.Exit`/`FailFast`,
+credentials, absolute paths (drive-letter branch guarded so `https://` never
+matches via `s://`), hardcoded IPs, `Thread.Sleep`. Warnings: hardcoded URLs
+(localhost/127.0.0.1/example.* /.test exempted), env var access
+(`Environment.GetEnvironmentVariable`), mutable static fields (shared
+mutable state; `static readonly` exempt), hardcoded numeric `const`s other
+than 0/±1, and unlisted `using` imports (resolved against widget.json deps
+with loose case-insensitive prefix matching, since package ids don't always
+equal namespace roots; `System.*`, `Microsoft.CSharp.*`, `Xunit.*`, and the
+widget's own namespace are exempt). `Task.Delay` is deliberately not
+flagged - awaited delays are non-blocking, and the async-abuse variants
+(`.Result`/`.Wait()`) are left to custom rules. Sleeps in tests warn only
+above 1s, estimated statically from the literal argument. Examples are
+exempt from the print block - they demonstrate by printing.
+
+**Blueprints:** C# composition adds a `ProjectReference` in the blueprint's
+src csproj pointing at the dep widget's csproj under `cg/`
+(`../cg/<dep-widget>/src/<dep>.csproj`) - the same hand-written path wiring
+Cargo path deps use for Rust. The validator sandbox copies each dep under
+`cg/`, so the relative path resolves there; `run_blueprint_example` just
+runs `dotnet run --project examples` in the sandbox.
 
 ## Contamination Scanning
 
