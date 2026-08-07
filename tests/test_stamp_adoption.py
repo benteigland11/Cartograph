@@ -110,8 +110,10 @@ def test_download_widget_parses_stamp_header(monkeypatch):
             return {
                 "body": b"zipbytes",
                 "headers": {
-                    "X-Widget-Version": "1.2.3",
-                    "X-Widget-Stamp": json.dumps(stamp),
+                    # Google Front End lowercases response headers; the
+                    # client must do case-insensitive lookup.
+                    "x-widget-version": "1.2.3",
+                    "x-widget-stamp": json.dumps(stamp),
                 },
             }
 
@@ -126,11 +128,25 @@ def test_download_widget_malformed_stamp_header(monkeypatch):
 
     class _FakeClient:
         def request_raw(self, *a, **k):
-            return {"body": b"z", "headers": {"X-Widget-Stamp": "not json"}}
+            return {"body": b"z", "headers": {"x-widget-stamp": "not json"}}
 
     monkeypatch.setattr(cloud, "_http_client", lambda: _FakeClient())
     r = cloud.download_widget("owner", "universal-demo-python")
     assert r["stamp"] is None
+
+
+def test_download_widget_canonical_case_headers(monkeypatch):
+    """Direct-origin responses keep canonical casing; lookup must be
+    case-insensitive in both directions."""
+    from cartograph import cloud
+
+    class _FakeClient:
+        def request_raw(self, *a, **k):
+            return {"body": b"z", "headers": {"X-Widget-Version": "2.0.0"}}
+
+    monkeypatch.setattr(cloud, "_http_client", lambda: _FakeClient())
+    r = cloud.download_widget("owner", "universal-demo-python")
+    assert r["version"] == "2.0.0"
 
 
 def test_download_widget_no_stamp_header(monkeypatch):
@@ -138,7 +154,7 @@ def test_download_widget_no_stamp_header(monkeypatch):
 
     class _FakeClient:
         def request_raw(self, *a, **k):
-            return {"body": b"z", "headers": {"X-Widget-Version": "1.0.0"}}
+            return {"body": b"z", "headers": {"X-Widget-Version": "1.0.0"}}  # canonical case must also work
 
     monkeypatch.setattr(cloud, "_http_client", lambda: _FakeClient())
     r = cloud.download_widget("owner", "universal-demo-python")
