@@ -1520,7 +1520,7 @@ def cmd_login(args):
             pass
 
     server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
-    server.timeout = 120
+    server.timeout = 5
     port = server.server_address[1]
     cli_redirect = f"http://127.0.0.1:{port}/callback"
 
@@ -1532,11 +1532,16 @@ def cmd_login(args):
 
     webbrowser.open(login_url)
 
-    # Keep serving until we get a code (or legacy tokens) or timeout
-    while "code" not in received and "id_token" not in received:
+    # Keep serving until we get a code (or legacy tokens) or the overall
+    # deadline passes. Browsers open speculative connections to localhost
+    # that never send a request (Chrome preconnect); handle_request()
+    # returns for those with nothing received, so an empty pass must NOT
+    # be treated as the timeout - only the wall clock decides.
+    import time as _time
+    deadline = _time.monotonic() + 120
+    while ("code" not in received and "id_token" not in received
+           and _time.monotonic() < deadline):
         server.handle_request()
-        if server.timeout and not received:
-            break
     server.server_close()
 
     id_token = received.get("id_token", "")
