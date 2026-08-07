@@ -416,9 +416,11 @@ def download_widget(owner_handle: str, widget_id: str,
     )
     if "error" in r:
         return r
-    headers = r["headers"]
+    # HTTP header names are case-insensitive and proxies rewrite them
+    # (Google Front End lowercases everything), so normalize before lookup.
+    headers = {k.lower(): v for k, v in r["headers"].items()}
     stamp = None
-    raw_stamp = headers.get("X-Widget-Stamp")
+    raw_stamp = headers.get("x-widget-stamp")
     if raw_stamp:
         try:
             stamp = json.loads(raw_stamp)
@@ -426,8 +428,8 @@ def download_widget(owner_handle: str, widget_id: str,
             stamp = None  # malformed header: fall back to unstamped install
     return {
         "zip_bytes": r["body"],
-        "version": headers.get("X-Widget-Version", "0.0.0"),
-        "governance": headers.get("X-Widget-Governance"),
+        "version": headers.get("x-widget-version", "0.0.0"),
+        "governance": headers.get("x-widget-governance"),
         "stamp": stamp,
     }
 
