@@ -159,6 +159,12 @@ def _install_from_cloud(widget_id, dest_path, registry_url=None, owner_hint=None
         with open(os.path.join(dest_path, ".cartograph_source"), "w", encoding="utf-8") as f:
             json.dump(source_meta, f)
 
+        # Adopt the publish-time validation stamp when the registry sent one
+        # and the extracted bytes fingerprint-match it. Failure to adopt is
+        # not an install failure - the widget just stays unstamped.
+        from .validation_stamp import adopt_registry_stamp
+        adopt_registry_stamp(dest_path, result.get("stamp"))
+
         return {
             "status": "success",
             "widget_id": widget_id,

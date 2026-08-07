@@ -2,7 +2,7 @@
   "meta": {
     "id": "infra-file-stamp-python",
     "name": "File Stamp",
-    "version": "1.0.2",
+    "version": "1.1.0",
     "domain": "infra",
     "tags": [
       "fingerprint",
@@ -24,7 +24,7 @@
   },
   "validation": {
     "engine_version": 1,
-    "validated_at": "2026-06-04T21:33:38.758184+00:00",
-    "runtime": "python 3.14.5"
+    "validated_at": "2026-08-06T15:42:50.154485+00:00",
+    "runtime": "python 3.14.6"
   }
 }

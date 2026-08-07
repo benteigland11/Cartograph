@@ -155,6 +155,39 @@ def read_stamp(root, stamp_name=STAMP_FILE):
         return None
 
 
+def adopt_stamp(root, stamp, stamp_name=STAMP_FILE, **collect_kwargs):
+    """Adopt a stamp produced elsewhere, if it matches root's current files.
+
+    Recomputes the fingerprint over root and compares it to the candidate
+    stamp's fingerprint. On match, writes the stamp verbatim (the original
+    stamped_at and metadata are preserved - adoption transports a stamping
+    event, it does not create one). On mismatch, writes nothing.
+
+    Use cases: restoring a stamp alongside files transported between
+    machines (archive download, sync, cache restore) so the receiver can
+    prove the files are exactly the ones that were stamped.
+
+    Args:
+        root: Directory the stamp claims to describe.
+        stamp: Candidate stamp dict. Must contain a "fingerprint" key.
+        stamp_name: Filename for the stamp. Defaults to .file_stamp.json.
+        **collect_kwargs: Passed to collect_files for recomputing fingerprint.
+
+    Returns:
+        True if the fingerprint matched and the stamp was written,
+        False otherwise (including a missing/empty fingerprint field).
+    """
+    expected = stamp.get("fingerprint") if isinstance(stamp, dict) else None
+    if not expected:
+        return False
+    if fingerprint(root, **collect_kwargs) != expected:
+        return False
+    stamp_path = os.path.join(root, stamp_name)
+    with open(stamp_path, "w") as f:
+        json.dump(stamp, f)
+    return True
+
+
 def is_stamp_valid(root, metadata_match=None, stamp_name=STAMP_FILE,
                    **collect_kwargs):
     """Check if the stamp is still valid (no files changed).

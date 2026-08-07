@@ -64,6 +64,20 @@ def sign_stamp(stamp: dict) -> str:
     return hmac.new(_signing_key(), _canonical(stamp), hashlib.sha256).hexdigest()
 
 
+def verify_stamp(stamp: dict) -> bool:
+    """Return True if the stamp's signature matches our own signing key.
+
+    Only meaningful for stamps this account signed (HMAC keys are per-user
+    symmetric): sync pulls of your own widgets. Raises MissingSigningKeyError
+    when no key is available, so callers can distinguish "can't verify"
+    from "verified false".
+    """
+    sig = stamp.get("signature") if isinstance(stamp, dict) else None
+    if not sig:
+        return False
+    return hmac.compare_digest(sign_stamp(stamp), sig)
+
+
 # Fields the cloud registry requires in every published stamp.
 # Defined here so the CLI and cloud stay in sync automatically.
 STAMP_REQUIRED_FIELDS: frozenset[str] = frozenset({

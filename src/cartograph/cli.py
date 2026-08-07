@@ -3452,7 +3452,13 @@ def cmd_sync(args):
                 with staged_dir(dest) as staging:
                     with zipfile.ZipFile(BytesIO(result["zip_bytes"])) as zf:
                         safe_extractall(zf, staging)
-            print(f"ok → v{result.get('version', '?')}")
+            from .validation_stamp import adopt_registry_stamp
+            stamped = adopt_registry_stamp(
+                dest, result.get("stamp"), require_signature=True,
+            )
+            suffix = "" if stamped else \
+                "  (no stamp adopted - run `cartograph validate " + wid + " --lib`)"
+            print(f"ok → v{result.get('version', '?')}{suffix}")
         except (UnsafeArchiveError, LockTimeout) as e:
             print(f"FAILED: {e}")
         except Exception as e:
