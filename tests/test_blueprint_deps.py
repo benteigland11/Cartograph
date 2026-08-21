@@ -158,6 +158,48 @@ def test_add_dep_rejects_path_not_found(carto, tmp_path):
     assert "not found" in res["message"].lower()
 
 
+def _write_todo_scaffold(project_dir, name="auth-flow"):
+    """Fresh-create shape: [TODO] tags/description, empty deps."""
+    bp = _write_blueprint(project_dir, name=name)
+    manifest_path = os.path.join(bp, "blueprint.json")
+    with open(manifest_path, encoding="utf-8") as f:
+        data = json.load(f)
+    data["description"] = f"[TODO] Describe what {name} does"
+    data["tags"] = ["[TODO: add 3-5 tags]"]
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return bp, data
+
+
+def test_add_dep_default_keeps_pin_on_unfinished_scaffold(carto, project):
+    """Default add-dep is pin-only. A scaffold cannot pass full validate,
+    so requiring it would make the pin a no-op (the circular authoring trap)."""
+    _write_installed_widget(str(project), "backend-greet-python", version="1.2.3")
+    bp, _ = _write_todo_scaffold(str(project))
+    res = carto.blueprint_add_dep(blueprint_path=bp, widget_id="backend-greet-python")
+    assert res["status"] == "success", res
+    assert res.get("validated") is False
+    with open(os.path.join(bp, "blueprint.json"), encoding="utf-8") as f:
+        stored = json.load(f)
+    assert stored["dependencies"] == [
+        {"id": "backend-greet-python", "version": "1.2.3"},
+    ]
+
+
+def test_add_dep_opt_in_validate_reverts_unfinished_scaffold(carto, project):
+    """`--validate` still reverts the pin when the unfinished blueprint fails."""
+    _write_installed_widget(str(project), "backend-greet-python", version="1.2.3")
+    bp, before = _write_todo_scaffold(str(project))
+    res = carto.blueprint_add_dep(
+        blueprint_path=bp, widget_id="backend-greet-python", validate=True,
+    )
+    assert res["status"] != "success"
+    assert res.get("reverted") is True
+    with open(os.path.join(bp, "blueprint.json"), encoding="utf-8") as f:
+        after = json.load(f)
+    assert after == before
+
+
 # --- remove-dep --------------------------------------------------------------
 
 def test_remove_dep_drops_entry(carto, project):
