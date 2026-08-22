@@ -47,6 +47,9 @@ final RegExp topLevelConst = RegExp(
     r'''^(?:const|final)\s+(?:int\s+|double\s+|num\s+)?[a-zA-Z_]\w*\s*=\s*(-?[\d_]+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*;''');
 final RegExp pubspecName = RegExp(r'''^name:\s*([A-Za-z0-9_]+)''',
     multiLine: true);
+final RegExp pubspecPathDep = RegExp(
+    r'''^\s+([A-Za-z0-9_]+):\s*\{\s*path:''',
+    multiLine: true);
 
 // Packages that never need declaring: the SDKs the scaffold itself
 // provides. dart:* imports are stdlib and skipped separately.
@@ -175,9 +178,22 @@ int estimateSleepMillis(String code) {
   }
 }
 
-/// Read tech_stack.dependencies bare names from widget.json in CWD.
+/// Read declared dependency names: tech_stack.dependencies bare names from
+/// widget.json in CWD, plus pub path-dependency package names from
+/// pubspec.yaml (blueprint-composed widgets are wired as path deps and are
+/// declared in blueprint.json rather than widget.json).
 List<String> readDeclaredDeps() {
   final deps = <String>[];
+  final pubspec = File('pubspec.yaml');
+  if (pubspec.existsSync()) {
+    try {
+      for (final m in pubspecPathDep.allMatches(pubspec.readAsStringSync())) {
+        deps.add(m.group(1)!);
+      }
+    } on Object {
+      // unreadable pubspec - path deps just stay undeclared
+    }
+  }
   final wj = File('widget.json');
   if (!wj.existsSync()) {
     return deps;
