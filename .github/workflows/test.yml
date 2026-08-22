@@ -270,7 +270,7 @@ jobs:
           python -c "
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
-          expected = {'angular', 'csharp', 'gdscript', 'go', 'java', 'javascript',
+          expected = {'angular', 'csharp', 'flutter', 'gdscript', 'go', 'java', 'javascript',
                       'lean', 'nim', 'openscad', 'php', 'python', 'rust',
                       'spice', 'systemverilog', 'terraform', 'typescript'}
           missing = expected - langs

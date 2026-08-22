@@ -165,7 +165,7 @@ class FlutterEngine(LanguageEngine):
         "flutter": "Install the Flutter SDK 3.x - docs.flutter.dev/get-started/install",
         "dart": "Bundled with the Flutter SDK - ensure the SDK's bin/ dir is on PATH",
     }
-    supported = False
+    supported = True
 
     scanner_runner = ["dart"]
     scanner_messages = {
