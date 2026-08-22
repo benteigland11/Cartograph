@@ -97,6 +97,10 @@ _BY_LANGUAGE: dict[str, frozenset[str]] = {
     "elixir": frozenset({"_build", "deps", "cover"}),
     "swift": frozenset({".build", ".swiftpm", "Pods"}),
     "dart": frozenset({".dart_tool", "build"}),
+    # Cartograph flutter widgets: lib/ is the validator-generated copy of
+    # src/ and pubspec.lock is regenerated per validation - both artifacts.
+    "flutter": frozenset({".dart_tool", "build", "coverage", "lib",
+                          "pubspec.lock"}),
     "terraform": frozenset({".terraform"}),
     "lean": frozenset({".lake", "lake-manifest.json"}),
 }
