@@ -53,6 +53,7 @@ These are requirements. Validation fails if any are not met.
 | Java | Yes | 80% | JaCoCo XML report from `gradle test` |
 | Lean | No | N/A | No coverage tool exists; the kernel proof-checks every theorem on every build - a stronger floor than coverage for proof code |
 | C# | Yes | 80% | coverlet Cobertura report from `dotnet test` |
+| Flutter | Yes | 80% | lcov report from `flutter test --coverage` (measured over src/ via the generated lib/ copy) |
 
 Nim coverage would require compiling via `--debugger:native` and running `gcov`/`lcov` on the generated C code. This produces C-level line coverage, not Nim source-level coverage. Decided it was too unreliable and confusing to impose on widget authors.
 
@@ -649,6 +650,97 @@ src csproj pointing at the dep widget's csproj under `cg/`
 Cargo path deps use for Rust. The validator sandbox copies each dep under
 `cg/`, so the relative path resolves there; `run_blueprint_example` just
 runs `dotnet run --project examples` in the sandbox.
+
+### Flutter
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| pubspec.yaml exists at widget root | missing | file check |
+| src/ has .dart files | missing | file check |
+| flutter analyze passes | analyzer errors | subprocess (infos/warnings non-fatal) |
+| Native Dart scanner passes on src/ | issues found | flutter_scanner.dart |
+| All declared dependencies are version-pinned | unpinned dep found | dep pinning check |
+| flutter test passes | any test fails | subprocess (flutter_test) |
+| Coverage meets threshold | below 80% | lcov LF/LH line counters |
+| Example passes under the flutter_test harness | non-zero exit or no tests defined | flutter test examples/example_usage.dart |
+
+**Layout:** `pubspec.yaml` at the widget root, sources in `src/` (the
+canonical Cartograph layout - import sibling src/ files by relative path),
+flutter_test tests in `tests/` (`*_test.dart`, importing the widget as
+`package:<module>/<module>.dart`), and `examples/example_usage.dart`.
+
+**The generated lib/ copy.** Flutter's coverage collector only reports
+libraries under `lib/`, and `package:` imports resolve there - so the
+engine materializes `lib/` as an exact copy of `src/` before analyze,
+tests, and examples, and removes it in cleanup. `src/` stays the single
+source of truth; `lib/` is a build artifact that must never be edited or
+committed. Failure messages map `lib/` paths back to `src/`.
+
+**Example validation deviates from "run and exit cleanly":** Flutter UI
+code cannot execute on the bare Dart VM (`package:flutter` needs the
+Flutter test binding), so examples are runnable demonstrations inside the
+flutter_test harness, executed with `flutter test
+examples/example_usage.dart`. The example must define at least one
+`test()`/`testWidgets()` block - a plain `main()` exits 79 ("no tests
+found") and the engine reports that as a targeted error. Headless on all
+platforms: no device, emulator, or display needed.
+
+**The widget owns its pubspec.yaml** - with one carve-out: the two marked
+blocks inside `dependencies:` are generated. The `cartograph-deps` block
+is rewritten from widget.json deps by the validator; the
+`cartograph-composed` block is rewritten by `blueprint add-dep`. Everything
+else (extra dev_dependencies, flutter config, assets) is the author's.
+Removing the markers is a validation error with a restore hint.
+
+**Toolchain:** the Flutter SDK alone (3.x). It bundles its own Dart SDK -
+the `dart` binary runs the native scanner - and flutter_test ships with
+the SDK, so nothing is fetched to validate a dependency-free widget.
+Pure Dart logic widgets validate through the same `flutter test` path as
+UI widgets (the SDK is a superset); a separate slim-Dart engine was
+deliberately not built (`dart` is reserved as a future engine name, not
+an alias).
+
+**Coverage:** 80% enforced via the lcov report `flutter test --coverage`
+writes natively. The engine sums LF/LH line counters across all records;
+only the widget's own package is instrumented (path-dep packages in
+blueprints are excluded by the collector), so the denominator is exactly
+the src/ sources via the lib/ copy.
+
+**Dependencies:** declared in widget.json as `package>=version` (e.g.
+`collection>=1.18.0`). The validator writes them into the marked pubspec
+block verbatim - pub treats `>=x.y.z` as a floor natively - and runs
+`flutter pub get`. The shared pub cache (`~/.pub-cache`) is
+package-addressed, so no per-widget isolation is needed.
+
+**Scanner:** native `flutter_scanner.dart`, stdlib-only (dart:io +
+dart:convert), run via the bundled Dart VM (`dart flutter_scanner.dart
+<files...>`). Comment- and string-aware by construction - a hand-written
+lexer that blanks `//` and *nested* `/* */` comments (Dart block comments
+nest), single/double-quoted strings, triple-quoted strings, and raw
+(`r'...'`) strings before applying code checks, while keeping string
+contents visible to the checks that look inside strings (paths, URLs, IPs,
+credentials, import URIs). Interpolation holes count as string content -
+acceptable for warning-grade checks. Blocks in src/: console output
+(`print`, `debugPrint`, `stdout`/`stderr` writes), `exit()`, credentials,
+absolute paths (drive-letter branch guarded so `https://` never matches
+via `s://`), hardcoded IPs, and blocking `sleep()` (`Future.delayed` is
+deliberately not flagged - awaited delays don't block the caller).
+Warnings: hardcoded URLs (localhost/127.0.0.1/example.* /.test exempted),
+`Platform.environment` access, top-level numeric `const`/`final`s other
+than 0/±1, and unlisted `package:` imports (resolved against widget.json
+deps plus pubspec path deps; `dart:*`, `package:flutter`,
+`package:flutter_test`, relative imports, and the widget's own package are
+exempt). Sleeps in tests warn only above 1s, statically estimated from
+`Duration(unit: literal)` arguments; non-literal durations count as long.
+
+**Blueprints:** composition is wired as pub *path dependencies* -
+`blueprint add-dep` writes `<dep_module>: { path: cg/<dep-widget-id> }`
+into the marked composed block, pointing at the layout the validator
+sandbox populates. The blueprint's sources then import composed widgets
+as `package:<dep_module>/...` like any consumer would. At test/example
+time the engine materializes `lib/` for the blueprint *and* for every
+flutter widget under the sandbox's `cg/`, so the path deps resolve.
+Coverage counts only the blueprint's own sources.
 
 ## Contamination Scanning
 

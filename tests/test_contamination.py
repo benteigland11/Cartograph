@@ -35,6 +35,7 @@ from cartograph.languages.gdscript import GDScriptEngine
 from cartograph.languages.java import JavaEngine
 from cartograph.languages.lean import LeanEngine
 from cartograph.languages.csharp import CSharpEngine
+from cartograph.languages.flutter import FlutterEngine
 from cartograph.languages.spice import SpiceEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
@@ -98,6 +99,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "java": JavaEngine,
         "lean": LeanEngine,
         "csharp": CSharpEngine,
+        "flutter": FlutterEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -134,6 +136,7 @@ CLEAN = {
     "gdscript":   ('func hello() -> String:\n\treturn "world"\n', "", None),
     "lean":       ('/-- Returns a greeting. -/\ndef hello : String := "world"\n', "", None),
     "csharp":     ('/// <summary>Clean module.</summary>\npublic static class Module\n{\n    /// <summary>Returns a greeting.</summary>\n    public static string Hello() { return "world"; }\n}\n', "", None),
+    "flutter":    ("String hello() => 'world';\n", "", None),
 }
 
 # Check 1: Absolute paths in src/ -> block
@@ -149,6 +152,7 @@ ABS_PATH_SRC = {
     "rust":       'pub fn log_path() -> &\'static str { "/home/user/logs/app.log" }\n',
     "java":       'public final class Module {\n    public static String logPath() { return "/home/user/logs/app.log"; }\n}\n',
     "csharp":     'public static class Module\n{\n    public static string LogPath() { return "/home/user/logs/app.log"; }\n}\n',
+    "flutter":    "String logPath() => '/home/user/logs/app.log';\n",
     "gdscript":   'var log_path: String = "/home/user/logs/app.log"\n',
     "lean":       'def logPath : String := "/home/user/logs/app.log"\n',
 }
@@ -166,6 +170,7 @@ CREDENTIAL_SRC = {
     "rust":       'pub fn key() -> String {\n    let api_key = "sk-abc123verylongkey";\n    api_key.to_string()\n}\n',
     "java":       'public final class Module {\n    public static String key() {\n        String api_key = "sk-abc123verylongkey";\n        return api_key;\n    }\n}\n',
     "csharp":     'public static class Module\n{\n    public static string Key()\n    {\n        string api_key = "sk-abc123verylongkey";\n        return api_key;\n    }\n}\n',
+    "flutter":    "String key() {\n  final api_key = 'sk-abc123verylongkey';\n  return api_key;\n}\n",
     "gdscript":   'var api_key: String = "sk-abc123verylongkey"\n',
     "lean":       'def api_key := "sk-abc123verylongkey"\n',
 }
@@ -183,6 +188,7 @@ CREDENTIAL_TEST = {
     "rust":       'fn fake_cred() -> String {\n    let password = "fake_test_password_123";\n    password.to_string()\n}\n',
     "java":       'class ModuleTest {\n    String fakeCred() {\n        String password = "fake_test_password_123";\n        return password;\n    }\n}\n',
     "csharp":     'public class ModuleTests\n{\n    public string FakeCred()\n    {\n        string password = "fake_test_password_123";\n        return password;\n    }\n}\n',
+    "flutter":    "String fakeCred() {\n  final password = 'fake_test_password_123';\n  return password;\n}\n",
     "gdscript":   'var password: String = "fake_test_password_123"\n',
     "lean":       'def password := "fake_test_password_123"\n',
 }
@@ -200,6 +206,7 @@ URL_SRC = {
     "rust":       'pub fn api() -> &\'static str { "https://api.mycompany.com/v1" }\n',
     "java":       'public final class Module {\n    public static String api() { return "https://api.mycompany.com/v1"; }\n}\n',
     "csharp":     'public static class Module\n{\n    public static string Api() { return "https://api.mycompany.com/v1"; }\n}\n',
+    "flutter":    "String api() => 'https://api.mycompany.com/v1';\n",
     "gdscript":   'var api: String = "https://api.mycompany.com/v1"\n',
     "lean":       'def api : String := "https://api.mycompany.com/v1"\n',
 }
@@ -217,6 +224,7 @@ URL_ALLOWED = {
     "rust":       'pub fn api() -> &\'static str { "http://localhost:8080/api" }\n',
     "java":       'public final class Module {\n    public static String api() { return "http://localhost:8080/api"; }\n}\n',
     "csharp":     'public static class Module\n{\n    public static string Api() { return "http://localhost:8080/api"; }\n}\n',
+    "flutter":    "String api() => 'http://localhost:8080/api';\n",
     "gdscript":   'var api: String = "http://localhost:8080/api"\n',
     "lean":       'def api : String := "http://localhost:8080/api"\n',
 }
@@ -234,6 +242,7 @@ IP_SRC = {
     "rust":       'pub fn host() -> &\'static str { "192.168.1.100" }\n',
     "java":       'public final class Module {\n    public static String host() { return "192.168.1.100"; }\n}\n',
     "csharp":     'public static class Module\n{\n    public static string Host() { return "192.168.1.100"; }\n}\n',
+    "flutter":    "String host() => '192.168.1.100';\n",
     "gdscript":   'var host: String = "192.168.1.100"\n',
     "lean":       'def host : String := "192.168.1.100"\n',
 }
@@ -248,6 +257,7 @@ SLEEP_SRC = {
     "go":         'package module\n\nimport "time"\n\nfunc Wait() { time.Sleep(1 * time.Second) }\n',
     "java":       'public final class Module {\n    public static void pause() throws InterruptedException { Thread.sleep(1000); }\n}\n',
     "csharp":     'public static class Module\n{\n    public static void Pause() { Thread.Sleep(1000); }\n}\n',
+    "flutter":    "import 'dart:io';\n\nvoid pause() {\n  sleep(const Duration(seconds: 1));\n}\n",
     "rust":       'use std::thread;\nuse std::time::Duration;\n\npub fn wait() { thread::sleep(Duration::from_secs(1)); }\n',
     "lean":       'def wait : IO Unit := IO.sleep 1000\n',
 }
@@ -262,6 +272,7 @@ SLEEP_TEST_SMALL = {
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(500 * time.Millisecond) }\n',
     "java":       'class ModuleTest {\n    void pause() throws InterruptedException { Thread.sleep(500); }\n}\n',
     "csharp":     'public class ModuleTests\n{\n    public void Pause() { Thread.Sleep(500); }\n}\n',
+    "flutter":    "import 'dart:io';\n\nvoid pause() {\n  sleep(const Duration(milliseconds: 500));\n}\n",
     "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_millis(500)); }\n',
     "lean":       'def wait : IO Unit := IO.sleep 500\n',
 }
@@ -276,6 +287,7 @@ SLEEP_TEST_LARGE = {
     "go":         'package tests\n\nimport "time"\n\nfunc wait() { time.Sleep(5 * time.Second) }\n',
     "java":       'class ModuleTest {\n    void pause() throws InterruptedException { Thread.sleep(5000); }\n}\n',
     "csharp":     'public class ModuleTests\n{\n    public void Pause() { Thread.Sleep(5000); }\n}\n',
+    "flutter":    "import 'dart:io';\n\nvoid pause() {\n  sleep(const Duration(seconds: 5));\n}\n",
     "rust":       'use std::thread;\nuse std::time::Duration;\n\nfn wait() { thread::sleep(Duration::from_secs(5)); }\n',
     "lean":       'def wait : IO Unit := IO.sleep 5000\n',
 }
@@ -290,6 +302,7 @@ HARDCODED_VALUE = {
     "go":         'package module\n\nconst Timeout = 30\n',
     "java":       'public final class Module {\n    static final int TIMEOUT = 30;\n    private Module() {}\n}\n',
     "csharp":     'public static class Module\n{\n    public const int Timeout = 30;\n}\n',
+    "flutter":    "const int timeout = 30;\n",
     "rust":       'pub const TIMEOUT: u64 = 30;\n',
     "lean":       'def timeout := 30\n',
 }
@@ -304,6 +317,7 @@ ENV_VAR = {
     "go":         'package module\n\nimport "os"\n\nfunc Cfg() string { return os.Getenv("KEY") }\n',
     "java":       'public final class Module {\n    public static String cfg() { return System.getenv("KEY"); }\n}\n',
     "csharp":     'public static class Module\n{\n    public static string? Cfg() { return Environment.GetEnvironmentVariable("KEY"); }\n}\n',
+    "flutter":    "import 'dart:io';\n\nString? cfg() => Platform.environment['KEY'];\n",
     "rust":       'pub fn cfg() -> Option<String> { std::env::var("KEY").ok() }\n',
     "lean":       'def cfg : IO (Option String) := IO.getEnv "KEY"\n',
 }
@@ -318,6 +332,7 @@ UNLISTED_IMPORT = {
     "go":         'package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n',
     "java":       'import com.google.gson.Gson;\n\npublic final class Module {\n    public static String js(Object o) { return new Gson().toJson(o); }\n}\n',
     "csharp":     'using Newtonsoft.Json;\n\npublic static class Module\n{\n    public static string Js(object o) { return JsonConvert.SerializeObject(o); }\n}\n',
+    "flutter":    "import 'package:http/http.dart' as http;\n\nString label(http.Client c) => c.toString();\n",
     "rust":       'use some_unregistered_crate::Thing;\n',
     "lean":       'import Somepkg\n',
 }
@@ -332,6 +347,7 @@ LISTED_IMPORT = {
     "go":         ('package module\n\nimport "github.com/google/uuid"\n\nvar _ = uuid.New\n', ["github.com/google/uuid>=1.6.0"]),
     "java":       ('import com.google.gson.Gson;\n\npublic final class Module {\n    public static String js(Object o) { return new Gson().toJson(o); }\n}\n', ["com.google.code.gson:gson>=2.11.0"]),
     "csharp":     ('using Newtonsoft.Json;\n\npublic static class Module\n{\n    public static string Js(object o) { return JsonConvert.SerializeObject(o); }\n}\n', ["Newtonsoft.Json>=13.0.3"]),
+    "flutter":    ("import 'package:http/http.dart' as http;\n\nString label(http.Client c) => c.toString();\n", ["http>=1.2.0"]),
     "rust":       ('use some_registered_pkg::Thing;\n', ["some-registered-pkg>=1.0.0"]),
     "lean":       ('import Somepkg\n', ["Somepkg>=1.0.0"]),
 }
@@ -347,15 +363,16 @@ STDLIB_IMPORT = {
     "go":         'package module\n\nimport "encoding/json"\n\nvar _ = json.Marshal\n',
     "java":       'import java.util.List;\n\npublic final class Module {\n    public static int size(List<String> xs) { return xs.size(); }\n}\n',
     "csharp":     'using System.Text;\n\npublic static class Module\n{\n    public static int Size(StringBuilder b) { return b.Length; }\n}\n',
+    "flutter":    "import 'dart:convert';\n\nString js(Object o) => jsonEncode(o);\n",
     "rust":       'use std::collections::HashMap;\n\npub fn f() -> HashMap<u8, u8> { HashMap::new() }\n',
     "lean":       'import Std\n',
 }
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java", "lean": "lean", "csharp": "cs"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java", "lean": "lean", "csharp": "cs", "flutter": "dart"}
 
 # Which languages need external tools to run their scanners
-NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot", "java": "java", "lean": "lean", "csharp": "dotnet"}
+NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot", "java": "java", "lean": "lean", "csharp": "dotnet", "flutter": "dart"}
 
 
 # ---------------------------------------------------------------------------
@@ -363,10 +380,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java", "lean", "csharp"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java", "lean", "csharp", "flutter"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java", "lean", "csharp"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java", "lean", "csharp", "flutter"]
 
 
 def _skip_if_missing(lang):
@@ -3023,5 +3040,110 @@ class TestCSharpSpecific:
                       '{\n'
                       '    public void Pause(int ms) { Thread.Sleep(ms); }\n'
                       '}\n')
+        assert any("sleep" in w.lower() for w in result["warnings"]), \
+            f"non-literal sleep in tests must warn (unknown duration): {result}"
+
+
+# ---------------------------------------------------------------------------
+# Flutter-specific validation
+# ---------------------------------------------------------------------------
+
+class TestFlutterSpecific:
+    """Checks unique to the Flutter engine's native Dart scanner, including
+    the comment/string/raw/triple-quote awareness regex can't do reliably
+    (Dart block comments nest; raw strings have no escapes)."""
+
+    def _fl_scan(self, tmp_path, src_code, **kw):
+        _skip_if_missing("flutter")
+        return _scan(tmp_path, "flutter", "dart", src_code, **kw)
+
+    def test_print_in_src_blocks(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "void hello() { print('debug'); }\n")
+        assert any("console output" in b for b in result["blocks"]), \
+            f"print in src must block: {result}"
+
+    def test_debugprint_in_src_blocks(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "import 'package:flutter/foundation.dart';\n\n"
+            "void hello() { debugPrint('debug'); }\n")
+        assert any("console output" in b for b in result["blocks"]), \
+            f"debugPrint in src must block: {result}"
+
+    def test_stdout_write_in_src_blocks(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "import 'dart:io';\n\n"
+            "void hello() { stdout.writeln('debug'); }\n")
+        assert any("console output" in b for b in result["blocks"]), \
+            f"stdout.writeln in src must block: {result}"
+
+    def test_exit_in_src_blocks(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "import 'dart:io';\n\n"
+            "void bail() { exit(1); }\n")
+        assert any("exit()" in b for b in result["blocks"]), \
+            f"exit() in src must block: {result}"
+
+    def test_print_in_tests_allowed(self, tmp_path):
+        clean_src = CLEAN["flutter"][0]
+        result = self._fl_scan(tmp_path, clean_src,
+            test_code="void main() { print('test debug'); }\n")
+        assert not result["blocks"], \
+            f"print in tests must not block: {result['blocks']}"
+
+    def test_banned_tokens_in_strings_do_not_trip(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "String a() => 'call print( here';\n"
+            "String b() => r'raw with sleep( inside';\n"
+            "String c() => '''triple with exit( inside''';\n"
+            'String d() => "double with debugPrint( inside";\n')
+        assert not result["blocks"], \
+            f"banned tokens inside strings must not trip: {result['blocks']}"
+
+    def test_banned_tokens_in_comments_do_not_trip(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "// print('in a line comment')\n"
+            "/* exit(1) in a block comment\n"
+            "   /* sleep(Duration(seconds: 9)) in a NESTED comment */\n"
+            "   still inside the outer comment: debugPrint('x')\n"
+            "*/\n"
+            "String hello() => 'world';\n")
+        assert not result["blocks"] and not result["warnings"], \
+            f"banned tokens inside (nested) comments must not trip: {result}"
+
+    def test_flutter_sdk_imports_not_flagged(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "import 'package:flutter/widgets.dart';\n\n"
+            "Widget hello() => const Text('hi', "
+            "textDirection: TextDirection.ltr);\n")
+        assert not any("Unlisted" in w for w in result["warnings"]), \
+            f"package:flutter must not need declaring: {result['warnings']}"
+
+    def test_relative_import_not_flagged(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "import 'other_helper.dart';\n\n"
+            "String hello() => 'world';\n")
+        assert not any("Unlisted" in w for w in result["warnings"]), \
+            f"relative imports must not need declaring: {result['warnings']}"
+
+    def test_pubspec_path_dep_import_not_flagged(self, tmp_path):
+        # Blueprint-composed widgets are declared as pub path deps in
+        # pubspec.yaml (not widget.json) - the scanner must honor them.
+        _skip_if_missing("flutter")
+        _write(os.path.join(str(tmp_path), "pubspec.yaml"),
+               "name: shouter\n"
+               "dependencies:\n"
+               "  greet: { path: cg/universal-greet-flutter }\n")
+        result = self._fl_scan(tmp_path,
+            "import 'package:greet/greet.dart';\n\n"
+            "String shout(String n) => greet(n).toUpperCase();\n")
+        assert not any("Unlisted" in w for w in result["warnings"]), \
+            f"pubspec path deps must count as declared: {result['warnings']}"
+
+    def test_sleep_non_literal_in_test_warns(self, tmp_path):
+        clean_src = CLEAN["flutter"][0]
+        result = self._fl_scan(tmp_path, clean_src,
+            test_code="import 'dart:io';\n\n"
+                      "void pause(Duration d) { sleep(d); }\n")
         assert any("sleep" in w.lower() for w in result["warnings"]), \
             f"non-literal sleep in tests must warn (unknown duration): {result}"
