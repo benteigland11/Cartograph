@@ -248,5 +248,25 @@ jobs:
           test -d "$WIDGET_DIR/tests"
           test -d "$WIDGET_DIR/examples"
 
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.1'
+          channel: stable
+          cache: true
+
+      - name: cartograph create (flutter)
+        run: cartograph create frontend-ci-test-flutter --language flutter --domain frontend --name "CI Flutter Test"
+
+      - name: Verify flutter widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 2 -name "pubspec.yaml" -printf "%h" -quit)
+          echo "Flutter widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/pubspec.yaml"
+          test -f "$WIDGET_DIR/analysis_options.yaml"
+          test -d "$WIDGET_DIR/src"
+          test -d "$WIDGET_DIR/tests"
+          test -d "$WIDGET_DIR/examples"
+
       - name: cartograph stats
         run: cartograph stats
