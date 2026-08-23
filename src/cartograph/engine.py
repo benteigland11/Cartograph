@@ -849,10 +849,10 @@ class Cartograph:
         return checkin_blueprint(self, path, reason=reason, version_bump=version_bump,
                                  override_warnings=override_warnings,
                                  override_reason=override_reason)
-    def blueprint_add_dep(self, blueprint_path, widget_id, validate=True):
+    def blueprint_add_dep(self, blueprint_path, widget_id, validate=False):
         from .blueprint_deps import add_dep
         return add_dep(self, blueprint_path, widget_id, validate=validate)
-    def blueprint_remove_dep(self, blueprint_path, widget_id, validate=True):
+    def blueprint_remove_dep(self, blueprint_path, widget_id, validate=False):
         from .blueprint_deps import remove_dep
         return remove_dep(self, blueprint_path, widget_id, validate=validate)
     def restore(self, item_id, version, reason):
