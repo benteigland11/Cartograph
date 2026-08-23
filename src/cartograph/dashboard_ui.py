@@ -236,6 +236,7 @@ _HTML = r"""<!DOCTYPE html>
   .lang-text-java       { color: #b07219; }
   .lang-text-lean       { color: #83579a; }
   .lang-text-csharp     { color: #178600; }
+  .lang-text-flutter    { color: #027dfd; }
   .widget-owner { font-size: 13px; color: var(--muted); }
   .widget-version { font-size: 12px; color: var(--muted); background: var(--surface2); padding: 1px 6px; border-radius: 4px; }
   .widget-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; max-width: 700px; }
@@ -258,6 +259,7 @@ _HTML = r"""<!DOCTYPE html>
   .lang-java       { background: #b07219; }
   .lang-lean       { background: #83579a; }
   .lang-csharp     { background: #178600; }
+  .lang-flutter    { background: #027dfd; }
   .lang-unknown    { background: var(--muted); }
 
   .domain-tag {
@@ -595,6 +597,7 @@ function langClass(lang) {
   if (l === 'java' || l === 'jdk' || l === 'openjdk') return 'lang-java';
   if (l === 'lean' || l === 'lean4') return 'lang-lean';
   if (l === 'csharp' || l === 'cs' || l === 'c#' || l === 'dotnet') return 'lang-csharp';
+  if (l === 'flutter') return 'lang-flutter';
   return 'lang-unknown';
 }
 

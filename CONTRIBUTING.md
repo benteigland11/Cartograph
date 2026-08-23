@@ -76,6 +76,24 @@ If a language requires additional files at the widget root (like `.nimble` for N
 
 **C#-specific notes:** C# widgets are three small csproj projects with no solution file - src/ (class library, namespace `<PascalCaseSlug>Widget`), tests/ (xUnit, `*Tests.cs`, black-box by namespace), examples/ (executable, `ExampleUsage.cs` top-level statements). The widget owns its csproj files; the engine's only build contract is that `dotnet test tests` produces a Cobertura coverage report (keep `coverlet.collector`) and `dotnet run --project examples` runs the example. Dependencies are declared in widget.json as `PackageId>=version` and land in the generated `cartograph-deps.props` - never hand-edit that file or add PackageReferences to the src csproj. Toolchain floor is .NET SDK 10 (file-based `dotnet run` executes the native scanner). Coverage floor is the standard 80% via coverlet.
 
+**Flutter-specific notes:** Flutter widgets keep sources in `src/` (the
+Cartograph standard) even though pub convention is `lib/` - the engine
+materializes `lib/` as an exact copy of `src/` at validation time because
+Flutter's coverage collector only reports libraries under `lib/`, then removes
+it in cleanup. Never scaffold, edit, or commit `lib/`. Tests (`*_test.dart`)
+and examples import the widget as `package:<module>/<module>.dart`; sibling
+files inside src/ import each other by relative path only. Example validation
+deviates from "run and exit cleanly": Flutter UI can't execute on the bare
+Dart VM, so `examples/example_usage.dart` runs through the flutter_test
+harness (`flutter test examples/example_usage.dart`) and must define at least
+one `test()`/`testWidgets()` block. The widget owns its `pubspec.yaml` except
+the two marked blocks inside `dependencies:` (`cartograph-deps` is generated
+from widget.json; `cartograph-composed` is written by `blueprint add-dep` as
+pub path deps) - keep both marker pairs intact. The toolchain is the Flutter
+SDK alone; its bundled `dart` binary runs the native scanner, which handles
+Dart's nested block comments and raw strings. Coverage floor is the standard
+80% via the lcov report `flutter test --coverage` emits natively.
+
 A language engine must:
 - Run tests and report pass/fail
 - Measure code coverage (if possible to measure, it should be measured and sit at 80%)
