@@ -333,8 +333,11 @@ class FlutterEngine(LanguageEngine):
             return self._fail("No *_test.dart files found in tests/")
 
         self._materialize_all_libs(path)
-        res = self._run(["flutter", "test", "--coverage", "tests"],
-                        cwd=path, timeout=600)
+        # --no-dds: the Dart Development Service is debug/devtools plumbing
+        # that headless validation never uses - and it can outlive the test
+        # run as an orphaned process (caught on the macOS validation node).
+        res = self._run(["flutter", "test", "--coverage", "--no-dds",
+                         "tests"], cwd=path, timeout=600)
         if res.returncode != 0:
             return self._fail(res.stdout or res.stderr)
 
@@ -373,7 +376,10 @@ class FlutterEngine(LanguageEngine):
         if not os.path.isfile(os.path.join(path, ep)):
             return self._fail("examples/example_usage.dart not found")
         self._materialize_all_libs(path)
-        res = self._run(["flutter", "test", ep], cwd=path, timeout=300)
+        # --no-dds for the same reason as run_tests: no debug service, no
+        # orphaned process after the harness exits.
+        res = self._run(["flutter", "test", "--no-dds", ep], cwd=path,
+                        timeout=300)
         if res.returncode != 0:
             output = (res.stdout or "") + (res.stderr or "")
             if "No tests were found" in output or res.returncode == 79:
