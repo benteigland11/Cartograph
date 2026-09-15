@@ -82,6 +82,9 @@ jobs:
             csharp:
               - 'src/cartograph/languages/csharp.py'
               - 'src/cartograph/languages/scanners/csharp_scanner.cs'
+            flutter:
+              - 'src/cartograph/languages/flutter.py'
+              - 'src/cartograph/languages/scanners/flutter_scanner.dart'
 
       - uses: actions/setup-python@v6
         with:
@@ -188,6 +191,18 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # subosito/flutter-action works identically on all three platforms and
+      # caches the SDK. The Flutter SDK bundles its own Dart SDK (used to run
+      # the native scanner), and flutter_test ships with the SDK, so this one
+      # step is the whole toolchain. Pinned to the stress-tested release.
+      - name: Install Flutter
+        if: env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.flutter == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.1'
+          channel: stable
+          cache: true
+
       # Lean's whole toolchain (elan + lean + lake) comes from the single
       # official elan installer; `stable` resolves the current Lean 4
       # release. The retry guards flaky release-server downloads.
@@ -255,7 +270,7 @@ jobs:
           python -c "
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
-          expected = {'angular', 'csharp', 'gdscript', 'go', 'java', 'javascript',
+          expected = {'angular', 'csharp', 'flutter', 'gdscript', 'go', 'java', 'javascript',
                       'lean', 'nim', 'openscad', 'php', 'python', 'rust',
                       'spice', 'systemverilog', 'terraform', 'typescript'}
           missing = expected - langs

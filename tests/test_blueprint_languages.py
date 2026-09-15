@@ -2177,3 +2177,133 @@ def test_csharp_blueprint_validates_end_to_end(carto, project):
     res = carto.validate_blueprint(bp)
     assert res.get("status") == "success", res
     assert res["id"] == "bp-shouter-csharp"
+
+
+# ---------------------------------------------------------------------------
+# Flutter
+# ---------------------------------------------------------------------------
+
+_FL_PUBSPEC = """\
+name: {name}
+description: {desc}
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # --- cartograph-deps start (generated from widget.json - do not edit) ---
+  # --- cartograph-deps end ---
+  # --- cartograph-composed start (blueprint deps - do not edit) ---
+{composed}\
+  # --- cartograph-composed end ---
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+"""
+
+_FL_ANALYSIS_OPTIONS = """\
+analyzer:
+  exclude:
+    - "lib/**"
+    - "cg/**"
+"""
+
+
+def _write_flutter_widget(project_dir: str) -> str:
+    wdir = os.path.join(project_dir, "cg", "universal-greet-flutter")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(wdir, d))
+    manifest = {
+        "meta": {
+            "id": "universal-greet-flutter", "name": "greet",
+            "version": "1.0.0",
+            "domain": "universal", "tags": ["greeting", "demo", "test"],
+        },
+        "tech_stack": {"language": "flutter", "dependencies": []},
+        "description": "Builds a greeting string.",
+    }
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    with open(os.path.join(wdir, "pubspec.yaml"), "w") as f:
+        f.write(_FL_PUBSPEC.format(name="greet",
+                                   desc="Builds a greeting string.",
+                                   composed=""))
+    with open(os.path.join(wdir, "src", "greet.dart"), "w") as f:
+        f.write("/// Builds a greeting for [name].\n"
+                "String greet(String name) => 'Hello, $name!';\n")
+    return wdir
+
+
+def _write_flutter_blueprint(project_dir: str) -> str:
+    bp = os.path.join(project_dir, "cg", "bp-shouter-flutter")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(bp, d))
+    manifest = {
+        "id": "bp-shouter-flutter",
+        "name": "shouter",
+        "language": "flutter",
+        "version": "0.1.0",
+        "description": "Uppercases a greeting via the greet widget.",
+        "tags": ["greeting", "demo", "blueprint"],
+        "dependencies": [
+            {"id": "universal-greet-flutter", "version": "1.0.0"},
+        ],
+        "domains": [],
+    }
+    with open(os.path.join(bp, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    composed = "  greet: { path: cg/universal-greet-flutter }\n"
+    with open(os.path.join(bp, "pubspec.yaml"), "w") as f:
+        f.write(_FL_PUBSPEC.format(
+            name="shouter",
+            desc="Uppercases a greeting via the greet widget.",
+            composed=composed))
+    with open(os.path.join(bp, "analysis_options.yaml"), "w") as f:
+        f.write(_FL_ANALYSIS_OPTIONS)
+    with open(os.path.join(bp, "src", "shouter.dart"), "w") as f:
+        f.write("import 'package:greet/greet.dart';\n"
+                "\n"
+                "/// Uppercases the greeting built by the greet widget.\n"
+                "String shout(String name) => greet(name).toUpperCase();\n")
+    with open(os.path.join(bp, "tests", "shouter_test.dart"), "w") as f:
+        f.write("import 'package:flutter_test/flutter_test.dart';\n"
+                "import 'package:shouter/shouter.dart';\n"
+                "\n"
+                "void main() {\n"
+                "  test('shout uppercases the greeting', () {\n"
+                "    expect(shout('world'), 'HELLO, WORLD!');\n"
+                "  });\n"
+                "}\n")
+    with open(os.path.join(bp, "examples", "example_usage.dart"), "w") as f:
+        f.write("import 'package:flutter_test/flutter_test.dart';\n"
+                "import 'package:shouter/shouter.dart';\n"
+                "\n"
+                "void main() {\n"
+                "  test('example: shout a fake name', () {\n"
+                "    expect(shout('team'), contains('TEAM'));\n"
+                "  });\n"
+                "}\n")
+    return bp
+
+
+@pytest.mark.slow
+def test_flutter_blueprint_validates_end_to_end(carto, project):
+    if not shutil.which("flutter"):
+        pytest.skip("flutter not available")
+    engine = get_engine("flutter")
+    if engine is None or not engine.supported:
+        pytest.skip("flutter engine not available")
+    ok, msg = engine.check_available()
+    if not ok:
+        pytest.skip(f"flutter engine not ready: {msg}")
+
+    _write_flutter_widget(str(project))
+    bp = _write_flutter_blueprint(str(project))
+
+    res = carto.validate_blueprint(bp)
+    assert res.get("status") == "success", res
+    assert res["id"] == "bp-shouter-flutter"

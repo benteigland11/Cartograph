@@ -56,6 +56,7 @@ _LANGUAGE_RULES = {
     "java":          ("rules.java.py",       [sys.executable]),
     "lean":          ("rules.lean.py",       [sys.executable]),
     "csharp":        ("rules.csharp.py",     [sys.executable]),
+    "flutter":       ("rules.flutter.py",    [sys.executable]),
 }
 
 
@@ -1774,6 +1775,91 @@ if __name__ == "__main__":
     main()
 """
 
+_TEMPLATE_FLUTTER = """\
+\"\"\"
+Custom validation rules for Flutter widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+              Use for things that must never ship.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+FLUTTER-SPECIFIC CHECKS TO CONSIDER
+-----------------------------------
+The engine already blocks print/debugPrint, exit(), and sleep() in src/,
+runs flutter analyze, and enforces 80% lcov line coverage. Teams often
+want more:
+
+  - Const discipline: flag non-const constructors invoked with all-const
+    arguments in src/ (rebuild churn).
+  - Forbidden deps: block a pub package your team bans by inspecting
+    widget.json dependencies.
+  - Material ban: require widgets to import package:flutter/widgets.dart
+    rather than material.dart, so consumers choose their design system.
+  - setState policy: flag setState in widgets above a size threshold -
+    require a change notifier or controller instead.
+  - Asset policy: block Image.network in src/ (URLs belong to callers).
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      pubspec.yaml     the widget owns this (marker blocks are generated)
+      src/             library sources (lib/ is a generated copy - ignore)
+      tests/           flutter_test tests (*_test.dart)
+      examples/        example_usage.dart (flutter_test harness)
+      widget.json
+
+This is a Python script - use any stdlib module you want.
+EXAMPLE
+-------
+\"\"\"
+import json
+import os
+import re
+import sys
+
+
+def main() -> None:
+    widget_path = sys.argv[1] if len(sys.argv) > 1 else "."
+    blocks: list[str] = []
+    warnings: list[str] = []
+
+    # Example: block Image.network in src/ - asset URLs belong to callers.
+    src = os.path.join(widget_path, "src")
+    for root, _dirs, files in os.walk(src):
+        for fname in files:
+            if not fname.endswith(".dart"):
+                continue
+            fpath = os.path.join(root, fname)
+            with open(fpath, encoding="utf-8") as f:
+                for line_no, line in enumerate(f, 1):
+                    if re.search(r"Image\\.network\\s*\\(", line):
+                        blocks.append(
+                            f"{os.path.relpath(fpath, widget_path)}:{line_no}: "
+                            "Image.network in src/ - accept an ImageProvider "
+                            "parameter instead")
+
+    print(json.dumps({"blocks": blocks, "warnings": warnings}))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 _TEMPLATES = {
     "python":        _TEMPLATE_PYTHON,
     "javascript":    _TEMPLATE_JAVASCRIPT,
@@ -1792,6 +1878,7 @@ _TEMPLATES = {
     "java":          _TEMPLATE_JAVA,
     "lean":          _TEMPLATE_LEAN,
     "csharp":        _TEMPLATE_CSHARP,
+    "flutter":       _TEMPLATE_FLUTTER,
 }
 
 

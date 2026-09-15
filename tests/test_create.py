@@ -459,3 +459,43 @@ def test_create_lean_widget(carto, tmp_path, monkeypatch):
         assert "import my_widget" in f.read()
     with open(f"{result['path']}/examples/example_usage.lean") as f:
         assert "import my_widget" in f.read()
+
+
+def test_create_flutter_widget(carto, tmp_path, monkeypatch):
+    # Flutter ships supported=False until its cross-platform CI proves the
+    # SDK toolchain; the scaffold itself is testable regardless.
+    from cartograph.languages.flutter import FlutterEngine
+    monkeypatch.setattr(FlutterEngine, "supported", True)
+    result = carto.create(
+        "my-widget",
+        language="flutter",
+        name="My Widget",
+        domain="frontend",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "pubspec.yaml",
+        "analysis_options.yaml",
+        "src/my_widget.dart",
+        "tests/my_widget_test.dart",
+        "examples/example_usage.dart",
+    ])
+    # The pubspec package name must match what the test/example import.
+    with open(f"{result['path']}/pubspec.yaml") as f:
+        pubspec = f.read()
+    assert "name: my_widget" in pubspec
+    # Both generated marker blocks must survive scaffolding - install_deps
+    # and blueprint wiring regenerate the pubspec between them.
+    assert "cartograph-deps start" in pubspec
+    assert "cartograph-composed start" in pubspec
+    with open(f"{result['path']}/tests/my_widget_test.dart") as f:
+        assert "import 'package:my_widget/my_widget.dart';" in f.read()
+    with open(f"{result['path']}/examples/example_usage.dart") as f:
+        example = f.read()
+    assert "import 'package:my_widget/my_widget.dart';" in example
+    # Examples validate through the flutter_test harness - the scaffold
+    # must ship at least one test block or `flutter test` finds no tests.
+    assert "testWidgets(" in example
