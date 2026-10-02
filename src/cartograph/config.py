@@ -63,6 +63,10 @@ _SCHEMA = {
     "search-priority":  ("library", "search_priority", "str", ["local", "registry"],
                          "Which pool fills the search budget first: your local library "
                          "or the registry pool"),
+    "heavy-deps-root":  ("heavy_deps", "root", "path", None,
+                         "Directory holding pre-provisioned heavy dependencies "
+                         "(e.g. <dir>/lean-mathlib/<pin>). Defaults to the data dir; "
+                         "$CARTOGRAPH_HEAVY_DEPS_ROOT overrides it"),
 }
 
 
@@ -170,6 +174,12 @@ def set_value(key: str, raw_value: str):
             value = False
         else:
             return f"Invalid boolean: '{raw_value}'. Use true or false."
+    elif typ == "path":
+        # Empty clears the setting (back to the default); otherwise store the
+        # absolute path so the value does not depend on the caller's cwd.
+        value = raw_value.strip()
+        if value:
+            value = os.path.abspath(os.path.expanduser(value))
     else:
         value = raw_value
 
@@ -251,6 +261,9 @@ def list_values() -> list[dict]:
         default = _DEFAULTS.get(section, {}).get(toml_key)
         if default is None and key in _DISPLAY_DEFAULTS:
             default = _DISPLAY_DEFAULTS[key]
+        if default is None and key == "heavy-deps-root":
+            from .engine import _user_data_dir
+            default = _user_data_dir()
         result.append({
             "key": key,
             "value": current,
