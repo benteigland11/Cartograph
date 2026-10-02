@@ -16,6 +16,7 @@ from src.mathlib_workspace import (
     seed_manifest,
     status,
     workspace_path,
+    workspace_toolchain,
     write_workspace_files,
 )
 
@@ -194,3 +195,17 @@ def test_two_pins_coexist(tmp_path):
               lambda a, c: 0)
     assert status(tmp_path, PIN, TOOLCHAIN).ready
     assert status(tmp_path, "v4.33.0", "leanprover/lean4:v4.33.0").ready
+
+
+def test_workspace_toolchain_read_from_workspace(tmp_path):
+    provision(tmp_path, "v4.33.0", "leanprover/lean4:v4.33.0",
+              lambda a, c: 0)
+    assert workspace_toolchain(tmp_path, "v4.33.0") == \
+        "leanprover/lean4:v4.33.0"
+
+
+def test_workspace_toolchain_none_when_absent(tmp_path):
+    assert workspace_toolchain(tmp_path, PIN) is None
+    (tmp_path / PIN).mkdir()
+    (tmp_path / PIN / "lean-toolchain").write_text("\n", encoding="utf-8")
+    assert workspace_toolchain(tmp_path, PIN) is None
