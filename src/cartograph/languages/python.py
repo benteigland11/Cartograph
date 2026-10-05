@@ -499,10 +499,10 @@ class PythonEngine(LanguageEngine):
         candidates = {base.replace("-", "_"), base.replace("-", "_").lower()}
         if base.lower() == "pytest-cov":
             candidates = {"pytest_cov"}
+        # One line: on Windows _run goes through cmd.exe, which ends the command at a newline.
         code = (
-            "import importlib.util,importlib.metadata as m,sys\n"
-            "if not all(importlib.util.find_spec(n) for n in %r): sys.exit(1)\n"
-            "print(m.version(%r))"
+            "import importlib.util,importlib.metadata as m,sys; "
+            "sys.exit(1) if not all(importlib.util.find_spec(n) for n in %r) else print(m.version(%r))"
         ) % (sorted(candidates), base)
         try:
             res = self._run([py, "-c", code], cwd=os.getcwd(), timeout=30)
