@@ -70,6 +70,45 @@ _HEAVY_ML_DEPS = {
     "flax", "optax",
 }
 
+# "name[extras] <rest>" - rest is the version specifier (or marker/URL, which we don't evaluate).
+_DEP_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(.*)$")
+_CLAUSE_RE = re.compile(r"^(~=|==|!=|<=|>=|<|>)\s*([0-9]+(?:\.[0-9]+)*)$")
+
+
+def _release(version: str):
+    """Numeric release tuple, or None for anything that isn't plain X.Y.Z (pre/post/dev/local)."""
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", version):
+        return None
+    return tuple(int(p) for p in version.split("."))
+
+
+def _version_satisfies(installed: str, specifier: str) -> bool:
+    """Whether `installed` meets a PEP 440-style specifier like ">=1.2,<2".
+
+    Stdlib-only subset: plain numeric releases and the ==, !=, <, <=, >, >=, ~=
+    operators. Anything outside that (wildcards, ===, pre-releases, local
+    versions) returns False, so the caller installs and pip decides."""
+    have = _release(installed)
+    if have is None:
+        return False
+    for clause in specifier.split(","):
+        cm = _CLAUSE_RE.match(clause.strip())
+        if not cm:
+            return False
+        op, want = cm.group(1), _release(cm.group(2))
+        width = max(len(have), len(want))
+        a = have + (0,) * (width - len(have))
+        b = want + (0,) * (width - len(want))
+        if op == "~=":
+            if len(want) < 2 or a < b or have[:len(want) - 1] != want[:-1]:
+                return False
+            continue
+        ok = {"==": a == b, "!=": a != b, "<": a < b,
+              "<=": a <= b, ">": a > b, ">=": a >= b}[op]
+        if not ok:
+            return False
+    return True
+
 
 class PythonEngine(LanguageEngine):
     name = "python"
@@ -425,6 +464,56 @@ class PythonEngine(LanguageEngine):
         """Return the venv python path if a venv was created, else sys.executable."""
         return getattr(self, "_venv_py", sys.executable)
 
+    @staticmethod
+    def _inherit_parent_site_packages(venv_dir: str) -> None:
+        """When cartograph itself runs inside a venv, let the throwaway venv see that
+        venv's packages too (system_site_packages only reaches the base interpreter)."""
+        import site
+        if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
+            return
+        try:
+            parents = [p for p in site.getsitepackages() if os.path.isdir(p)]
+        except Exception:  # noqa: BLE001
+            return
+        for lib in (os.path.join(venv_dir, "lib"), os.path.join(venv_dir, "Lib")):
+            if not os.path.isdir(lib):
+                continue
+            for entry in os.listdir(lib):
+                target = os.path.join(lib, entry, "site-packages")
+                if os.path.isdir(target) and parents:
+                    with open(os.path.join(target, "_cartograph_parent.pth"), "w", encoding="utf-8") as handle:
+                        handle.write("\n".join(parents) + "\n")
+
+    def _importable(self, py: str, dep_name: str) -> bool:
+        """True when the venv's python can already import the package's module
+        and the installed distribution satisfies the declared version specifier."""
+        m = _DEP_RE.match(dep_name)
+        if not m:
+            return False
+        base, spec = m.group(1), m.group(2).strip()
+        if spec.startswith("(") and spec.endswith(")"):
+            spec = spec[1:-1].strip()
+        if ";" in spec or "@" in spec:
+            # Environment markers and direct URLs: let pip decide.
+            return False
+        candidates = {base.replace("-", "_"), base.replace("-", "_").lower()}
+        if base.lower() == "pytest-cov":
+            candidates = {"pytest_cov"}
+        # One line: on Windows _run goes through cmd.exe, which ends the command at a newline.
+        code = (
+            "import importlib.util,importlib.metadata as m,sys; "
+            "sys.exit(1) if not all(importlib.util.find_spec(n) for n in %r) else print(m.version(%r))"
+        ) % (sorted(candidates), base)
+        try:
+            res = self._run([py, "-c", code], cwd=os.getcwd(), timeout=30)
+        except Exception:  # noqa: BLE001
+            return False
+        if res.returncode != 0:
+            return False
+        if not spec:
+            return True
+        return _version_satisfies((res.stdout or "").strip(), spec)
+
     def install_deps(self, path: str, dependencies: list) -> None:
         import shutil
         import venv
@@ -475,6 +564,7 @@ class PythonEngine(LanguageEngine):
             self._venv_py = os.path.join(venv_dir, "Scripts", "python.exe")
         else:
             self._venv_py = os.path.join(venv_dir, "bin", "python")
+        self._inherit_parent_site_packages(venv_dir)
 
         all_deps = list(dependencies) + ["pytest", "pytest-cov"]
         log.debug("Installing %d Python package(s) into venv...", len(all_deps))
@@ -499,6 +589,12 @@ class PythonEngine(LanguageEngine):
                         f"  pip install {dep_name}"
                     )
                 log.debug("Heavy ML dep '%s' found in environment - skipping install.", dep_name)
+                continue
+            # A dependency the venv can already import (inherited from the running
+            # interpreter or the system) needs no network round trip; sandboxes
+            # without network validate offline as long as the deps are present.
+            if self._importable(py, dep_name):
+                log.debug("Dependency '%s' already importable - skipping install.", dep_name)
                 continue
             # --no-cache-dir keeps pip from writing to ~/.cache/pip, which
             # may not exist or be writable in sandboxed environments (Codex,
