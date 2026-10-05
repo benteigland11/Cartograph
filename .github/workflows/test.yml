@@ -85,6 +85,9 @@ jobs:
             flutter:
               - 'src/cartograph/languages/flutter.py'
               - 'src/cartograph/languages/scanners/flutter_scanner.dart'
+            blender:
+              - 'src/cartograph/languages/blender.py'
+              - 'src/cartograph/languages/scanners/blender_runner.py'
 
       - uses: actions/setup-python@v6
         with:
@@ -225,6 +228,71 @@ jobs:
           & ./elan-init.ps1 -NoPrompt $true -NoModifyPath $true -DefaultToolchain stable
           Remove-Item elan-init.ps1
           Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.elan\bin"
+
+      # Blender validates headless (`blender -b`). Official builds come from
+      # the Blender mirrors (download.blender.org sits behind a bot check that
+      # rejects curl), cached per OS. Pinned to the latest LTS; the engine's
+      # floor is 4.2 LTS. Linux needs the X/GL client libs even headless.
+      - name: Cache Blender
+        if: (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.blender == 'true')
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/blender
+          key: blender-5.2.2-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install Blender (Linux)
+        if: matrix.os == 'ubuntu-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.blender == 'true')
+        shell: bash
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libxkbcommon0 libsm6 libice6
+          BL="$RUNNER_TEMP/blender"
+          if [ ! -x "$BL/blender" ]; then
+            f=blender-5.2.2-linux-x64.tar.xz
+            for m in https://mirrors.ocf.berkeley.edu/blender/release https://ftp.halifax.rwth-aachen.de/blender/release; do
+              curl -sSfL --retry 2 -o "$RUNNER_TEMP/$f" "$m/Blender5.2/$f" && break
+            done
+            mkdir -p "$BL" && tar -xf "$RUNNER_TEMP/$f" -C "$BL" --strip-components=1 && rm "$RUNNER_TEMP/$f"
+          fi
+          echo "$BL" >> "$GITHUB_PATH"
+
+      - name: Install Blender (macOS)
+        if: matrix.os == 'macos-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.blender == 'true')
+        shell: bash
+        run: |
+          BL="$RUNNER_TEMP/blender"
+          if [ ! -d "$BL/Blender.app" ]; then
+            f=blender-5.2.2-macos-arm64.dmg
+            for m in https://mirrors.ocf.berkeley.edu/blender/release https://ftp.halifax.rwth-aachen.de/blender/release; do
+              curl -sSfL --retry 2 -o "$RUNNER_TEMP/$f" "$m/Blender5.2/$f" && break
+            done
+            mkdir -p "$BL"
+            hdiutil attach -nobrowse -quiet -mountpoint "$RUNNER_TEMP/blender-dmg" "$RUNNER_TEMP/$f"
+            cp -R "$RUNNER_TEMP/blender-dmg/Blender.app" "$BL/"
+            hdiutil detach -quiet "$RUNNER_TEMP/blender-dmg" && rm "$RUNNER_TEMP/$f"
+          fi
+          # A wrapper, not a symlink: Blender locates its bundle from the real executable path.
+          mkdir -p "$BL/bin"
+          printf '#!/bin/sh\nexec "%s/Blender.app/Contents/MacOS/Blender" "$@"\n' "$BL" > "$BL/bin/blender"
+          chmod +x "$BL/bin/blender"
+          echo "$BL/bin" >> "$GITHUB_PATH"
+
+      - name: Install Blender (Windows)
+        if: matrix.os == 'windows-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.blender == 'true')
+        shell: pwsh
+        run: |
+          $BL = Join-Path $env:RUNNER_TEMP "blender"
+          if (-not (Test-Path (Join-Path $BL "blender.exe"))) {
+            $f = "blender-5.2.2-windows-x64.zip"
+            $zip = Join-Path $env:RUNNER_TEMP $f
+            foreach ($m in @("https://mirrors.ocf.berkeley.edu/blender/release", "https://ftp.halifax.rwth-aachen.de/blender/release")) {
+              curl.exe -sSfL --retry 2 -o $zip "$m/Blender5.2/$f"
+              if ($LASTEXITCODE -eq 0) { break }
+            }
+            7z x $zip "-o$env:RUNNER_TEMP" -y | Out-Null
+            Move-Item (Join-Path $env:RUNNER_TEMP "blender-5.2.2-windows-x64") $BL
+            Remove-Item $zip
+          }
+          Add-Content $env:GITHUB_PATH $BL
 
       - name: Install dependencies
         run: pip install -e . && pip install pytest pytest-cov
