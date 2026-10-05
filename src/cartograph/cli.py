@@ -842,7 +842,7 @@ def cmd_blueprint_add_dep(args):
     result = _carto().blueprint_add_dep(
         blueprint_path=bp_path,
         widget_id=leaf_id,
-        validate=not args.no_validate,
+        validate=bool(getattr(args, "validate", False)),
     )
     if result.get("status") == "error" or "error" in result:
         err(result)
@@ -855,7 +855,7 @@ def cmd_blueprint_remove_dep(args):
     result = _carto().blueprint_remove_dep(
         blueprint_path=bp_path,
         widget_id=leaf_id,
-        validate=not args.no_validate,
+        validate=bool(getattr(args, "validate", False)),
     )
     if result.get("status") == "error" or "error" in result:
         err(result)
@@ -4012,10 +4012,13 @@ def _build_cli() -> AgentCLI:
                  "help": "Leaf widget id, cg/ path, or basename (installed under project/cg/)"},
                 {"name": "--path", "default": ".",
                  "help": "Blueprint id, directory, or '.' (default: .)"},
+                {"name": "--validate", "action": "store_true", "default": False,
+                 "help": "After the pin, run full blueprint validation and revert on "
+                         "failure. Default is pin-only; `cartograph validate` / checkin "
+                         "is the real gate."},
                 {"name": "--no-validate", "action": "store_true", "default": False,
                  "dest": "no_validate",
-                 "help": "Skip re-validation after the edit. Use only for fast iteration; "
-                         "the next checkin will re-validate anyway."},
+                 "help": "Accepted for compatibility. Skipping validation is now the default."},
             ],
         },
         {
@@ -4026,9 +4029,12 @@ def _build_cli() -> AgentCLI:
                 {"name": "widget_id", "help": "Widget id to remove from deps."},
                 {"name": "--path", "default": ".",
                  "help": "Blueprint directory (default: .)."},
+                {"name": "--validate", "action": "store_true", "default": False,
+                 "help": "After the edit, run full blueprint validation and revert on "
+                         "failure. Default is unpin-only."},
                 {"name": "--no-validate", "action": "store_true", "default": False,
                  "dest": "no_validate",
-                 "help": "Skip re-validation after the edit."},
+                 "help": "Accepted for compatibility. Skipping validation is now the default."},
             ],
         },
     ])

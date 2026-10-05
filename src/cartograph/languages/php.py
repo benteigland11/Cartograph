@@ -5,10 +5,16 @@ import json
 import os
 import re
 import shutil
+import subprocess
 
 from .base import LanguageEngine, _dep_bare_name, log
 
 _COVERAGE_THRESHOLD = 80
+
+# A cold `php` start on Windows CI runners has exceeded 10s; one probe for
+# both drivers, with room to spare.
+_PROBE_TIMEOUT = 60
+_DRIVER_PROBE = "echo (extension_loaded('xdebug') ? 'xdebug ' : '') . (extension_loaded('pcov') ? 'pcov' : '');"
 
 # ── Scaffold templates ────────────────────────────────────────────────────────
 
@@ -216,19 +222,23 @@ class PhpEngine(LanguageEngine):
         m = re.match(r"PHP\s+(\S+)", first_line)
         return f"php {m.group(1)}" if m else first_line.strip()
 
+    def _coverage_drivers(self, cwd: str) -> tuple[bool, bool] | None:
+        """(xdebug, pcov) loaded in the php CLI, or None when php doesn't answer in time."""
+        try:
+            res = self._run(["php", "-r", _DRIVER_PROBE], cwd=cwd, timeout=_PROBE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return None
+        if res.returncode != 0:
+            return False, False
+        loaded = (res.stdout or "").split()
+        return "xdebug" in loaded, "pcov" in loaded
+
     def check_optional(self) -> list[tuple[str, bool, str]]:
         """Surface Xdebug / PCOV coverage driver status in doctor."""
-        res = self._run(
-            ["php", "-r", "echo extension_loaded('xdebug') ? 'yes' : 'no';"],
-            cwd=os.getcwd(), timeout=10,
-        )
-        xdebug_ok = res.returncode == 0 and "yes" in (res.stdout or "")
-
-        res2 = self._run(
-            ["php", "-r", "echo extension_loaded('pcov') ? 'yes' : 'no';"],
-            cwd=os.getcwd(), timeout=10,
-        )
-        pcov_ok = res2.returncode == 0 and "yes" in (res2.stdout or "")
+        drivers = self._coverage_drivers(os.getcwd())
+        if drivers is None:
+            return [("xdebug/pcov", False, f"php did not respond within {_PROBE_TIMEOUT}s")]
+        xdebug_ok, pcov_ok = drivers
 
         if xdebug_ok:
             return [("xdebug", True, "coverage driver available")]
@@ -541,16 +551,13 @@ class PhpEngine(LanguageEngine):
 
     def run_tests(self, path: str) -> dict:
         # Detect available coverage driver
-        xdebug = self._run(
-            ["php", "-r", "echo extension_loaded('xdebug') ? 'yes' : 'no';"],
-            cwd=path, timeout=10,
-        )
-        pcov = self._run(
-            ["php", "-r", "echo extension_loaded('pcov') ? 'yes' : 'no';"],
-            cwd=path, timeout=10,
-        )
-        has_xdebug = xdebug.returncode == 0 and "yes" in (xdebug.stdout or "")
-        has_pcov = pcov.returncode == 0 and "yes" in (pcov.stdout or "")
+        drivers = self._coverage_drivers(path)
+        if drivers is None:
+            return self._fail(
+                f"php did not respond within {_PROBE_TIMEOUT}s while detecting the "
+                "coverage driver. Check that the php binary starts cleanly."
+            )
+        has_xdebug, has_pcov = drivers
 
         if not has_xdebug and not has_pcov:
             return self._fail(
