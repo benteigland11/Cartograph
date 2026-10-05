@@ -37,8 +37,8 @@ def test_save_credentials_writes_file(tmp_path, monkeypatch):
     assert data["refresh_token"] == "refresh456"
 
 
-def test_write_credentials_removes_file_on_chmod_failure(tmp_path, monkeypatch):
-    """If chmod fails, the credentials file should be deleted."""
+def test_write_credentials_survives_chmod_failure(tmp_path, monkeypatch):
+    """chmod failure must not delete a live credentials file (that was a logout)."""
     creds_file = str(tmp_path / "creds.json")
     monkeypatch.setattr("cartograph.auth._CREDENTIALS_FILE", creds_file)
 
@@ -47,9 +47,12 @@ def test_write_credentials_removes_file_on_chmod_failure(tmp_path, monkeypatch):
     monkeypatch.setattr("os.chmod", _bad_chmod)
 
     from cartograph.auth import save_credentials
-    with pytest.raises(OSError, match="Could not set permissions"):
-        save_credentials("token", "refresh", "key")
-    assert not os.path.exists(creds_file)
+    save_credentials("token", "refresh", "key")
+    assert os.path.exists(creds_file)
+    with open(creds_file, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["id_token"] == "token"
+    assert data["refresh_token"] == "refresh"
 
 
 # ---------------------------------------------------------------------------
@@ -287,3 +290,124 @@ def test_refresh_refuses_http_registry(tmp_path, monkeypatch):
                         lambda: "http://api.example.com")
     from cartograph.auth import _refresh_id_token
     assert _refresh_id_token("r1") is None
+
+
+def _jwt(exp):
+    import base64
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"exp": exp}).encode()
+    ).decode().rstrip("=")
+    return f"x.{payload}.y"
+
+
+def _expired_jwt():
+    return _jwt(1)
+
+
+def test_write_credentials_keeps_refresh_token_when_omitted(tmp_path, monkeypatch):
+    """A writer that only updates id_token must not blank refresh_token."""
+    creds_file = str(tmp_path / "creds.json")
+    monkeypatch.setattr("cartograph.auth._CREDENTIALS_FILE", creds_file)
+    _write_creds(creds_file, {
+        "id_token": "old",
+        "refresh_token": "keep-me",
+        "signing_key": "sign-me",
+        "token_url": "https://api.example.com/v1/auth/refresh",
+    })
+    from cartograph.auth import _write_credentials
+    _write_credentials({"id_token": "new"})
+    with open(creds_file, encoding="utf-8") as f:
+        stored = json.load(f)
+    assert stored["id_token"] == "new"
+    assert stored["refresh_token"] == "keep-me"
+    assert stored["signing_key"] == "sign-me"
+    assert stored["token_url"] == "https://api.example.com/v1/auth/refresh"
+
+
+def test_write_credentials_replaces_atomically(tmp_path, monkeypatch):
+    creds_file = str(tmp_path / "creds.json")
+    monkeypatch.setattr("cartograph.auth._CREDENTIALS_FILE", creds_file)
+    seen = {}
+    real_replace = os.replace
+
+    def spy_replace(src, dst):
+        seen["src"] = src
+        seen["dst"] = dst
+        return real_replace(src, dst)
+
+    monkeypatch.setattr("os.replace", spy_replace)
+    from cartograph.auth import _write_credentials
+    _write_credentials({"id_token": "t", "refresh_token": "r"})
+    assert seen["dst"] == creds_file
+    assert seen["src"] == creds_file + ".tmp"
+    assert not os.path.exists(creds_file + ".tmp")
+
+
+def test_get_token_refreshes_once_when_many_callers_race(tmp_path, monkeypatch):
+    """Parallel get_token calls share one refresh; losers reuse the new token."""
+    import threading
+    creds_file = str(tmp_path / "creds.json")
+    monkeypatch.setattr("cartograph.auth._CREDENTIALS_FILE", creds_file)
+    _write_creds(creds_file, {
+        "id_token": _expired_jwt(),
+        "refresh_token": "r1",
+        "token_url": "https://api.example.com/v1/auth/refresh",
+    })
+    monkeypatch.setattr("cartograph.auth.get_registry_url",
+                        lambda: "https://api.example.com")
+    calls = []
+    lock = threading.Lock()
+
+    def fake_urlopen(req, timeout=None, context=None):
+        with lock:
+            calls.append(1)
+        return _FakeResponse({"id_token": _jwt(2_000_000_000)})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    from cartograph.auth import get_token
+    results = [None] * 8
+
+    def worker(i):
+        results[i] = get_token()
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    fresh = _jwt(2_000_000_000)
+    assert results == [fresh] * 8
+    assert len(calls) == 1
+    with open(creds_file, encoding="utf-8") as f:
+        stored = json.load(f)
+    assert stored["refresh_token"] == "r1"
+    assert stored["id_token"] == fresh
+
+
+def test_concurrent_partial_writes_cannot_drop_refresh_token(tmp_path, monkeypatch):
+    """Even sloppy overlapping writes must leave valid JSON with refresh_token."""
+    import threading
+    creds_file = str(tmp_path / "creds.json")
+    monkeypatch.setattr("cartograph.auth._CREDENTIALS_FILE", creds_file)
+    from cartograph.auth import _write_credentials, save_credentials
+    save_credentials("id0", "refresh-keep", "sign-keep",
+                     token_url="https://api.example.com/v1/auth/refresh")
+    errors = []
+
+    def writer(n):
+        try:
+            _write_credentials({"id_token": f"id{n}"})
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    with open(creds_file, encoding="utf-8") as f:
+        stored = json.load(f)
+    assert stored["refresh_token"] == "refresh-keep"
+    assert stored["signing_key"] == "sign-keep"
+    assert stored["id_token"].startswith("id")

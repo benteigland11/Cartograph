@@ -92,6 +92,20 @@ def remove_registry_token(registry_url: str) -> bool:
     return True
 
 
+def _credentials_lock_path() -> str:
+    return _CREDENTIALS_FILE + ".lock"
+
+
+def _auth_lock():
+    """Exclusive lock for credential read-modify-write (refresh, login, logout)."""
+    from cg.infra_interprocess_lock_python.src.interprocess_lock import file_lock
+    dest = _CREDENTIALS_FILE
+    parent = os.path.dirname(dest)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    return file_lock(_credentials_lock_path(), blocking=True)
+
+
 def _read_credentials() -> dict:
     """Read the credentials file, or return empty dict."""
     try:
@@ -190,9 +204,12 @@ def _refresh_id_token(refresh_token: str) -> str | None:
         if new_id_token:
             creds = _read_credentials()
             creds["id_token"] = new_id_token
+            new_refresh = result.get("refresh_token")
+            if new_refresh:
+                creds["refresh_token"] = new_refresh
             # Drop any legacy secret once registry-mediated refresh works.
             if use_registry:
-                creds.pop("client_secret", None)
+                creds["client_secret"] = None  # drop on write
                 if not creds.get("token_url"):
                     creds["token_url"] = f"{registry}/v1/auth/refresh"
             _write_credentials(creds)
@@ -225,17 +242,22 @@ def get_token(registry_url: str | None = None) -> str | None:
     if not id_token:
         return None
 
-    # Check if expired and try to refresh
-    if _is_token_expired(id_token):
+    if not _is_token_expired(id_token):
+        return id_token
+
+    # Serialize refresh so parallel CLI/MCP processes cannot truncate
+    # credentials.json and drop the refresh_token (open(..., "w") race).
+    with _auth_lock():
+        creds = _read_credentials()
+        id_token = creds.get("id_token")
+        if id_token and not _is_token_expired(id_token):
+            return id_token
         refresh_token = creds.get("refresh_token", "")
         refreshed = _refresh_id_token(refresh_token)
         if refreshed:
             return refreshed
-        # Refresh failed — token is expired
         log.debug("ID token expired and refresh failed")
         return None
-
-    return id_token
 
 
 def get_signing_key() -> str | None:
@@ -252,19 +274,49 @@ def is_authenticated() -> bool:
 
 
 def _write_credentials(creds: dict) -> None:
-    """Write credentials dict to disk with restricted permissions."""
-    os.makedirs(os.path.dirname(_CREDENTIALS_FILE), exist_ok=True)
-    with open(_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
-        json.dump(creds, f)
-    try:
-        os.chmod(_CREDENTIALS_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
-    except OSError:
-        # Permissions failed - remove the file rather than leave it world-readable
-        os.remove(_CREDENTIALS_FILE)
-        raise OSError(
-            f"Could not set permissions on {_CREDENTIALS_FILE}. "
-            "Credentials were not saved."
-        )
+    """Write credentials dict to disk with restricted permissions.
+
+    Replaces the live file via a sibling temp + ``os.replace`` so readers
+    never see a truncated JSON document. Concurrent writers are serialized
+    by ``_auth_lock``. A write that omits ``refresh_token`` / ``signing_key``
+    keeps the existing values instead of blanking them.
+    """
+    dest = _CREDENTIALS_FILE
+    parent = os.path.dirname(dest)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    incoming = dict(creds)
+    with _auth_lock():
+        existing = _read_credentials()
+        merged = dict(existing)
+        for key, value in incoming.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        for key in ("refresh_token", "signing_key"):
+            if not str(merged.get(key) or "").strip() and str(existing.get(key) or "").strip():
+                merged[key] = existing[key]
+        tmp = dest + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(merged, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, dest)
+        except Exception:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+        try:
+            os.chmod(dest, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+        except OSError as e:
+            # Live file already came from a 0o600 tmp replace. Deleting it
+            # would log the user out; leave it and keep going.
+            log.debug("Could not chmod %s: %s", dest, e)
 
 
 def save_credentials(id_token: str, refresh_token: str, signing_key: str,
@@ -294,12 +346,14 @@ def save_credentials(id_token: str, refresh_token: str, signing_key: str,
 
 def clear_token() -> None:
     """Remove stored credentials."""
-    try:
-        os.remove(_CREDENTIALS_FILE)
-    except FileNotFoundError:
-        pass
-    except OSError as e:
-        log.debug("Could not remove credentials file: %s", e)
+    with _auth_lock():
+        for path in (_CREDENTIALS_FILE, _CREDENTIALS_FILE + ".tmp"):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                log.debug("Could not remove %s: %s", path, e)
     # Profile cache is auth-scoped — wipe it alongside credentials so the
     # next session doesn't read a stale handle for the previous account.
     from cg.universal_ttl_disk_cache_python.src import ttl_disk_cache
