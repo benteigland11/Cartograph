@@ -70,6 +70,45 @@ _HEAVY_ML_DEPS = {
     "flax", "optax",
 }
 
+# "name[extras] <rest>" - rest is the version specifier (or marker/URL, which we don't evaluate).
+_DEP_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(.*)$")
+_CLAUSE_RE = re.compile(r"^(~=|==|!=|<=|>=|<|>)\s*([0-9]+(?:\.[0-9]+)*)$")
+
+
+def _release(version: str):
+    """Numeric release tuple, or None for anything that isn't plain X.Y.Z (pre/post/dev/local)."""
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", version):
+        return None
+    return tuple(int(p) for p in version.split("."))
+
+
+def _version_satisfies(installed: str, specifier: str) -> bool:
+    """Whether `installed` meets a PEP 440-style specifier like ">=1.2,<2".
+
+    Stdlib-only subset: plain numeric releases and the ==, !=, <, <=, >, >=, ~=
+    operators. Anything outside that (wildcards, ===, pre-releases, local
+    versions) returns False, so the caller installs and pip decides."""
+    have = _release(installed)
+    if have is None:
+        return False
+    for clause in specifier.split(","):
+        cm = _CLAUSE_RE.match(clause.strip())
+        if not cm:
+            return False
+        op, want = cm.group(1), _release(cm.group(2))
+        width = max(len(have), len(want))
+        a = have + (0,) * (width - len(have))
+        b = want + (0,) * (width - len(want))
+        if op == "~=":
+            if len(want) < 2 or a < b or have[:len(want) - 1] != want[:-1]:
+                return False
+            continue
+        ok = {"==": a == b, "!=": a != b, "<": a < b,
+              "<=": a <= b, ">": a > b, ">=": a >= b}[op]
+        if not ok:
+            return False
+    return True
+
 
 class PythonEngine(LanguageEngine):
     name = "python"
@@ -446,17 +485,34 @@ class PythonEngine(LanguageEngine):
                         handle.write("\n".join(parents) + "\n")
 
     def _importable(self, py: str, dep_name: str) -> bool:
-        """True when the venv's python can already import the package's module."""
-        base = dep_name.split("[")[0].split("==")[0].split(">=")[0].split("<=")[0].split("!=")[0].split("~=")[0].strip()
+        """True when the venv's python can already import the package's module
+        and the installed distribution satisfies the declared version specifier."""
+        m = _DEP_RE.match(dep_name)
+        if not m:
+            return False
+        base, spec = m.group(1), m.group(2).strip()
+        if spec.startswith("(") and spec.endswith(")"):
+            spec = spec[1:-1].strip()
+        if ";" in spec or "@" in spec:
+            # Environment markers and direct URLs: let pip decide.
+            return False
         candidates = {base.replace("-", "_"), base.replace("-", "_").lower()}
         if base.lower() == "pytest-cov":
             candidates = {"pytest_cov"}
-        code = "import importlib.util,sys; sys.exit(0 if all(importlib.util.find_spec(n) for n in %r) else 1)" % (sorted(candidates),)
+        code = (
+            "import importlib.util,importlib.metadata as m,sys\n"
+            "if not all(importlib.util.find_spec(n) for n in %r): sys.exit(1)\n"
+            "print(m.version(%r))"
+        ) % (sorted(candidates), base)
         try:
             res = self._run([py, "-c", code], cwd=os.getcwd(), timeout=30)
         except Exception:  # noqa: BLE001
             return False
-        return res.returncode == 0
+        if res.returncode != 0:
+            return False
+        if not spec:
+            return True
+        return _version_satisfies((res.stdout or "").strip(), spec)
 
     def install_deps(self, path: str, dependencies: list) -> None:
         import shutil

@@ -39,3 +39,30 @@ def test_importable_reads_the_venvs_own_python():
     assert engine._importable(sys.executable, "pytest>=7")
     assert engine._importable(sys.executable, "pytest-cov") == bool(__import__("importlib").util.find_spec("pytest_cov"))
     assert not engine._importable(sys.executable, "definitely-not-a-real-package-xyz==1.0")
+
+
+def test_importable_honors_the_declared_version():
+    import pytest as _pytest
+    engine = PythonEngine()
+    have = _pytest.__version__
+    assert engine._importable(sys.executable, f"pytest=={have}")
+    assert not engine._importable(sys.executable, "pytest==0.0.1")
+    assert not engine._importable(sys.executable, "pytest<1")
+    assert not engine._importable(sys.executable, "pytest>=7; python_version<'3'")
+
+
+def test_version_satisfies_subset():
+    from cartograph.languages.python import _version_satisfies as ok
+    assert ok("2.0", "==2.0.0")
+    assert ok("1.4.2", ">=1.2,<2")
+    assert not ok("2.0.1", ">=1.2,<2")
+    assert ok("1.4.9", "~=1.4.2")
+    assert not ok("1.5.0", "~=1.4.2")
+    assert ok("1.9", "~=1.4")
+    assert not ok("2.0", "~=1.4")
+    assert not ok("3.0", "!=3")
+    assert not ok("1.0", "~=1")
+    # Outside the subset: refuse, so pip installs.
+    assert not ok("2.0rc1", ">=1")
+    assert not ok("2.1.0+cpu", ">=2")
+    assert not ok("2.0", "==2.*")
