@@ -43,7 +43,7 @@ jobs:
           python -c "
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
-          expected = {'angular', 'csharp', 'flutter', 'gdscript', 'go', 'java', 'javascript',
+          expected = {'angular', 'blender', 'csharp', 'flutter', 'gdscript', 'go', 'java', 'javascript',
                       'lean', 'nim', 'openscad', 'php', 'python', 'rust',
                       'spice', 'systemverilog', 'terraform', 'typescript'}
           missing = expected - langs
@@ -266,6 +266,31 @@ jobs:
           test -f "$WIDGET_DIR/analysis_options.yaml"
           test -d "$WIDGET_DIR/src"
           test -d "$WIDGET_DIR/tests"
+          test -d "$WIDGET_DIR/examples"
+
+      # Official build from the Blender mirrors (download.blender.org sits behind
+      # a bot check); X/GL client libs are needed even headless.
+      - name: Install Blender
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libxkbcommon0 libsm6 libice6
+          f=blender-5.2.2-linux-x64.tar.xz
+          for m in https://mirrors.ocf.berkeley.edu/blender/release https://ftp.halifax.rwth-aachen.de/blender/release; do
+            curl -sSfL --retry 2 -o "$RUNNER_TEMP/$f" "$m/Blender5.2/$f" && break
+          done
+          mkdir -p "$RUNNER_TEMP/blender" && tar -xf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/blender" --strip-components=1
+          echo "$RUNNER_TEMP/blender" >> "$GITHUB_PATH"
+
+      - name: cartograph create (blender)
+        run: cartograph create modeling-ci-test-blender --language blender --domain modeling --name "CI Blender Test"
+
+      - name: Verify blender widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 3 -name "conftest.py" -printf "%h" -quit)
+          # conftest.py lives in tests/, so step up to the widget root
+          WIDGET_DIR=$(dirname "$WIDGET_DIR")
+          echo "Blender widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/src/__init__.py"
+          test -f "$WIDGET_DIR/tests/conftest.py"
           test -d "$WIDGET_DIR/examples"
 
       - name: cartograph stats

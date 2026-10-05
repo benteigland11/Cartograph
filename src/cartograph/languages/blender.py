@@ -140,7 +140,7 @@ class BlenderEngine(LanguageEngine):
     aliases = ["bpy"]
     toolchain = {"blender": "Install Blender 4.2 LTS or newer - blender.org "
                             "(validation runs it headless with -b)"}
-    supported = False
+    supported = True
     # blender.exe is a real executable; no cmd.exe in between.
     windows_shell = False
 
