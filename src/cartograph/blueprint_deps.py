@@ -8,9 +8,12 @@ keeps pinning honest — we read the version straight off the installed
 widget's manifest — and gives the validator something concrete to read
 from at the moment of pin.
 
-After mutating `blueprint.json`, both verbs re-run the blueprint
-validator unless `validate=False` is passed. If validation fails, the
-manifest is reverted so authors aren't left with a half-broken state.
+Pin/unpin is structural: installed widget, same language, leaf-only,
+exact version. Full blueprint validation is a separate step
+(`cartograph validate` / checkin). Pass `validate=True` to re-run the
+validator after the edit and revert the pin on failure — useful on a
+finished blueprint, circular on a scaffold (empty deps, [TODO] tags
+and examples cannot pass, so the pin would never stick).
 """
 
 import json
@@ -127,7 +130,7 @@ def _maybe_validate(carto, blueprint_path: str, before: dict, validate: bool) ->
     return None
 
 
-def add_dep(carto, blueprint_path: str, widget_id: str, validate: bool = True) -> dict:
+def add_dep(carto, blueprint_path: str, widget_id: str, validate: bool = False) -> dict:
     """Add a widget to the blueprint's dependencies, pinned to the locally installed version."""
     data, err = _load_blueprint(blueprint_path)
     if err:
@@ -226,7 +229,7 @@ def add_dep(carto, blueprint_path: str, widget_id: str, validate: bool = True) -
     }
 
 
-def remove_dep(carto, blueprint_path: str, widget_id: str, validate: bool = True) -> dict:
+def remove_dep(carto, blueprint_path: str, widget_id: str, validate: bool = False) -> dict:
     """Remove a widget from the blueprint's dependencies."""
     data, err = _load_blueprint(blueprint_path)
     if err:
