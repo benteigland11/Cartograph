@@ -58,6 +58,7 @@ _LANGUAGE_RULES = {
     "csharp":        ("rules.csharp.py",     [sys.executable]),
     "flutter":       ("rules.flutter.py",    [sys.executable]),
     "blender":       ("rules.blender.py",    [sys.executable]),
+    "kicad":         ("rules.kicad.py",      [sys.executable]),
 }
 
 
@@ -1434,6 +1435,90 @@ if __name__ == "__main__":
     main()
 """
 
+_TEMPLATE_KICAD = """\
+\"\"\"
+Custom validation rules for KiCad widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+KICAD-SPECIFIC CHECKS TO CONSIDER
+---------------------------------
+The engine already runs the Python contamination scanner, blocks GUI-only
+pcbnew calls (GetBoard, Refresh), wx and the IPC API, blocks absolute 3D
+model paths in bundled footprints, requires bundled .kicad_sch/.kicad_pcb
+files to pass ERC/DRC with no errors, and enforces 80% coverage under
+KiCad's Python. Teams often want more on top:
+
+  - House footprint conventions: courtyard on every footprint, fab-layer
+    reference, pad-1 marking.
+  - Symbol conventions: required fields (Datasheet, Footprint), reference
+    prefixes from an approved list.
+  - Tests must run kicad-cli (ERC/DRC/netlist) on generated output, not
+    just inspect pcbnew objects.
+  - Generated boards must declare their design rules (.kicad_dru) instead
+    of relying on defaults.
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      src/        __init__.py + the reusable module(s), optional native
+                  KiCad files (*.kicad_sym, *.pretty/, *.kicad_sch, ...)
+      tests/      test_*.py (pytest under KiCad's Python)
+      examples/   example_usage.py
+      widget.json
+
+This script runs under your normal Python, not KiCad's - parse sources
+with `ast` and native files as text, don't import pcbnew.
+EXAMPLE
+-------
+\"\"\"
+import json
+import os
+import sys
+
+
+def main() -> None:
+    widget_path = sys.argv[1] if len(sys.argv) > 1 else "."
+    blocks: list[str] = []
+    warnings: list[str] = []
+
+    src_dir = os.path.join(widget_path, "src")
+    for root, _dirs, files in os.walk(src_dir):
+        for fname in files:
+            if not fname.endswith(".kicad_mod"):
+                continue
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, widget_path)
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            # [TODO] Replace with your team's checks. Example: every
+            # footprint draws a courtyard.
+            if "F.CrtYd" not in text and "B.CrtYd" not in text:
+                warnings.append(f"{rel}: footprint has no courtyard")
+
+    print(json.dumps({"blocks": blocks, "warnings": warnings}))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 _TEMPLATE_GDSCRIPT = """\
 \"\"\"
 Custom validation rules for GDScript (Godot 4) widgets.
@@ -1962,6 +2047,7 @@ _TEMPLATES = {
     "rust":          _TEMPLATE_RUST,
     "gdscript":      _TEMPLATE_GDSCRIPT,
     "blender":       _TEMPLATE_BLENDER,
+    "kicad":         _TEMPLATE_KICAD,
     "java":          _TEMPLATE_JAVA,
     "lean":          _TEMPLATE_LEAN,
     "csharp":        _TEMPLATE_CSHARP,

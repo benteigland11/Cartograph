@@ -177,6 +177,7 @@ LANGUAGE_ALIASES = {
     "golang": "go",
     "gd": "gdscript", "godot": "gdscript", "godot4": "gdscript",
     "bpy": "blender",
+    "pcbnew": "kicad",
     "jdk": "java", "openjdk": "java",
     "c++": "cpp", "cxx": "cpp",
     "c#": "csharp", "cs": "csharp", "dotnet": "csharp",
@@ -211,12 +212,12 @@ def normalize_widget_id(widget_id: str) -> str:
 def python_dir_name(widget_id: str) -> str:
     """Return the filesystem directory name for a widget.
 
-    Python, Blender (Python) and Nim widgets get underscores so the directory
+    Python, Blender and KiCad (both Python) and Nim widgets get underscores so the directory
     is importable (these languages cannot handle hyphens in import paths).
     Other languages keep the canonical hyphenated ID.
     """
     canonical = normalize_widget_id(widget_id)
-    if canonical.endswith(("-python", "-blender", "-nim")):
+    if canonical.endswith(("-python", "-blender", "-kicad", "-nim")):
         return canonical.replace("-", "_")
     return canonical
 
