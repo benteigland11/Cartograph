@@ -97,13 +97,13 @@ def _credentials_lock_path() -> str:
 
 
 def _auth_lock():
-    """Exclusive lock for credential read-modify-write (refresh, login, logout)."""
-    from cg.infra_interprocess_lock_python.src.interprocess_lock import file_lock
-    dest = _CREDENTIALS_FILE
-    parent = os.path.dirname(dest)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    return file_lock(_credentials_lock_path(), blocking=True)
+    """Exclusive lock for credential read-modify-write (refresh, login, logout).
+
+    Timed retry rather than ``blocking=True``: the refresh holds this lock
+    across a network call, and Windows' blocking lock gives up after ~10s.
+    """
+    from .safefs import path_lock
+    return path_lock(_credentials_lock_path(), "credentials", timeout=60.0)
 
 
 def _read_credentials() -> dict:

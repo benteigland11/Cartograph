@@ -411,3 +411,25 @@ def test_concurrent_partial_writes_cannot_drop_refresh_token(tmp_path, monkeypat
     assert stored["refresh_token"] == "refresh-keep"
     assert stored["signing_key"] == "sign-keep"
     assert stored["id_token"].startswith("id")
+
+
+def test_auth_lock_retries_through_contention(tmp_path, monkeypatch):
+    """Contention must be waited out, not raised (Windows' LK_LOCK gives up ~10s)."""
+    from contextlib import contextmanager
+    import cartograph.safefs as safefs
+    from cg.infra_interprocess_lock_python.src.interprocess_lock import LockBusy
+    monkeypatch.setattr("cartograph.auth._CREDENTIALS_FILE", str(tmp_path / "creds.json"))
+    calls = []
+
+    @contextmanager
+    def flaky_lock(path, blocking=True):
+        calls.append(blocking)
+        if len(calls) < 3:
+            raise LockBusy("held")
+        yield
+
+    monkeypatch.setattr(safefs, "_file_lock", flaky_lock)
+    from cartograph.auth import _auth_lock
+    with _auth_lock():
+        pass
+    assert calls == [False, False, False]
