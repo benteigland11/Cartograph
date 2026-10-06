@@ -208,7 +208,7 @@ class KicadEngine(LanguageEngine):
     # Native KiCad files a widget may carry; also whitelists them for publish.
     manifest_patterns = ["src/*.kicad_sym", "src/*.kicad_mod", "src/*.kicad_sch",
                          "src/*.kicad_pcb", "src/*.kicad_pro", "src/*.kicad_dru"]
-    supported = False
+    supported = True
     # kicad-cli and KiCad's python are real executables; no cmd.exe in between.
     windows_shell = False
 

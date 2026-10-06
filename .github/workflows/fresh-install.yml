@@ -44,7 +44,7 @@ jobs:
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
           expected = {'angular', 'blender', 'csharp', 'flutter', 'gdscript', 'go', 'java', 'javascript',
-                      'lean', 'nim', 'openscad', 'php', 'python', 'rust',
+                      'kicad', 'lean', 'nim', 'openscad', 'php', 'python', 'rust',
                       'spice', 'systemverilog', 'terraform', 'typescript'}
           missing = expected - langs
           assert not missing, f'engines missing from wheel install: {missing}'
@@ -292,6 +292,25 @@ jobs:
           test -f "$WIDGET_DIR/src/__init__.py"
           test -f "$WIDGET_DIR/tests/conftest.py"
           test -d "$WIDGET_DIR/examples"
+
+      # KiCad 10 from the official PPA, without the multi-GB libraries.
+      - name: Install KiCad
+        run: |
+          sudo add-apt-repository -y ppa:kicad/kicad-10.0-releases
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends kicad
+
+      - name: cartograph create (kicad)
+        run: cartograph create modeling-ci-test-kicad --language kicad --domain modeling --name "CI KiCad Test"
+
+      - name: Verify kicad widget structure
+        run: |
+          WIDGET_DIR=$(find cg -maxdepth 1 -type d -name "*_kicad" | head -1)
+          echo "KiCad widget at: $WIDGET_DIR"
+          test -f "$WIDGET_DIR/src/__init__.py"
+          ls "$WIDGET_DIR"/tests/test_*.py
+          test -f "$WIDGET_DIR/examples/example_usage.py"
+          grep -q "kicad-cli" "$WIDGET_DIR"/tests/test_*.py
 
       - name: cartograph stats
         run: cartograph stats
