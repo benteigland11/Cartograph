@@ -37,6 +37,7 @@ from cartograph.languages.lean import LeanEngine
 from cartograph.languages.csharp import CSharpEngine
 from cartograph.languages.flutter import FlutterEngine
 from cartograph.languages.blender import BlenderEngine
+from cartograph.languages.kicad import KicadEngine
 from cartograph.languages.spice import SpiceEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
@@ -67,7 +68,7 @@ def _make_widget(tmp_path, language, src_filename, src_code,
     }
     _write(os.path.join(wdir, "widget.json"), json.dumps(manifest, indent=2))
     _write(os.path.join(wdir, "src", src_filename), src_code)
-    if language in ("python", "blender"):
+    if language in ("python", "blender", "kicad"):
         _write(os.path.join(wdir, "src", "__init__.py"), "")
     if test_code:
         test_name = "test_" + src_filename
@@ -102,6 +103,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "csharp": CSharpEngine,
         "flutter": FlutterEngine,
         "blender": BlenderEngine,
+        "kicad": KicadEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -377,9 +379,10 @@ for _samples in (CLEAN, ABS_PATH_SRC, CREDENTIAL_SRC, CREDENTIAL_TEST, URL_SRC,
                  SLEEP_TEST_LARGE, HARDCODED_VALUE, ENV_VAR, UNLISTED_IMPORT,
                  LISTED_IMPORT, STDLIB_IMPORT):
     _samples["blender"] = _samples["python"]
+    _samples["kicad"] = _samples["python"]
 
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java", "lean": "lean", "csharp": "cs", "flutter": "dart", "blender": "py"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java", "lean": "lean", "csharp": "cs", "flutter": "dart", "blender": "py", "kicad": "py"}
 
 # Which languages need external tools to run their scanners
 NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot", "java": "java", "lean": "lean", "csharp": "dotnet", "flutter": "dart"}
@@ -390,10 +393,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java", "lean", "csharp", "flutter", "blender"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java", "lean", "csharp", "flutter", "blender", "kicad"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java", "lean", "csharp", "flutter", "blender"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java", "lean", "csharp", "flutter", "blender", "kicad"]
 
 
 def _skip_if_missing(lang):
@@ -2759,6 +2762,96 @@ class TestBlenderSpecific:
         wdir = _make_widget(tmp_path, "blender", "module.py", "def f():\n    print('x')\n")
         result = engine.validate_widget(wdir, [])
         assert not result["passed"] and "print()" in result["error"]
+
+
+class TestKicadSpecific:
+    """Checks unique to the KiCad engine: pcbnew is importable without being
+    declared, editor-only pcbnew calls / wx / the IPC API are blocked, and
+    bundled native KiCad files must load or pass ERC/DRC."""
+
+    def _kc_scan(self, tmp_path, src_code, **kw):
+        return _scan(tmp_path, "kicad", "py", src_code, **kw)
+
+    def test_pcbnew_is_not_unlisted(self, tmp_path):
+        result = self._kc_scan(tmp_path,
+            "import pcbnew\n\n\ndef board():\n    return pcbnew.BOARD()\n")
+        assert result["blocks"] == [] and result["warnings"] == [], result
+
+    def test_unlisted_import_still_blocks(self, tmp_path):
+        result = self._kc_scan(tmp_path, "import skidl\n")
+        assert any("unlisted import 'skidl'" in b.lower() for b in result["blocks"]), result
+
+    def test_declared_dependency_is_importable(self, tmp_path):
+        result = self._kc_scan(tmp_path, "import skidl\n", dependencies=["skidl>=2.2.3,<3"])
+        assert not any("skidl" in b for b in result["blocks"]), result
+
+    def test_editor_only_calls_block(self, tmp_path):
+        result = self._kc_scan(tmp_path,
+            "import pcbnew\n\n\ndef current():\n    b = pcbnew.GetBoard()\n    pcbnew.Refresh()\n    return b\n")
+        assert any("pcbnew.GetBoard()" in b for b in result["blocks"]), result
+        assert any("pcbnew.Refresh()" in b for b in result["blocks"]), result
+
+    def test_gui_modules_block(self, tmp_path):
+        result = self._kc_scan(tmp_path, "import wx\nfrom kipy import KiCad\n",
+                               dependencies=["wxPython>=4", "kicad-python>=0.1"])
+        assert any("import wx" in b for b in result["blocks"]), result
+        assert any("import kipy" in b for b in result["blocks"]), result
+
+    def test_action_plugin_warns(self, tmp_path):
+        result = self._kc_scan(tmp_path,
+            "import pcbnew\n\n\nclass Tool(pcbnew.ActionPlugin):\n    def Run(self):\n        return None\n")
+        assert result["blocks"] == [], result
+        assert any("ActionPlugin" in w for w in result["warnings"]), result
+
+    def test_editor_calls_in_tests_are_fine(self, tmp_path):
+        result = self._kc_scan(tmp_path, "def f():\n    return 1\n",
+            test_code="import pcbnew\n\n\ndef test_x():\n    assert pcbnew.GetBoard() is None\n")
+        assert not any("GetBoard" in f for f in result["warnings"] + result["blocks"]), result
+
+    def test_absolute_3d_model_path_in_footprint_blocks(self, tmp_path):
+        wdir = _make_widget(tmp_path, "kicad", "module.py", "def f():\n    return 1\n")
+        _write(os.path.join(wdir, "src", "Lib.pretty", "Part.kicad_mod"),
+               '(footprint "Part" (layer "F.Cu")\n'
+               '  (model "/home/someone/models/part.step")\n)\n')
+        result = KicadEngine().scan_contamination(wdir, {"dependencies": []})
+        assert any("Absolute 3D model path" in b for b in result["blocks"]), result
+
+    def test_path_variable_model_reference_is_fine(self, tmp_path):
+        wdir = _make_widget(tmp_path, "kicad", "module.py", "def f():\n    return 1\n")
+        _write(os.path.join(wdir, "src", "Lib.pretty", "Part.kicad_mod"),
+               '(footprint "Part" (layer "F.Cu")\n'
+               '  (model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603.step")\n)\n')
+        result = KicadEngine().scan_contamination(wdir, {"dependencies": []})
+        assert result["blocks"] == [], result
+
+    def test_unpinned_dependency_fails_validation(self, tmp_path):
+        wdir = _make_widget(tmp_path, "kicad", "module.py", "def f():\n    return 1\n")
+        result = KicadEngine().validate_widget(wdir, ["skidl"])
+        assert not result["passed"] and "no version pin" in result["error"]
+
+    def test_print_in_src_fails_validation(self, tmp_path):
+        wdir = _make_widget(tmp_path, "kicad", "module.py", "def f():\n    print('x')\n")
+        result = KicadEngine().validate_widget(wdir, [])
+        assert not result["passed"] and "print()" in result["error"]
+
+    @pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
+    def test_corrupt_bundled_symbol_library_fails_validation(self, tmp_path):
+        wdir = _make_widget(tmp_path, "kicad", "module.py", "def f():\n    return 1\n")
+        _write(os.path.join(wdir, "src", "lib", "broken.kicad_sym"),
+               '(kicad_symbol_lib (version 20241209) (symbol "Broken" (property')
+        result = KicadEngine().validate_widget(wdir, [])
+        assert not result["passed"] and "does not load in KiCad" in result["error"], result
+
+    @pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
+    def test_valid_bundled_footprint_library_passes_validation(self, tmp_path):
+        wdir = _make_widget(tmp_path, "kicad", "module.py", "def f():\n    return 1\n")
+        _write(os.path.join(wdir, "src", "Lib.pretty", "Pad2.kicad_mod"),
+               '(footprint "Pad2" (version 20241229) (generator "test") (layer "F.Cu")\n'
+               '  (attr smd)\n'
+               '  (pad "1" smd rect (at -1 0) (size 1 1) (layers "F.Cu" "F.Paste" "F.Mask"))\n'
+               '  (pad "2" smd rect (at 1 0) (size 1 1) (layers "F.Cu" "F.Paste" "F.Mask"))\n)\n')
+        result = KicadEngine().validate_widget(wdir, [])
+        assert result["passed"], result
 
 
 class TestSpiceSpecific:

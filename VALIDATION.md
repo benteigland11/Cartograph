@@ -55,6 +55,7 @@ These are requirements. Validation fails if any are not met.
 | C# | Yes | 80% | coverlet Cobertura report from `dotnet test` |
 | Flutter | Yes | 80% | lcov report from `flutter test --coverage` (measured over src/ via the generated lib/ copy) |
 | Blender | Yes | 80% | pytest-cov run inside headless Blender (`blender -b`) |
+| KiCad | Yes | 80% | pytest-cov run under KiCad's own Python (the interpreter with `pcbnew`) |
 
 Nim coverage would require compiling via `--debugger:native` and running `gcov`/`lcov` on the generated C code. This produces C-level line coverage, not Nim source-level coverage. Decided it was too unreliable and confusing to impose on widget authors.
 
@@ -807,6 +808,81 @@ tests (e.g. the conftest reset) is fine.
 **Blueprints:** composed widgets live under the sandbox's `cg/` with
 underscored dirs; the runner puts the sandbox root on `sys.path`, so a
 blueprint's sources import `from cg.<widget>.src.<module> import ...`.
+
+### KiCad
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| KiCad 10 or newer | missing or older | `kicad-cli version` |
+| KiCad's Python is found | no interpreter can `import pcbnew` | probe next to kicad-cli, then the system Python; `paths.kicad-python` overrides |
+| `src/__init__.py` exists, src/ has a module | missing | file check |
+| No print() in src/ | present | AST (Python engine's check) |
+| Declared dependencies are pinned | a dep has no version | `_check_dep_pinning` |
+| Bundled symbol libraries load | `*.kicad_sym` under src/ fails to load | `kicad-cli sym upgrade --force` into a temp file |
+| Bundled footprint libraries load | a `*.pretty/` under src/ fails to load | `kicad-cli fp upgrade --force` into a temp dir |
+| Bundled schematics pass ERC | any error-severity ERC violation | `kicad-cli sch erc --format json --severity-error` |
+| Bundled boards pass DRC | any error-severity DRC violation or unconnected item | `kicad-cli pcb drc --format json --severity-error` |
+| Python contamination scan passes | issues found | Python AST scanner, `pcbnew` importable |
+| No editor-only pcbnew calls in src/ | `pcbnew.GetBoard()`, `Refresh()`, `UpdateUserInterface()` | AST |
+| No GUI / IPC imports in src/ | `wx`, `kipy`, `kicad` | AST |
+| No absolute 3D model paths in bundled files | `(model "/abs/...")` or a drive path | text scan of `*.kicad_mod/sym/sch/pcb` |
+| pytest passes under KiCad's Python | any test fails | `<kicad python> -m pytest` |
+| Coverage meets threshold | below 80% | pytest-cov `--cov=src --cov-fail-under=80` |
+| Example runs under KiCad's Python | non-zero exit | `<kicad python> examples/example_usage.py` |
+
+**Layout:** `src/__init__.py` plus the reusable module(s), pytest tests in
+`tests/` (`test_*.py`, importing `from src.<module>`), and
+`examples/example_usage.py`. Native KiCad files (symbol libraries,
+`*.pretty/` footprint libraries, schematics, boards, project and design-rule
+files) may live anywhere under `src/`. Directories are underscored like
+Python's so blueprints can `from cg.<widget>.src...`.
+
+**Everything runs under KiCad's own Python.** `pcbnew` is a SWIG module
+built against one interpreter: the system Python on Linux distro packages,
+the `python.exe` next to `kicad-cli.exe` on Windows, and the bundled
+`Python.framework` inside `KiCad.app` on macOS. The engine probes those in
+order (one-line `-c` probe that imports `pcbnew`), or uses
+`paths.kicad-python` when set. Tests and examples run with that interpreter;
+the widget root, declared deps and test tools go on `PYTHONPATH`, and
+kicad-cli's directory is prepended to `PATH` so tests can call it.
+Validation sets `KICAD_CONFIG_HOME` to a temp dir (no user settings or
+global library tables) and `PYTHONNOUSERSITE=1`. Always headless.
+
+**Test tools:** pytest + pytest-cov are installed once per KiCad Python
+version into `<data_dir>/kicad-test-tools/`, with KiCad's own pip if it has
+one, otherwise the CLI's pip pinned to KiCad's Python version
+(`--python-version X.Y --only-binary=:all:`). Nothing is written into
+KiCad's or the system's site-packages.
+
+**Dependencies:** pinned pip packages in widget.json (e.g. `skidl`) are
+installed per validation into a temp `--target` dir on `PYTHONPATH` and
+removed afterwards. `pcbnew` needs no declaration.
+
+**Tests should check the design, not the file.** The scaffold's test saves
+the generated board and runs `kicad-cli pcb drc` on it; widgets are expected
+to assert electrical and geometric facts (DRC/ERC clean, netlist
+connectivity, pad counts and positions, outline size) on what they generate.
+
+**Versions:** the floor is KiCad 10; validation records the exact version
+in the stamp (`runtime_version`). CI pins 10.0.6 (Ubuntu PPA without the
+multi-GB libraries, the macOS DMG mounted in place, the Windows installer
+run silently). KiCad 10 marks the SWIG `pcbnew` module deprecated in
+favour of the IPC API and kicad-cli; the IPC API needs a running GUI, so it
+cannot be validated headless and is blocked until KiCad offers a headless
+server. Native files and kicad-cli checks are unaffected by that change.
+
+**Scanner:** the Python engine's AST scanner unchanged, with `pcbnew`
+treated as declared. On top, in src/ only: editor-only pcbnew calls
+(`GetBoard`, `Refresh`, `UpdateUserInterface`) block - they act on the board
+open in the PCB editor, which doesn't exist headless; `wx`, `kipy` and
+`kicad` imports block (GUI / IPC API); a `pcbnew.ActionPlugin` subclass
+warns - its `Run()` needs the editor, so the logic should live in plain
+functions that take a board. Bundled KiCad files block on absolute 3D model
+paths; use `${KICAD10_3DMODEL_DIR}` or a library-relative path.
+
+**Blueprints:** composed widgets live under the sandbox's `cg/` with
+underscored dirs; the sandbox root is on `PYTHONPATH`, so a blueprint's
+sources import `from cg.<widget>.src.<module> import ...`.
 
 ## Contamination Scanning
 

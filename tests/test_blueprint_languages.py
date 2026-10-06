@@ -1593,6 +1593,122 @@ def test_blender_blueprint_validates_end_to_end(carto, project):
     assert res["id"] == "bp-tile-grid-blender"
 
 # ---------------------------------------------------------------------------
+# KiCad
+# ---------------------------------------------------------------------------
+
+_KC_OUTLINE_SRC = """\
+import pcbnew
+
+
+def add_outline(board, x_mm, y_mm, width_mm, height_mm):
+    shape = pcbnew.PCB_SHAPE(board)
+    shape.SetShape(pcbnew.SHAPE_T_RECT)
+    shape.SetLayer(pcbnew.Edge_Cuts)
+    shape.SetStart(pcbnew.VECTOR2I(pcbnew.FromMM(x_mm), pcbnew.FromMM(y_mm)))
+    shape.SetEnd(pcbnew.VECTOR2I(pcbnew.FromMM(x_mm + width_mm), pcbnew.FromMM(y_mm + height_mm)))
+    board.Add(shape)
+    return shape
+"""
+
+# Blueprint: a row of identical boards (a simple panel) via the outline widget.
+_KC_PANEL_SRC = """\
+import pcbnew
+
+from cg.modeling_board_outline_kicad.src.outline import add_outline
+
+
+def make_panel(count=2, width_mm=20.0, height_mm=10.0, gap_mm=2.0):
+    board = pcbnew.BOARD()
+    for i in range(count):
+        add_outline(board, i * (width_mm + gap_mm), 0.0, width_mm, height_mm)
+    return board
+"""
+
+
+def _write_kicad_widget(project_dir: str) -> str:
+    wdir = os.path.join(project_dir, "cg", "modeling_board_outline_kicad")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(wdir, d))
+    manifest = {
+        "meta": {
+            "id": "modeling-board-outline-kicad", "name": "outline", "version": "1.0.0",
+            "domain": "modeling", "tags": ["pcb", "demo", "test"],
+        },
+        "tech_stack": {"language": "kicad", "dependencies": []},
+        "description": "Adds a rectangular Edge.Cuts outline to a board.",
+    }
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    files = {
+        "src/__init__.py": "",
+        "src/outline.py": _KC_OUTLINE_SRC,
+        "tests/test_outline.py": "import pcbnew\n\nfrom src.outline import add_outline\n\n\n"
+                                 "def test_outline():\n"
+                                 "    shape = add_outline(pcbnew.BOARD(), 0, 0, 20, 10)\n"
+                                 "    assert pcbnew.ToMM(shape.GetEnd().x) == 20.0\n",
+        "examples/example_usage.py": "import pcbnew\n\nfrom src.outline import add_outline\n\n"
+                                     "add_outline(pcbnew.BOARD(), 0, 0, 20, 10)\n",
+    }
+    for rel, content in files.items():
+        with open(os.path.join(wdir, rel), "w") as f:
+            f.write(content)
+    return wdir
+
+
+def _write_kicad_blueprint(project_dir: str) -> str:
+    bp = os.path.join(project_dir, "cg", "bp_board_panel_kicad")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(bp, d))
+    manifest = {
+        "id": "bp-board-panel-kicad",
+        "name": "board-panel",
+        "language": "kicad",
+        "version": "0.1.0",
+        "description": "Lays out a row of identical board outlines via the outline widget.",
+        "tags": ["pcb", "demo", "blueprint"],
+        "dependencies": [
+            {"id": "modeling-board-outline-kicad", "version": "1.0.0"},
+        ],
+        "domains": [],
+    }
+    with open(os.path.join(bp, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    files = {
+        "src/__init__.py": "",
+        "src/panel.py": _KC_PANEL_SRC,
+        "tests/test_panel.py": "import pcbnew\n\nfrom src.panel import make_panel\n\n\n"
+                               "def test_panel():\n"
+                               "    board = make_panel(count=3)\n"
+                               "    edges = [d for d in board.GetDrawings() if d.GetLayer() == pcbnew.Edge_Cuts]\n"
+                               "    assert len(edges) == 3\n"
+                               "    assert pcbnew.ToMM(max(e.GetEnd().x for e in edges)) == 64.0\n",
+        "examples/example_usage.py": "from src.panel import make_panel\n\nmake_panel(count=2)\n",
+    }
+    for rel, content in files.items():
+        with open(os.path.join(bp, rel), "w") as f:
+            f.write(content)
+    return bp
+
+
+@pytest.mark.slow
+def test_kicad_blueprint_validates_end_to_end(carto, project):
+    if not shutil.which("kicad-cli"):
+        pytest.skip("kicad-cli not available")
+    engine = get_engine("kicad")
+    if engine is None or not engine.supported:
+        pytest.skip("kicad engine not available")
+    ok, msg = engine.check_available()
+    if not ok:
+        pytest.skip(f"kicad engine not ready: {msg}")
+
+    _write_kicad_widget(str(project))
+    bp = _write_kicad_blueprint(str(project))
+
+    res = carto.validate_blueprint(bp)
+    assert res.get("status") == "success", res
+    assert res["id"] == "bp-board-panel-kicad"
+
+# ---------------------------------------------------------------------------
 # SPICE
 # ---------------------------------------------------------------------------
 
