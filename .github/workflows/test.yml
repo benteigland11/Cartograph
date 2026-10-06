@@ -7,12 +7,11 @@ on:
       - '**.md'
       - 'LICENSE'
       - '.gitignore'
+  # No paths-ignore on PRs: branch protection requires every test cell, and a
+  # workflow skipped by path never reports them, deadlocking docs-only PRs.
+  # Docs-only PRs still run the jobs but skip install + tests (see "scope").
   pull_request:
     branches: [master]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
   workflow_call:
     inputs:
       full_install:
@@ -88,6 +87,23 @@ jobs:
             blender:
               - 'src/cartograph/languages/blender.py'
               - 'src/cartograph/languages/scanners/blender_runner.py'
+
+      # Separate filter: "every" quantifier lets the negations exclude docs,
+      # which would break the any-match engine filters above.
+      - uses: dorny/paths-filter@v4
+        id: scope
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            code:
+              - '**'
+              - '!**.md'
+              - '!LICENSE'
+              - '!.gitignore'
+
+      - name: Docs-only change, skipping tests
+        if: env.FULL_INSTALL != 'true' && steps.scope.outputs.code != 'true'
+        run: echo "Only docs changed; required checks report success without running the suite."
 
       - uses: actions/setup-python@v6
         with:
@@ -295,6 +311,7 @@ jobs:
           Add-Content $env:GITHUB_PATH $BL
 
       - name: Install dependencies
+        if: env.FULL_INSTALL == 'true' || steps.scope.outputs.code == 'true'
         run: pip install -e . && pip install pytest pytest-cov
 
       # cg/ must remain a PEP 420 namespace package — a stray
@@ -310,6 +327,7 @@ jobs:
           fi
 
       - name: Run tests
+        if: env.FULL_INSTALL == 'true' || steps.scope.outputs.code == 'true'
         run: pytest --tb=short -q
 
   # Repo tests run against the checkout (editable install + repo cwd), which
