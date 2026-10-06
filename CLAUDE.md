@@ -1,162 +1,44 @@
+## cartograph-cli
 
-## Cartograph
+The Cartograph CLI: widget library manager with a per-language validation
+pipeline (contamination -> validate -> checkin). Philosophy and the
+non-negotiables (validation is the product, stdlib-only, opinions not
+configurable) live in CONTRIBUTING.md. Read it before touching validation.
 
-Widget library manager. Widgets are reusable code modules with tests,
-examples, and metadata. Installed widgets live under `cg/<widget_id>/`.
+Sources of truth (don't restate them here, they drift):
+- Command surface: `cartograph --help` / `cartograph <command> --help`
+- Domains: `src/cartograph/library_config.json`
+- Engines: `src/cartograph/languages/`
 
-widget_id format: `<domain>-<name>-<language>` (e.g. `backend-retry-backoff-python`)
+### Layout
 
-When using `cartograph create`, only provide the name. The `--domain` and
-`--language` flags are prepended and appended automatically.
-Example: `cartograph create retry-backoff --domain backend --language python`
-creates `backend-retry-backoff-python`.
+    src/cartograph/          CLI + engine (cli.py, engine.py, validator.py, ...)
+    src/cartograph/languages/  one module per language engine
+    cg/                      widgets this repo dogfoods (ships in the package)
+    tests/                   pytest suite
 
-### Domains
+### Dev loop
 
-    backend    server-side logic, APIs, networking
-    frontend   UI components, browser utilities
-    data       parsing, transformation, pipelines
-    ml         machine learning utilities (must be framework-free)
-    security   auth, encryption, scanning
-    infra      CLI tools, file ops, system utilities
-    modeling   3D geometry, CAD, parametric design (OpenSCAD)
-    rtl        register-transfer level hardware design (SystemVerilog)
-    devops     infrastructure-as-code, deployment, ops tooling (Terraform)
-    analog     analog/mixed-signal circuits, SPICE simulation (ngspice)
-    formal     formally verified code, machine-checked proofs (Lean 4)
-    universal  language-agnostic, cross-domain
+- `pip install -e .` - the daily-driver CLI tracks whatever this checkout has.
+- In a git worktree, the editable install still points at the main checkout.
+  Run tests with `PYTHONPATH=src python -m pytest ...` or you test the wrong code.
+- Run targeted tests on small changes; the full `pytest` suite before merge.
+- Never add a runtime dependency without a deliberate decision.
 
-### Commands
+### Pre-flight (engine / release PRs)
 
-All commands run from your project root. Widgets install to `cg/` in the
-current directory (or the directory specified by `--target`).
+1. Full local `pytest` green, including the language's create /
+   contamination / blueprint suites.
+2. Real-widget stress: at least one widget through the actual CLI
+   (`cartograph create` -> `validate`), not engine methods.
+3. If remote validation nodes are configured on this machine (the
+   workspace's `scripts/remote-stress-*`, outside this repo), run them and
+   require PASS.
+4. PR CI green on all 9 matrix combos before merging.
 
-**Find and use widgets**
+### Releasing
 
-    search <query> [--domain ...] [--language ...]
-      Search for widgets matching a query.
-
-    inspect <widget_id> [--source] [--reviews] [--version X]
-      View a widget's metadata, source code, or reviews.
-
-    install <widget_id> [--target .] [--version X]
-      Install a widget into your project.
-
-    uninstall <widget_id> [--target .]
-      Remove an installed widget from your project.
-
-    upgrade <widget_id> [--target .] [--version X]
-      Update an installed widget to the latest version.
-
-    status [widget_id] [--target .] [--page N --size N | --all]
-      Check if an installed widget is outdated or locally modified.
-      Without widget_id: paginated listing of all installed widgets.
-      Default page size 20. Use --all for every widget, or --page/--size
-      to step through. Response includes pagination.next_command /
-      prev_command strings the agent can run verbatim.
-
-    rate <widget_id> <score 1-5> [--comment "..."]
-      Rate an installed widget (1-5). Ratings affect search ranking.
-
-**Create and publish widgets**
-
-    create <widget_id> --language <lang> --domain <domain>
-      Scaffold a new widget with the correct directory structure.
-
-    validate [path] [--lib]
-      Run tests, check for contamination, and verify widget correctness.
-
-    checkin [path] --reason "..." [--bump patch|minor|major] [--publish]
-      Push an edited widget back to the library. Runs validation if needed.
-      Version is managed by Cartograph - do NOT hand-edit the version
-      field in widget.json. Use --bump to increment.
-
-    rollback <widget_id> [--version X] [--reason "..."]
-      Restore a previous version of a widget from history.
-
-    delete <widget_id> [--confirm]
-      Remove a widget from the library and cloud.
-
-**Cloud registry**
-
-    cloud publish [id] [path] [--visibility ...] [--governance ...]
-      Publish a widget or blueprint to the cloud registry. Dispatches by
-      manifest type: blueprint.json -> blueprint flow, widget.json ->
-      widget flow. Versions are immutable - fix and bump.
-
-    cloud unpublish <widget_id> [--confirm]
-      Remove a widget from the cloud registry.
-
-    cloud adopt <local-id> <@owner/prefix-widget-id>
-      Link a local widget to its cloud counterpart by verifying source identity.
-      Writes .cartograph_source sidecar so future checkin --publish routes correctly.
-
-    cloud sync [--dry-run]
-      Sync local library with cloud. Higher version wins.
-
-    cloud proposals [widget_id] [--accept] [--reject] [--reason "..."]
-      Review community-submitted changes to your published widgets.
-
-**Custom validation rules**
-
-    rules
-      List all active rules files.
-
-    rules init --language <lang> [--global]
-      Create a rules file from a template. Edit it in your editor to add
-      checks. Runs automatically during `cartograph validate`.
-      Per-project: .cartograph/rules/   Global: <data_dir>/rules/
-
-    rules reset --language <lang> [--global]
-      Restore a rules file to its default template.
-
-**Configuration**
-
-    config [key] [value]
-      View or change settings.
-
-    registry [add <url> | remove <prefix>]
-      Manage additional registries. Prefix is fetched from /info automatically.
-
-    setup [--agent ...] [--file X] [--print] [--workflow]
-      Write Cartograph instructions to your agent's config file.
-      Auto-detects agent. Appends, never replaces.
-
-    doctor
-      Check system health - library, languages, cloud connectivity.
-
-    stats
-      Show library statistics.
-
-
-### Workflow
-
-Think in terms of widgets. Need to add capability, search for a widget.
-
-If you are adding a feature always consider whether it can be added into an existing widget. If not, consider if it could be added as a new widget.
-Only project specific wiring should not be made into widgets.
-
-1. Plan what components you need before building
-2. Decide whether new implementation can just be an improvement on currently used widgets. Read the widgets before deciding.
-3. Search the library before writing new logic
-4. Install widgets, then write glue code to connect them. Don't edit widget source directly for this step.
-5. If you do edit a widget, only do so if you intend to check it back in as an improvement for the general logic of the widget.
-6. Validate before checking in, check in before publishing
-
-Definition of reusable code: Any code that would be written for another project. A lot of code may look "project specific" but if you peel back the logic you will realize it can be used across many projects. These are the widgets that need to be extracted, or made.
-
-### Pre-flight checklist (before merging engine/release PRs)
-
-1. Full local test suite green (`pytest`), including the language's
-   create / contamination / blueprint suites.
-2. Real-widget stress: at least one widget validated end-to-end via the
-   actual CLI (`cartograph create` -> `validate`), not engine methods.
-3. If remote validation nodes are configured on this machine (see the
-   workspace-level CLAUDE.md and `scripts/remote-stress-*`), run the
-   ephemeral cross-platform stress on each node and require PASS.
-4. Wait for PR CI green on all 9 matrix combos before merging. Never tag
-   or bump ahead of CI.
-5. After merge, verify the release actually shipped by checking master:
-   pyproject version bumped, the change present on origin/master, and the
-   vX.Y.Z tag created (auto-tag silently skips when the version wasn't
-   bumped - a merged PR is not proof).
+Master push -> test.yml -> auto-tag -> publish.yml. Auto-tag only fires
+when `pyproject.toml`'s version has no tag yet, so a release needs a
+version bump; a merged PR alone ships nothing. After merge, verify the
+version on origin/master, the `vX.Y.Z` tag, and PyPI.
