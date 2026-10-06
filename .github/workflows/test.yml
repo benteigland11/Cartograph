@@ -349,7 +349,10 @@ jobs:
           Remove-Item $exe
           $bin = "C:\Program Files\KiCad\10.0\bin"
           if (-not (Test-Path (Join-Path $bin "kicad-cli.exe"))) { throw "kicad-cli.exe not found in $bin" }
-          Add-Content $env:GITHUB_PATH $bin
+          # Append via GITHUB_ENV, not GITHUB_PATH (which prepends): KiCad's
+          # bin dir ships its own python.exe, which would shadow the matrix
+          # Python for every later step.
+          Add-Content $env:GITHUB_ENV "PATH=$env:PATH;$bin"
           & (Join-Path $bin "kicad-cli.exe") version
 
       - name: Install dependencies

@@ -818,6 +818,7 @@ blueprint's sources import `from cg.<widget>.src.<module> import ...`.
 | `src/__init__.py` exists, src/ has a module | missing | file check |
 | No print() in src/ | present | AST (Python engine's check) |
 | Declared dependencies are pinned | a dep has no version | `_check_dep_pinning` |
+| Code runs on Python 3.9 | `match`/`except*` syntax, or `X \| Y` annotations without `from __future__ import annotations`, in src/, tests/ or examples/ | `ast.parse(feature_version=(3, 9))` + annotation walk |
 | Bundled symbol libraries load | `*.kicad_sym` under src/ fails to load | `kicad-cli sym upgrade --force` into a temp file |
 | Bundled footprint libraries load | a `*.pretty/` under src/ fails to load | `kicad-cli fp upgrade --force` into a temp dir |
 | Bundled schematics pass ERC | any error-severity ERC violation | `kicad-cli sch erc --format json --severity-error` |
@@ -847,6 +848,12 @@ the widget root, declared deps and test tools go on `PYTHONPATH`, and
 kicad-cli's directory is prepended to `PATH` so tests can call it.
 Validation sets `KICAD_CONFIG_HOME` to a temp dir (no user settings or
 global library tables) and `PYTHONNOUSERSITE=1`. Always headless.
+
+**Python 3.9 floor:** KiCad 10 bundles Python 3.9 on macOS (3.11 on
+Windows; Linux uses the distro's), so widget code must run on 3.9
+everywhere. Syntax newer than 3.9 is rejected, as are `X | Y` annotations
+(evaluated at definition time on 3.9) unless the file has
+`from __future__ import annotations`.
 
 **Test tools:** pytest + pytest-cov are installed once per KiCad Python
 version into `<data_dir>/kicad-test-tools/`, with KiCad's own pip if it has

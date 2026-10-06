@@ -52,6 +52,9 @@ from .base import LanguageEngine, _override_for, log
 
 _COVERAGE_THRESHOLD = 80
 _MIN_KICAD = (10, 0)
+# Oldest Python any supported KiCad bundles (KiCad 10 on macOS ships 3.9);
+# widget code must run on it everywhere.
+_MIN_PYTHON = (3, 9)
 _TEST_TOOLS = ["pytest", "pytest-cov"]
 
 # Importable in KiCad's interpreter without installing anything.
@@ -293,11 +296,52 @@ class KicadEngine(LanguageEngine):
                 errors.append(f"print() in {rel}:{lineno} - remove debug output from src/")
 
         errors.extend(self._check_dep_pinning(dependencies))
+        errors.extend(self._check_python_floor(path))
         errors.extend(self._check_native_files(path))
 
         if errors:
             return self._fail("\n".join(errors))
         return self._ok()
+
+    def _check_python_floor(self, path):
+        """Code must run on the oldest Python KiCad bundles (3.9 on macOS)."""
+        floor = "%d.%d" % _MIN_PYTHON
+        errors = []
+        for sub in ("src", "tests", "examples"):
+            for fpath in _python._py_files(path, sub):
+                rel = os.path.relpath(fpath, path)
+                try:
+                    with open(fpath, encoding="utf-8") as f:
+                        source = f.read()
+                    tree = ast.parse(source, feature_version=_MIN_PYTHON)
+                except SyntaxError as e:
+                    errors.append(f"{rel}:{e.lineno}: {e.msg} - KiCad bundles Python {floor} "
+                                  f"on macOS, so widget code must run on {floor}")
+                    continue
+                except OSError:
+                    continue
+                future = any(isinstance(n, ast.ImportFrom) and n.module == "__future__"
+                             and any(a.name == "annotations" for a in n.names)
+                             for n in tree.body)
+                if future:
+                    continue
+                for node in ast.walk(tree):
+                    annotations = []
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        args = node.args
+                        annotations = [a.annotation for a in
+                                       args.posonlyargs + args.args + args.kwonlyargs
+                                       + [args.vararg, args.kwarg] if a is not None]
+                        annotations.append(node.returns)
+                    elif isinstance(node, ast.AnnAssign):
+                        annotations = [node.annotation]
+                    if any(isinstance(sub_node, ast.BinOp) and isinstance(sub_node.op, ast.BitOr)
+                           for a in annotations if a is not None for sub_node in ast.walk(a)):
+                        errors.append(
+                            f"{rel}:{node.lineno}: `X | Y` type annotation fails at runtime on "
+                            f"Python {floor} (KiCad's macOS Python) - add `from __future__ "
+                            f"import annotations` or use typing.Optional/Union")
+        return errors
 
     def _check_native_files(self, path):
         """Every bundled KiCad file must load (libraries) or pass ERC/DRC."""

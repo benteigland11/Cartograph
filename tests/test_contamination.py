@@ -2829,6 +2829,22 @@ class TestKicadSpecific:
         result = KicadEngine().validate_widget(wdir, ["skidl"])
         assert not result["passed"] and "no version pin" in result["error"]
 
+    def test_python_310_syntax_fails_validation(self, tmp_path):
+        wdir = _make_widget(tmp_path, "kicad", "module.py",
+                            "def f(x):\n    match x:\n        case 1:\n            return 1\n")
+        result = KicadEngine().validate_widget(wdir, [])
+        assert not result["passed"] and "Python 3.9" in result["error"], result
+
+    def test_union_annotation_needs_future_import(self, tmp_path):
+        wdir = _make_widget(tmp_path, "kicad", "module.py",
+                            "def f(x: int | None = None):\n    return x\n")
+        result = KicadEngine().validate_widget(wdir, [])
+        assert not result["passed"] and "X | Y" in result["error"], result
+        wdir2 = _make_widget(tmp_path / "ok", "kicad", "module.py",
+                             "from __future__ import annotations\n\n\n"
+                             "def f(x: int | None = None):\n    return x\n")
+        assert KicadEngine().validate_widget(wdir2, [])["passed"]
+
     def test_print_in_src_fails_validation(self, tmp_path):
         wdir = _make_widget(tmp_path, "kicad", "module.py", "def f():\n    print('x')\n")
         result = KicadEngine().validate_widget(wdir, [])
