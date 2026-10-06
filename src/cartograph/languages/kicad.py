@@ -75,6 +75,8 @@ _GUI_MODULES = {
 }
 
 # A 3D model or library reference pinned to one machine.
+_RUNNER = os.path.join(os.path.dirname(__file__), "scanners", "kicad_runner.py")
+
 _ABS_MODEL_RE = re.compile(r'\(model\s+"((?:[A-Za-z]:[\\/]|/|~)[^"]*)"')
 
 # One line: cmd.exe would cut a multi-line -c at the first newline.
@@ -505,11 +507,10 @@ class KicadEngine(LanguageEngine):
     def run_tests(self, path):
         if not self.find_test_files(path):
             return self._fail("No test files found in tests/ (test_*.py)")
-        res = self._run(
-            [self._kicad_python(), "-m", "pytest", "tests", "-p", "no:cacheprovider",
-             "--tb=short", "--cov=src", f"--cov-fail-under={_COVERAGE_THRESHOLD}",
-             "--cov-report=term-missing"],
-            cwd=path, timeout=900, env=self._kicad_env(path))
+        res = self._runner(
+            "test", path, ["tests", "-p", "no:cacheprovider", "--tb=short", "--cov=src",
+                           f"--cov-fail-under={_COVERAGE_THRESHOLD}", "--cov-report=term-missing"],
+            timeout=900)
         if res.returncode != 0:
             return self._fail(self._output(res))
         return self._ok()
@@ -518,8 +519,7 @@ class KicadEngine(LanguageEngine):
         ex = os.path.join(path, "examples", self.example_filename())
         if not os.path.isfile(ex):
             return self._fail("examples/example_usage.py not found")
-        res = self._run([self._kicad_python(), ex], cwd=path, timeout=300,
-                        env=self._kicad_env(path))
+        res = self._runner("example", path, [ex], timeout=300)
         if res.returncode != 0:
             return self._fail(self._output(res))
         return self._ok()
@@ -550,6 +550,13 @@ class KicadEngine(LanguageEngine):
                         pass
 
     # ---- private -----------------------------------------------------------
+
+    def _runner(self, mode, path, args, timeout):
+        """Run scanners/kicad_runner.py with KiCad's Python: it sets sys.path
+        itself, since KiCad's Windows interpreter ignores PYTHONPATH."""
+        cmd = [self._kicad_python(), _RUNNER, mode, path, self._deps_dir or "",
+               self._tools_dir or ""] + args
+        return self._run(cmd, cwd=path, timeout=timeout, env=self._kicad_env())
 
     def _cli(self, args, cwd):
         return self._run(["kicad-cli"] + args, cwd=cwd, timeout=300, env=self._kicad_env())
@@ -620,19 +627,19 @@ class KicadEngine(LanguageEngine):
     def _output(res):
         return ((res.stdout or "") + (res.stderr or "")).strip()
 
-    def _kicad_env(self, widget_root=None):
-        """A factory KiCad: config in a temp dir, no user-site packages, the
-        widget + its deps + test tools on sys.path, kicad-cli on PATH."""
+    def _kicad_env(self):
+        """A factory KiCad: config in a temp dir, no user-site packages,
+        kicad-cli on PATH (appended: KiCad's Windows bin dir also holds a
+        python.exe that must not shadow anything). sys.path is set by the
+        runner, not PYTHONPATH."""
         env = os.environ.copy()
         config = os.path.join(tempfile.gettempdir(), "cartograph-kicad-config")
         os.makedirs(config, exist_ok=True)
         env["KICAD_CONFIG_HOME"] = config
         env["PYTHONNOUSERSITE"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env.pop("PYTHONPATH", None)
         cli = self._kicad_cli_path()
         if cli:
-            env["PATH"] = os.path.dirname(os.path.realpath(cli)) + os.pathsep + env.get("PATH", "")
-        if widget_root:
-            parts = [widget_root] + [d for d in (self._deps_dir, self._tools_dir) if d]
-            env["PYTHONPATH"] = os.pathsep.join(parts)
+            env["PATH"] = env.get("PATH", "") + os.pathsep + os.path.dirname(os.path.realpath(cli))
         return env

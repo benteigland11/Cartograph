@@ -827,9 +827,9 @@ blueprint's sources import `from cg.<widget>.src.<module> import ...`.
 | No editor-only pcbnew calls in src/ | `pcbnew.GetBoard()`, `Refresh()`, `UpdateUserInterface()` | AST |
 | No GUI / IPC imports in src/ | `wx`, `kipy`, `kicad` | AST |
 | No absolute 3D model paths in bundled files | `(model "/abs/...")` or a drive path | text scan of `*.kicad_mod/sym/sch/pcb` |
-| pytest passes under KiCad's Python | any test fails | `<kicad python> -m pytest` |
+| pytest passes under KiCad's Python | any test fails | `<kicad python> kicad_runner.py test` (pytest.main) |
 | Coverage meets threshold | below 80% | pytest-cov `--cov=src --cov-fail-under=80` |
-| Example runs under KiCad's Python | non-zero exit | `<kicad python> examples/example_usage.py` |
+| Example runs under KiCad's Python | non-zero exit | `<kicad python> kicad_runner.py example` (runpy as `__main__`) |
 
 **Layout:** `src/__init__.py` plus the reusable module(s), pytest tests in
 `tests/` (`test_*.py`, importing `from src.<module>`), and
@@ -843,9 +843,13 @@ built against one interpreter: the system Python on Linux distro packages,
 the `python.exe` next to `kicad-cli.exe` on Windows, and the bundled
 `Python.framework` inside `KiCad.app` on macOS. The engine probes those in
 order (one-line `-c` probe that imports `pcbnew`), or uses
-`paths.kicad-python` when set. Tests and examples run with that interpreter;
-the widget root, declared deps and test tools go on `PYTHONPATH`, and
-kicad-cli's directory is prepended to `PATH` so tests can call it.
+`paths.kicad-python` when set. Tests and examples run with that interpreter
+through `scanners/kicad_runner.py`, which sets `sys.path` itself - the widget
+root, declared deps and test tools first, then only the interpreter's own
+entries. `PYTHONPATH` is not used: KiCad's Windows Python ignores it and adds
+the user's per-version `3rdparty` site-packages, which the runner drops.
+kicad-cli's directory is appended to `PATH` so tests can call it (appended,
+because KiCad's Windows bin dir also holds a `python.exe`).
 Validation sets `KICAD_CONFIG_HOME` to a temp dir (no user settings or
 global library tables) and `PYTHONNOUSERSITE=1`. Always headless.
 
@@ -888,7 +892,7 @@ functions that take a board. Bundled KiCad files block on absolute 3D model
 paths; use `${KICAD10_3DMODEL_DIR}` or a library-relative path.
 
 **Blueprints:** composed widgets live under the sandbox's `cg/` with
-underscored dirs; the sandbox root is on `PYTHONPATH`, so a blueprint's
+underscored dirs; the runner puts the sandbox root on `sys.path`, so a blueprint's
 sources import `from cg.<widget>.src.<module> import ...`.
 
 ## Contamination Scanning

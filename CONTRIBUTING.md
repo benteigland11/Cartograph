@@ -112,9 +112,11 @@ KiCad's own interpreter (the one `pcbnew` was built against), so the engine is
 standalone but reuses the Python AST scanner. The engine finds that
 interpreter next to kicad-cli (Windows `python.exe`, macOS `KiCad.app`'s
 bundled framework) or falls back to the system Python on Linux;
-`paths.kicad-python` overrides. Tests and examples run with it, with the
-widget root, a per-run deps dir and the cached test tools on `PYTHONPATH`
-and `KICAD_CONFIG_HOME` pointed at a temp dir. Native files under src/ are
+`paths.kicad-python` overrides. Tests and examples run with it through
+`scanners/kicad_runner.py`, which sets `sys.path` explicitly (widget root,
+per-run deps dir, cached test tools, then only the interpreter's own entries)
+because KiCad's Windows Python ignores `PYTHONPATH`; `KICAD_CONFIG_HOME`
+points at a temp dir. Native files under src/ are
 checked by kicad-cli itself (libraries must load, schematics/boards must be
 ERC/DRC clean). Tests should run kicad-cli on generated output rather than
 only inspecting pcbnew objects. v1 is KiCad 10+, SWIG `pcbnew` plus
