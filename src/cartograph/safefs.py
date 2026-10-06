@@ -42,6 +42,7 @@ __all__ = [
     "robust_rmtree",
     "widget_lock",
     "library_lock",
+    "path_lock",
     "LockTimeout",
 ]
 
@@ -115,3 +116,14 @@ def library_lock(lock_dir, timeout=30.0, poll=0.1):
     """
     lock_path = os.path.join(lock_dir, LOCK_FILENAME)
     return _path_lock(lock_path, timeout, poll, "library")
+
+
+def path_lock(lock_path, what, timeout=30.0, poll=0.1):
+    """Exclusive cross-process lock on an arbitrary lock file.
+
+    For CLI state outside the library (e.g. credentials). Use this instead of
+    ``file_lock(blocking=True)``: on Windows that gives up after ~10s with an
+    OSError, so a holder doing network I/O can make a waiter fail outright.
+    Reentrant within a single thread.
+    """
+    return _path_lock(lock_path, timeout, poll, what)
