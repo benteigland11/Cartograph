@@ -217,6 +217,35 @@ def test_create_gdscript_widget(carto, tmp_path, monkeypatch):
         assert 'res://src/my_widget.gd' in f.read()
 
 
+def test_create_blender_widget(carto, tmp_path, monkeypatch):
+    # Blender ships supported=False until CI and the remote nodes prove it;
+    # the scaffold itself is testable regardless of the ship gate.
+    from cartograph.languages.blender import BlenderEngine
+    monkeypatch.setattr(BlenderEngine, "supported", True)
+    result = carto.create(
+        "my-widget",
+        language="blender",
+        name="My Widget",
+        domain="modeling",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    # Blender widgets are Python packages: the dir is underscored like Python's.
+    assert result["path"].endswith("modeling_my_widget_blender")
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "src/__init__.py",
+        "src/my_widget.py",
+        "tests/conftest.py",
+        "tests/test_my_widget.py",
+        "examples/example_usage.py",
+    ])
+    with open(f"{result['path']}/tests/test_my_widget.py") as f:
+        assert "from src.my_widget import my_widget" in f.read()
+    with open(f"{result['path']}/tests/conftest.py") as f:
+        assert "read_factory_settings(use_empty=True)" in f.read()
+
 def test_create_java_widget(carto, tmp_path, monkeypatch):
     # Java ships supported=False until its cross-platform CI proves the
     # Gradle toolchain; the scaffold itself is testable regardless.
