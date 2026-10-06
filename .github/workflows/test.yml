@@ -341,13 +341,18 @@ jobs:
         if: matrix.os == 'windows-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.kicad == 'true')
         shell: pwsh
         run: |
+          # Unpack the official installer with 7-Zip instead of running it:
+          # same layout as an install (bin/ holds kicad-cli.exe and KiCad's
+          # python.exe), no installer quirks.
           $f = "kicad-10.0.6-x86_64.exe"
           $exe = Join-Path $env:RUNNER_TEMP $f
           curl.exe -sSfL --retry 2 -o $exe "https://github.com/KiCad/kicad-source-mirror/releases/download/10.0.6/$f"
           if ($LASTEXITCODE -ne 0) { throw "KiCad download failed" }
-          Start-Process -FilePath $exe -ArgumentList "/S" -Wait
+          $root = Join-Path $env:RUNNER_TEMP "kicad"
+          7z x $exe "-o$root" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "KiCad unpack failed" }
           Remove-Item $exe
-          $bin = "C:\Program Files\KiCad\10.0\bin"
+          $bin = Join-Path $root "bin"
           if (-not (Test-Path (Join-Path $bin "kicad-cli.exe"))) { throw "kicad-cli.exe not found in $bin" }
           # Append via GITHUB_ENV, not GITHUB_PATH (which prepends): KiCad's
           # bin dir ships its own python.exe, which would shadow the matrix
