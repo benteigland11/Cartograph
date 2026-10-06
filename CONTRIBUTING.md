@@ -107,6 +107,19 @@ the data API (`bpy.data`, `bmesh`) over `bpy.ops` in src/. v1 is Blender 4.2
 LTS+ and stdlib + Blender-bundled modules only; declared dependencies are
 refused.
 
+**KiCad-specific notes:** KiCad widgets are Python that only runs under
+KiCad's own interpreter (the one `pcbnew` was built against), so the engine is
+standalone but reuses the Python AST scanner. The engine finds that
+interpreter next to kicad-cli (Windows `python.exe`, macOS `KiCad.app`'s
+bundled framework) or falls back to the system Python on Linux;
+`paths.kicad-python` overrides. Tests and examples run with it, with the
+widget root, a per-run deps dir and the cached test tools on `PYTHONPATH`
+and `KICAD_CONFIG_HOME` pointed at a temp dir. Native files under src/ are
+checked by kicad-cli itself (libraries must load, schematics/boards must be
+ERC/DRC clean). Tests should run kicad-cli on generated output rather than
+only inspecting pcbnew objects. v1 is KiCad 10+, SWIG `pcbnew` plus
+kicad-cli; the IPC API needs a GUI and is blocked.
+
 A language engine must:
 - Run tests and report pass/fail
 - Measure code coverage (if possible to measure, it should be measured and sit at 80%)
