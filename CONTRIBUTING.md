@@ -132,3 +132,4 @@ The default registry is hosted at the URL configured in `src/cartograph/auth.py`
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
+
