@@ -265,13 +265,7 @@ def validate_item(carto, path):
         test_error = result.get("error", "")
         if not check("All tests pass", result["passed"], test_error):
             _print_checklist(checklist, errors, failed=True, test_output=test_error)
-            if ("does not meet global threshold" in test_error
-                    or "Required test coverage of" in test_error
-                    or ("coverage" in test_error.lower() and "threshold" in test_error.lower())):
-                fail_msg = "Coverage below threshold - add tests to reach 80%."
-            else:
-                fail_msg = "Tests failed. Fix before checkin."
-            return {"status": "error", "message": fail_msg,
+            return {"status": "error", "message": _test_failure_message(test_error),
                     "test_output": test_error[:3000]}
 
         # 9b. Sidecar (e.g. python/ inside an openscad widget)
@@ -345,6 +339,23 @@ def validate_item(carto, path):
             engine.cleanup(path)
         except Exception as e:
             log.error("Validation cleanup failed for %s: %s", path, e)
+
+
+def _test_failure_message(test_error: str) -> str:
+    """Headline for a failed test run: a coverage shortfall or failing tests.
+
+    pytest-cov prints "Required test coverage of 80% reached." even when the
+    run failed for other reasons, so only its "not reached" form counts as
+    a coverage failure. Engines that gate coverage themselves report
+    "Coverage N% is below the required 80%".
+    """
+    low = test_error.lower()
+    if ("does not meet global threshold" in test_error  # vitest, karma
+            or ("Required test coverage of" in test_error and "not reached" in test_error)  # pytest-cov
+            or re.search(r"coverage [\d.]+% is below the required", low)  # go, rust, php, java, c#, flutter
+            or ("coverage" in low and "threshold" in low)):
+        return "Coverage below threshold - add tests to reach 80%."
+    return "Tests failed. Fix before checkin."
 
 
 def _print_checklist(checklist, errors, failed, test_output=None, warnings=None):
