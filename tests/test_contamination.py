@@ -2850,6 +2850,25 @@ class TestKicadSpecific:
         result = KicadEngine().validate_widget(wdir, [])
         assert not result["passed"] and "print()" in result["error"]
 
+    @pytest.mark.parametrize("test_code", [
+        "import pytest\n\n\ndef test_x():\n    pcbnew = pytest.importorskip('pcbnew')\n",
+        "import shutil\nimport pytest\n\n\n@pytest.mark.skipif(shutil.which('kicad-cli') is None, reason='x')\n"
+        "def test_x():\n    pass\n",
+        "import importlib.util\nimport pytest\n\n\n"
+        "@pytest.mark.skipif(importlib.util.find_spec('pcbnew') is None, reason='x')\ndef test_x():\n    pass\n",
+        "import shutil\nimport pytest\n\n\ndef test_x():\n    if shutil.which('kicad-cli') is None:\n"
+        "        pytest.skip('no kicad')\n",
+    ])
+    def test_toolchain_skips_in_tests_block(self, tmp_path, test_code):
+        result = self._kc_scan(tmp_path, "def f():\n    return 1\n", test_code=test_code)
+        assert any("pcbnew" in b and "test_module.py" in b for b in result["blocks"]), result
+
+    def test_unrelated_skips_are_fine(self, tmp_path):
+        result = self._kc_scan(tmp_path, "def f():\n    return 1\n", test_code=(
+            "import sys\nimport pytest\n\n\n@pytest.mark.skipif(sys.platform == 'win32', reason='posix')\n"
+            "def test_x():\n    pytest.importorskip('numpy')\n"))
+        assert result["blocks"] == [], result
+
     @pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="kicad-cli not installed")
     def test_corrupt_bundled_symbol_library_fails_validation(self, tmp_path):
         wdir = _make_widget(tmp_path, "kicad", "module.py", "def f():\n    return 1\n")

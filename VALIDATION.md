@@ -826,6 +826,7 @@ blueprint's sources import `from cg.<widget>.src.<module> import ...`.
 | Python contamination scan passes | issues found | Python AST scanner, `pcbnew` importable |
 | No editor-only pcbnew calls in src/ | `pcbnew.GetBoard()`, `Refresh()`, `UpdateUserInterface()` | AST |
 | No GUI / IPC imports in src/ | `wx`, `kipy`, `kicad` | AST |
+| Tests never skip on the toolchain | `importorskip("pcbnew")`, a `skipif` whose condition mentions pcbnew/kicad-cli, or `pytest.skip` under such an `if`, in tests/ | AST |
 | No absolute 3D model paths in bundled files | `(model "/abs/...")` or a drive path | text scan of `*.kicad_mod/sym/sch/pcb` |
 | pytest passes under KiCad's Python | any test fails | `<kicad python> kicad_runner.py test` (pytest.main) |
 | Coverage meets threshold | below 80% | pytest-cov `--cov=src --cov-fail-under=80` |
@@ -890,6 +891,9 @@ open in the PCB editor, which doesn't exist headless; `wx`, `kipy` and
 warns - its `Run()` needs the editor, so the logic should live in plain
 functions that take a board. Bundled KiCad files block on absolute 3D model
 paths; use `${KICAD10_3DMODEL_DIR}` or a library-relative path.
+In tests/, skipping on a missing pcbnew or kicad-cli blocks: validation always
+has both, so such a skip can only hide a test - this is exactly how
+pcbnew-based Python widgets went unvalidated under the plain Python engine.
 
 **Blueprints:** composed widgets live under the sandbox's `cg/` with
 underscored dirs; the runner puts the sandbox root on `sys.path`, so a blueprint's

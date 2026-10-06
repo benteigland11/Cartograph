@@ -184,6 +184,53 @@ def _dotted(node):
     return None
 
 
+def _mentions_toolchain(node):
+    """True if an expression refers to pcbnew or kicad-cli (by name or string)."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, str) and (
+                sub.value.split(".")[0] == "pcbnew" or "kicad-cli" in sub.value):
+            return True
+        if isinstance(sub, ast.Name) and sub.id == "pcbnew":
+            return True
+        if isinstance(sub, ast.Attribute) and _dotted(sub) and _dotted(sub).startswith("pcbnew."):
+            return True
+    return False
+
+
+def _toolchain_skips(path):
+    """Block tests that skip when pcbnew or kicad-cli is missing.
+
+    Validation always runs under KiCad's Python with kicad-cli on PATH, so such
+    a skip can only ever hide a test (this is how pcbnew-based widgets went
+    unvalidated under the plain Python engine)."""
+    blocks = []
+    for fpath in _python._py_files(path, "tests"):
+        rel = os.path.relpath(fpath, path)
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                tree = ast.parse(f.read())
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = (_dotted(node.func) or "").rsplit(".", 1)[-1]
+                if name == "importorskip" and node.args and _mentions_toolchain(node.args[0]):
+                    blocks.append(f"importorskip of pcbnew in {rel}:{node.lineno} - KiCad "
+                                  "validation always has pcbnew; import it directly so the "
+                                  "test can never be silently skipped")
+                elif name == "skipif" and node.args and _mentions_toolchain(node.args[0]):
+                    blocks.append(f"skipif on pcbnew/kicad-cli in {rel}:{node.lineno} - KiCad "
+                                  "validation always has both; drop the condition so the test "
+                                  "always runs")
+            elif isinstance(node, ast.If) and _mentions_toolchain(node.test):
+                skips = [n for b in node.body for n in ast.walk(b) if isinstance(n, ast.Call)
+                         and (_dotted(n.func) or "").rsplit(".", 1)[-1] == "skip"]
+                if skips:
+                    blocks.append(f"pytest.skip guarded on pcbnew/kicad-cli in {rel}:{node.lineno} "
+                                  "- KiCad validation always has both; remove the skip")
+    return blocks
+
+
 def _native_files(path):
     src = os.path.join(path, "src")
     found = {"sym": [], "pretty": [], "sch": [], "pcb": []}
@@ -200,7 +247,7 @@ def _native_files(path):
 
 class KicadEngine(LanguageEngine):
     name = "kicad"
-    validation_version = 1
+    validation_version = 2
     file_ext = "py"
     aliases = ["pcbnew"]
     toolchain = {"kicad-cli": "Install KiCad 10 or newer - kicad.org "
@@ -447,6 +494,7 @@ class KicadEngine(LanguageEngine):
                             f"{os.path.relpath(fpath, path)}:{lineno} - use a KiCad path "
                             "variable such as ${KICAD10_3DMODEL_DIR} or a path relative "
                             "to the library")
+        blocks.extend(_toolchain_skips(path))
         return {"blocks": blocks, "warnings": warnings}
 
     # ---- dependencies ------------------------------------------------------
