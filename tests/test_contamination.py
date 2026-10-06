@@ -36,6 +36,7 @@ from cartograph.languages.java import JavaEngine
 from cartograph.languages.lean import LeanEngine
 from cartograph.languages.csharp import CSharpEngine
 from cartograph.languages.flutter import FlutterEngine
+from cartograph.languages.blender import BlenderEngine
 from cartograph.languages.spice import SpiceEngine
 from cartograph.languages.base import LanguageEngine
 from cartograph.contamination import scan_contamination
@@ -66,7 +67,7 @@ def _make_widget(tmp_path, language, src_filename, src_code,
     }
     _write(os.path.join(wdir, "widget.json"), json.dumps(manifest, indent=2))
     _write(os.path.join(wdir, "src", src_filename), src_code)
-    if language == "python":
+    if language in ("python", "blender"):
         _write(os.path.join(wdir, "src", "__init__.py"), "")
     if test_code:
         test_name = "test_" + src_filename
@@ -100,6 +101,7 @@ def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
         "lean": LeanEngine,
         "csharp": CSharpEngine,
         "flutter": FlutterEngine,
+        "blender": BlenderEngine,
     }
     wdir = _make_widget(tmp_path, language, f"module.{ext}", src_code,
                         test_code, dependencies, example_code=example_code)
@@ -368,8 +370,16 @@ STDLIB_IMPORT = {
     "lean":       'import Std\n',
 }
 
+# Blender widgets are Python source scanned by the Python AST scanner, so the
+# Python samples apply unchanged.
+for _samples in (CLEAN, ABS_PATH_SRC, CREDENTIAL_SRC, CREDENTIAL_TEST, URL_SRC,
+                 URL_ALLOWED, IP_SRC, SLEEP_SRC, SLEEP_TEST_SMALL,
+                 SLEEP_TEST_LARGE, HARDCODED_VALUE, ENV_VAR, UNLISTED_IMPORT,
+                 LISTED_IMPORT, STDLIB_IMPORT):
+    _samples["blender"] = _samples["python"]
+
 # File extensions per language
-EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java", "lean": "lean", "csharp": "cs", "flutter": "dart"}
+EXT = {"python": "py", "javascript": "js", "nim": "nim", "systemverilog": "sv", "angular": "ts", "php": "php", "terraform": "tf", "go": "go", "rust": "rs", "gdscript": "gd", "java": "java", "lean": "lean", "csharp": "cs", "flutter": "dart", "blender": "py"}
 
 # Which languages need external tools to run their scanners
 NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "angular": "node", "go": "go", "rust": "rustc", "gdscript": "godot", "java": "java", "lean": "lean", "csharp": "dotnet", "flutter": "dart"}
@@ -380,10 +390,10 @@ NEEDS_TOOL = {"javascript": "node", "nim": "nim", "systemverilog": "iverilog", "
 # ---------------------------------------------------------------------------
 
 # All languages with contamination engines
-LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java", "lean", "csharp", "flutter"]
+LANGUAGES = ["python", "javascript", "nim", "systemverilog", "angular", "php", "terraform", "go", "rust", "gdscript", "java", "lean", "csharp", "flutter", "blender"]
 
 # Languages with native sleep/import/env detection (not applicable to SV)
-LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java", "lean", "csharp", "flutter"]
+LANGUAGES_SOFTWARE = ["python", "javascript", "nim", "angular", "php", "go", "rust", "java", "lean", "csharp", "flutter", "blender"]
 
 
 def _skip_if_missing(lang):
@@ -2690,6 +2700,65 @@ class TestGDScriptSpecific:
         result = self._gd_scan(tmp_path, "var speed = 100\n")
         assert any("typed" in w.lower() for w in result["warnings"]), \
             f"untyped var should warn: {result['warnings']}"
+
+
+class TestBlenderSpecific:
+    """Checks unique to the Blender engine: Blender's bundled modules are
+    importable without being declared, bpy.ops is discouraged in src/, and
+    .blend file operators must not carry literal paths."""
+
+    def _bl_scan(self, tmp_path, src_code, **kw):
+        return _scan(tmp_path, "blender", "py", src_code, **kw)
+
+    def test_bundled_modules_are_not_unlisted(self, tmp_path):
+        result = self._bl_scan(tmp_path,
+            "import bpy\nimport bmesh\nfrom mathutils import Vector\nimport numpy\n\n\n"
+            "def origin():\n    return Vector((0, 0, 0))\n")
+        assert result["blocks"] == [] and result["warnings"] == [], result
+
+    def test_unlisted_import_still_blocks(self, tmp_path):
+        result = self._bl_scan(tmp_path, "import requests\n")
+        assert any("unlisted import 'requests'" in b.lower() for b in result["blocks"]), result
+
+    def test_bpy_ops_in_src_warns(self, tmp_path):
+        result = self._bl_scan(tmp_path,
+            "import bpy\n\n\ndef cube():\n    bpy.ops.mesh.primitive_cube_add(size=2)\n")
+        assert result["blocks"] == [], result["blocks"]
+        assert any("bpy.ops.mesh.primitive_cube_add" in w for w in result["warnings"]), result
+
+    def test_bpy_ops_in_tests_is_fine(self, tmp_path):
+        result = self._bl_scan(tmp_path, "def f():\n    return 1\n",
+            test_code="import bpy\n\n\ndef test_x():\n    bpy.ops.wm.read_factory_settings(use_empty=True)\n")
+        assert not any("bpy.ops" in f for f in result["warnings"] + result["blocks"]), result
+
+    def test_file_operator_with_literal_path_blocks(self, tmp_path):
+        result = self._bl_scan(tmp_path,
+            "import bpy\n\n\ndef save():\n    bpy.ops.wm.save_as_mainfile(filepath=\"scene.blend\")\n")
+        assert any("literal path" in b for b in result["blocks"]), result
+
+    def test_file_operator_with_parameter_path_only_warns(self, tmp_path):
+        result = self._bl_scan(tmp_path,
+            "import bpy\n\n\ndef save(path):\n    bpy.ops.wm.save_as_mainfile(filepath=path)\n")
+        assert not any("literal path" in b for b in result["blocks"]), result
+        assert any("bpy.ops.wm.save_as_mainfile" in w for w in result["warnings"]), result
+
+    def test_bpy_ops_in_string_or_comment_not_flagged(self, tmp_path):
+        result = self._bl_scan(tmp_path,
+            "# bpy.ops.wm.save_as_mainfile(filepath='x.blend') is avoided here\n"
+            "def doc():\n    return \"bpy.ops.mesh.primitive_cube_add()\"\n")
+        assert not any("bpy.ops" in f for f in result["warnings"] + result["blocks"]), result
+
+    def test_declared_dependencies_refused(self, tmp_path):
+        engine = BlenderEngine()
+        wdir = _make_widget(tmp_path, "blender", "module.py", "def f():\n    return 1\n")
+        result = engine.validate_widget(wdir, ["requests>=2"])
+        assert not result["passed"] and "cannot declare dependencies" in result["error"]
+
+    def test_print_in_src_fails_validation(self, tmp_path):
+        engine = BlenderEngine()
+        wdir = _make_widget(tmp_path, "blender", "module.py", "def f():\n    print('x')\n")
+        result = engine.validate_widget(wdir, [])
+        assert not result["passed"] and "print()" in result["error"]
 
 
 class TestSpiceSpecific:

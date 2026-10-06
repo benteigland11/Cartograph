@@ -1466,6 +1466,132 @@ def test_gdscript_blueprint_validates_end_to_end(carto, project):
     assert res["id"] == "bp-shouter-gdscript"
 
 
+
+# ---------------------------------------------------------------------------
+# Blender
+# ---------------------------------------------------------------------------
+
+_BL_PLANE_SRC = """\
+import bpy
+
+
+def make_plane(name="Plane", size=1.0):
+    half = size / 2
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(-half, -half, 0), (half, -half, 0), (half, half, 0), (-half, half, 0)],
+                     [], [(0, 1, 2, 3)])
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+"""
+
+_BL_CONFTEST = """\
+import bpy
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def empty_scene():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    yield
+"""
+
+# Blueprint: a grid of planes built from the plane widget.
+_BL_GRID_SRC = """\
+from cg.modeling_plane_blender.src.plane import make_plane
+
+
+def make_grid(count=2, size=1.0, gap=0.5):
+    objs = []
+    for i in range(count):
+        for j in range(count):
+            obj = make_plane(name=f"Tile.{i}.{j}", size=size)
+            obj.location = (i * (size + gap), j * (size + gap), 0)
+            objs.append(obj)
+    return objs
+"""
+
+
+def _write_blender_widget(project_dir: str) -> str:
+    wdir = os.path.join(project_dir, "cg", "modeling_plane_blender")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(wdir, d))
+    manifest = {
+        "meta": {
+            "id": "modeling-plane-blender", "name": "plane", "version": "1.0.0",
+            "domain": "modeling", "tags": ["mesh", "demo", "test"],
+        },
+        "tech_stack": {"language": "blender", "dependencies": []},
+        "description": "Creates a square plane mesh object.",
+    }
+    with open(os.path.join(wdir, "widget.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    files = {
+        "src/__init__.py": "",
+        "src/plane.py": _BL_PLANE_SRC,
+        "tests/conftest.py": _BL_CONFTEST,
+        "tests/test_plane.py": "from src.plane import make_plane\n\n\ndef test_plane():\n"
+                               "    assert len(make_plane(size=2.0).data.polygons) == 1\n",
+        "examples/example_usage.py": "from src.plane import make_plane\n\nmake_plane(size=2.0)\n",
+    }
+    for rel, content in files.items():
+        with open(os.path.join(wdir, rel), "w") as f:
+            f.write(content)
+    return wdir
+
+
+def _write_blender_blueprint(project_dir: str) -> str:
+    bp = os.path.join(project_dir, "cg", "bp_tile_grid_blender")
+    for d in ("src", "tests", "examples"):
+        os.makedirs(os.path.join(bp, d))
+    manifest = {
+        "id": "bp-tile-grid-blender",
+        "name": "tile-grid",
+        "language": "blender",
+        "version": "0.1.0",
+        "description": "Lays out a grid of planes via the plane widget.",
+        "tags": ["mesh", "demo", "blueprint"],
+        "dependencies": [
+            {"id": "modeling-plane-blender", "version": "1.0.0"},
+        ],
+        "domains": [],
+    }
+    with open(os.path.join(bp, "blueprint.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    files = {
+        "src/__init__.py": "",
+        "src/grid.py": _BL_GRID_SRC,
+        "tests/conftest.py": _BL_CONFTEST,
+        "tests/test_grid.py": "from src.grid import make_grid\n\n\ndef test_grid():\n"
+                              "    tiles = make_grid(count=3)\n"
+                              "    assert len(tiles) == 9\n"
+                              "    assert tiles[-1].location.x == 3.0\n",
+        "examples/example_usage.py": "from src.grid import make_grid\n\nmake_grid(count=2)\n",
+    }
+    for rel, content in files.items():
+        with open(os.path.join(bp, rel), "w") as f:
+            f.write(content)
+    return bp
+
+
+@pytest.mark.slow
+def test_blender_blueprint_validates_end_to_end(carto, project):
+    if not shutil.which("blender"):
+        pytest.skip("blender not available")
+    engine = get_engine("blender")
+    if engine is None or not engine.supported:
+        pytest.skip("blender engine not available")
+    ok, msg = engine.check_available()
+    if not ok:
+        pytest.skip(f"blender engine not ready: {msg}")
+
+    _write_blender_widget(str(project))
+    bp = _write_blender_blueprint(str(project))
+
+    res = carto.validate_blueprint(bp)
+    assert res.get("status") == "success", res
+    assert res["id"] == "bp-tile-grid-blender"
+
 # ---------------------------------------------------------------------------
 # SPICE
 # ---------------------------------------------------------------------------

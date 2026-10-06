@@ -94,6 +94,19 @@ SDK alone; its bundled `dart` binary runs the native scanner, which handles
 Dart's nested block comments and raw strings. Coverage floor is the standard
 80% via the lcov report `flutter test --coverage` emits natively.
 
+**Blender-specific notes:** Blender widgets are Python that only runs inside
+Blender, so the engine is standalone (not a Python subclass) but reuses the
+Python AST scanner. Tests, the coverage run and the example all execute in
+headless Blender through `scanners/blender_runner.py`; never the UI, never a
+GPU render. pytest + pytest-cov are installed by pip running *inside* Blender
+into `<data_dir>/blender-test-tools/py<X.Y>` - never into Blender's own
+install, and never via the interpreter `sys.executable` reports (distro builds
+can name a different Python than they embed). Scaffolded tests get a
+`conftest.py` that resets to an empty factory scene before every test. Prefer
+the data API (`bpy.data`, `bmesh`) over `bpy.ops` in src/. v1 is Blender 4.2
+LTS+ and stdlib + Blender-bundled modules only; declared dependencies are
+refused.
+
 A language engine must:
 - Run tests and report pass/fail
 - Measure code coverage (if possible to measure, it should be measured and sit at 80%)

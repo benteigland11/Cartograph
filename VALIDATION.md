@@ -54,6 +54,7 @@ These are requirements. Validation fails if any are not met.
 | Lean | No | N/A | No coverage tool exists; the kernel proof-checks every theorem on every build - a stronger floor than coverage for proof code |
 | C# | Yes | 80% | coverlet Cobertura report from `dotnet test` |
 | Flutter | Yes | 80% | lcov report from `flutter test --coverage` (measured over src/ via the generated lib/ copy) |
+| Blender | Yes | 80% | pytest-cov run inside headless Blender (`blender -b`) |
 
 Nim coverage would require compiling via `--debugger:native` and running `gcov`/`lcov` on the generated C code. This produces C-level line coverage, not Nim source-level coverage. Decided it was too unreliable and confusing to impose on widget authors.
 
@@ -741,6 +742,71 @@ as `package:<dep_module>/...` like any consumer would. At test/example
 time the engine materializes `lib/` for the blueprint *and* for every
 flutter widget under the sandbox's `cg/`, so the path deps resolve.
 Coverage counts only the blueprint's own sources.
+
+### Blender
+
+| Check | Fails if | Method |
+|-------|----------|--------|
+| Blender 4.2 LTS or newer on PATH | missing or older | `blender --version` |
+| `src/__init__.py` exists, src/ has a module | missing | file check |
+| No print() in src/ | present | AST (Python engine's check) |
+| No declared dependencies (v1) | any present | widget.json check |
+| Python contamination scan passes | issues found | Python AST scanner, Blender's bundled modules importable |
+| No .blend file operator with a literal path in src/ | present | AST (`bpy.ops.wm.open_mainfile/save_mainfile/save_as_mainfile/append/link` with a string `filepath`/`directory`/`filename`) |
+| pytest passes inside Blender | any test fails | `blender -b --factory-startup` + pytest |
+| Coverage meets threshold | below 80% | pytest-cov `--cov=src --cov-fail-under=80` |
+| Example runs inside headless Blender | non-zero exit or uncaught exception | `blender -b` runs examples/example_usage.py as `__main__` |
+
+**Layout:** `src/__init__.py` plus the reusable module(s), pytest tests in
+`tests/` (`test_*.py`, importing `from src.<module>`), a scaffolded
+`tests/conftest.py` whose autouse fixture resets to an empty factory scene
+before every test, and `examples/example_usage.py`. Directories are
+underscored like Python's so blueprints can `from cg.<widget>.src...`.
+
+**Everything runs inside Blender's embedded Python.** Widgets import `bpy`,
+which only exists inside Blender, so tests and examples run through
+`scanners/blender_runner.py` under `blender -b --factory-startup
+--python-exit-code 1`: the runner puts the widget root (and the test-tool
+dir) on `sys.path` and calls `pytest.main` or runs the example as
+`__main__`. Blender exits with the code passed to `sys.exit` and 1 on an
+uncaught exception, so results come from the exit status. Validation sets
+`BLENDER_USER_RESOURCES` to a temp dir (no user prefs, add-ons or scripts)
+and `PYTHONNOUSERSITE=1` (no `~/.local` packages), so it sees a factory
+Blender and works where `$HOME` is read-only. Never the UI and never a GPU
+render - EEVEE needs a GPU that CI and sandboxes don't have.
+
+**Test tools:** pytest + pytest-cov are installed once per Blender Python
+version (e.g. `py3.11` for 4.2, `py3.13` for 5.2) into
+`<data_dir>/blender-test-tools/`, by pip running *inside* Blender. Some
+distro builds report a different interpreter in `sys.executable` than the
+one they embed (Fedora's Blender names Homebrew's python when it is first
+on PATH), so `<sys.executable> -m pip` can install for the wrong ABI;
+pip-inside-Blender always matches. Nothing is written into Blender's own
+install. First use needs PyPI; afterwards validation is offline.
+
+**Dependencies (v1):** the standard library and what Blender bundles
+(`bpy`, `bmesh`, `mathutils`, `bpy_extras`, `bl_math`, `gpu`,
+`gpu_extras`, `idprop`, `aud`, `freestyle`, `imbuf`, `numpy`, ...).
+Declared pip dependencies are refused until v2.
+
+**Versions:** the floor is Blender 4.2 LTS; validation records the exact
+Blender version in the stamp (`runtime_version`). CI pins the latest LTS.
+Verified on official 4.2.23 (Python 3.11) and 5.2.2 (Python 3.13) builds
+and Fedora's 5.2.2 (system Python 3.14).
+
+**Scanner:** the Python engine's AST scanner unchanged (abs paths,
+credentials, URLs, IPs, sleep, hardcoded values, env vars, unlisted
+imports), with Blender's bundled modules treated as declared. On top, in
+src/ only: any `bpy.ops.*` call warns - operators depend on UI context
+(active object, selection, area) and break headless or when another add-on
+calls them; the data API (`bpy.data`, `bmesh`, `mesh.from_pydata`) is the
+reusable path - and a .blend file operator given a literal path blocks.
+AST-based, so mentions in strings and comments never trip. `bpy.ops` in
+tests (e.g. the conftest reset) is fine.
+
+**Blueprints:** composed widgets live under the sandbox's `cg/` with
+underscored dirs; the runner puts the sandbox root on `sys.path`, so a
+blueprint's sources import `from cg.<widget>.src.<module> import ...`.
 
 ## Contamination Scanning
 
