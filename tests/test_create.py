@@ -246,6 +246,36 @@ def test_create_blender_widget(carto, tmp_path, monkeypatch):
     with open(f"{result['path']}/tests/conftest.py") as f:
         assert "read_factory_settings(use_empty=True)" in f.read()
 
+def test_create_kicad_widget(carto, tmp_path, monkeypatch):
+    # KiCad ships supported=False until CI and the remote nodes prove it;
+    # the scaffold itself is testable regardless of the ship gate.
+    from cartograph.languages.kicad import KicadEngine
+    monkeypatch.setattr(KicadEngine, "supported", True)
+    result = carto.create(
+        "my-widget",
+        language="kicad",
+        name="My Widget",
+        domain="modeling",
+        tags=["utility"],
+        target_dir=str(tmp_path),
+    )
+    assert result.get("status") == "success"
+    # KiCad widgets are Python packages: the dir is underscored like Python's.
+    assert result["path"].endswith("modeling_my_widget_kicad")
+    _assert_scaffold(result["path"], [
+        "widget.json",
+        "src/__init__.py",
+        "src/my_widget.py",
+        "tests/test_my_widget.py",
+        "examples/example_usage.py",
+    ])
+    with open(f"{result['path']}/tests/test_my_widget.py") as f:
+        test_src = f.read()
+    assert "from src.my_widget import my_widget" in test_src
+    assert "kicad-cli" in test_src
+    with open(f"{result['path']}/src/my_widget.py") as f:
+        assert "Coordinate frame" in f.read()
+
 def test_create_java_widget(carto, tmp_path, monkeypatch):
     # Java ships supported=False until its cross-platform CI proves the
     # Gradle toolchain; the scaffold itself is testable regardless.

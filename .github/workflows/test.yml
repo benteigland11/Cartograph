@@ -87,6 +87,8 @@ jobs:
             blender:
               - 'src/cartograph/languages/blender.py'
               - 'src/cartograph/languages/scanners/blender_runner.py'
+            kicad:
+              - 'src/cartograph/languages/kicad.py'
 
       # Separate filter: "every" quantifier lets the negations exclude docs,
       # which would break the any-match engine filters above.
@@ -310,6 +312,54 @@ jobs:
           }
           Add-Content $env:GITHUB_PATH $BL
 
+      # KiCad 10 for the kicad engine: kicad-cli plus the Python that can
+      # import pcbnew. Linux uses the official PPA without the multi-GB
+      # symbol/footprint/3D libraries; macOS runs straight from the mounted
+      # DMG; Windows runs the official installer silently.
+      - name: Install KiCad (Linux)
+        if: matrix.os == 'ubuntu-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.kicad == 'true')
+        shell: bash
+        run: |
+          sudo add-apt-repository -y ppa:kicad/kicad-10.0-releases
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends kicad || (sleep 15 && sudo apt-get install -y -q --no-install-recommends kicad)
+          kicad-cli version
+          /usr/bin/python3 -c "import pcbnew; print('pcbnew', pcbnew.Version())"
+
+      - name: Install KiCad (macOS)
+        if: matrix.os == 'macos-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.kicad == 'true')
+        shell: bash
+        run: |
+          f=kicad-unified-universal-10.0.6.dmg
+          curl -sSfL --retry 2 -o "$RUNNER_TEMP/$f" "https://github.com/KiCad/kicad-source-mirror/releases/download/10.0.6/$f"
+          hdiutil attach -nobrowse -quiet -mountpoint "$RUNNER_TEMP/kicad-dmg" "$RUNNER_TEMP/$f"
+          APP=$(find "$RUNNER_TEMP/kicad-dmg" -maxdepth 2 -name KiCad.app -type d | head -1)
+          echo "$APP/Contents/MacOS" >> "$GITHUB_PATH"
+          "$APP/Contents/MacOS/kicad-cli" version
+
+      - name: Install KiCad (Windows)
+        if: matrix.os == 'windows-latest' && (env.FULL_INSTALL == 'true' || steps.changes.outputs.core == 'true' || steps.changes.outputs.kicad == 'true')
+        shell: pwsh
+        run: |
+          # Unpack the official installer with 7-Zip instead of running it:
+          # same layout as an install (bin/ holds kicad-cli.exe and KiCad's
+          # python.exe), no installer quirks.
+          $f = "kicad-10.0.6-x86_64.exe"
+          $exe = Join-Path $env:RUNNER_TEMP $f
+          curl.exe -sSfL --retry 2 -o $exe "https://github.com/KiCad/kicad-source-mirror/releases/download/10.0.6/$f"
+          if ($LASTEXITCODE -ne 0) { throw "KiCad download failed" }
+          $root = Join-Path $env:RUNNER_TEMP "kicad"
+          7z x $exe "-o$root" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "KiCad unpack failed" }
+          Remove-Item $exe
+          $bin = Join-Path $root "bin"
+          if (-not (Test-Path (Join-Path $bin "kicad-cli.exe"))) { throw "kicad-cli.exe not found in $bin" }
+          # Append via GITHUB_ENV, not GITHUB_PATH (which prepends): KiCad's
+          # bin dir ships its own python.exe, which would shadow the matrix
+          # Python for every later step.
+          Add-Content $env:GITHUB_ENV "PATH=$env:PATH;$bin"
+          & (Join-Path $bin "kicad-cli.exe") version
+
       - name: Install dependencies
         if: env.FULL_INSTALL == 'true' || steps.scope.outputs.code == 'true'
         run: pip install -e . && pip install pytest pytest-cov
@@ -357,7 +407,7 @@ jobs:
           from cartograph.languages import supported_languages
           langs = set(supported_languages())
           expected = {'angular', 'blender', 'csharp', 'flutter', 'gdscript', 'go', 'java', 'javascript',
-                      'lean', 'nim', 'openscad', 'php', 'python', 'rust',
+                      'kicad', 'lean', 'nim', 'openscad', 'php', 'python', 'rust',
                       'spice', 'systemverilog', 'terraform', 'typescript'}
           missing = expected - langs
           assert not missing, f'engines missing from wheel install: {missing}'
