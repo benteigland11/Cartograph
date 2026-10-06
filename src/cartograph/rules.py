@@ -57,6 +57,7 @@ _LANGUAGE_RULES = {
     "lean":          ("rules.lean.py",       [sys.executable]),
     "csharp":        ("rules.csharp.py",     [sys.executable]),
     "flutter":       ("rules.flutter.py",    [sys.executable]),
+    "blender":       ("rules.blender.py",    [sys.executable]),
 }
 
 
@@ -1348,6 +1349,91 @@ if __name__ == "__main__":
     main()
 """
 
+_TEMPLATE_BLENDER = """\
+\"\"\"
+Custom validation rules for Blender (bpy) widgets.
+
+HOW THIS WORKS
+--------------
+This file runs automatically during `cartograph validate` (and therefore
+`cartograph checkin`). Cartograph calls it with the widget directory as
+the first argument. Your job is to inspect the widget and report problems.
+
+Print a JSON object to stdout with two keys:
+
+    {"blocks": [...], "warnings": [...]}
+
+  blocks    - hard failures. Checkin is rejected, no override possible.
+  warnings  - soft issues. Checkin pauses, but the user can override with
+              --override-warnings --override-reason "why it's ok".
+
+Empty arrays (or no output at all) means all checks passed.
+
+BLENDER-SPECIFIC CHECKS TO CONSIDER
+-----------------------------------
+The engine already runs the Python contamination scanner, warns on bpy.ops
+in src/, blocks .blend file operators with literal paths, and enforces 80%
+coverage inside headless Blender. Teams often want more on top:
+
+  - Ban bpy.ops entirely in src/ (data API and bmesh only).
+  - Ban bpy.context.active_object / selected_objects in src/ - take objects
+    as parameters.
+  - Require every public function to return what it creates.
+  - Naming: generated datablocks get a caller-supplied name, never a
+    hardcoded one.
+  - Tests must assert a geometric property (counts, dimensions, manifold).
+
+WHAT YOU HAVE ACCESS TO
+-----------------------
+The widget_path argument points to a standard widget directory:
+
+    widget_path/
+      src/        __init__.py + the reusable module(s)
+      tests/      conftest.py + test_*.py (pytest inside Blender)
+      examples/   example_usage.py
+      widget.json
+
+This script runs under your normal Python, not inside Blender - parse the
+source with `ast`, don't import bpy.
+EXAMPLE
+-------
+\"\"\"
+import ast
+import json
+import os
+import sys
+
+
+def main() -> None:
+    widget_path = sys.argv[1] if len(sys.argv) > 1 else "."
+    blocks: list[str] = []
+    warnings: list[str] = []
+
+    src_dir = os.path.join(widget_path, "src")
+    for root, _dirs, files in os.walk(src_dir):
+        for fname in files:
+            if not fname.endswith(".py"):
+                continue
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, widget_path)
+            with open(fpath, encoding="utf-8", errors="replace") as f:
+                tree = ast.parse(f.read())
+            # [TODO] Replace with your team's checks. Example: no reliance on
+            # the active object in reusable code.
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute) and node.attr == "active_object":
+                    warnings.append(
+                        f"{rel}:{node.lineno}: active_object - take the object "
+                        f"as a parameter instead"
+                    )
+
+    print(json.dumps({"blocks": blocks, "warnings": warnings}))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 _TEMPLATE_GDSCRIPT = """\
 \"\"\"
 Custom validation rules for GDScript (Godot 4) widgets.
@@ -1875,6 +1961,7 @@ _TEMPLATES = {
     "spice":         _TEMPLATE_SPICE,
     "rust":          _TEMPLATE_RUST,
     "gdscript":      _TEMPLATE_GDSCRIPT,
+    "blender":       _TEMPLATE_BLENDER,
     "java":          _TEMPLATE_JAVA,
     "lean":          _TEMPLATE_LEAN,
     "csharp":        _TEMPLATE_CSHARP,

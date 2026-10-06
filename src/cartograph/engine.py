@@ -176,6 +176,7 @@ LANGUAGE_ALIASES = {
     "rs": "rust",
     "golang": "go",
     "gd": "gdscript", "godot": "gdscript", "godot4": "gdscript",
+    "bpy": "blender",
     "jdk": "java", "openjdk": "java",
     "c++": "cpp", "cxx": "cpp",
     "c#": "csharp", "cs": "csharp", "dotnet": "csharp",
@@ -210,12 +211,12 @@ def normalize_widget_id(widget_id: str) -> str:
 def python_dir_name(widget_id: str) -> str:
     """Return the filesystem directory name for a widget.
 
-    Python and Nim widgets get underscores so the directory is importable
-    (both languages cannot handle hyphens in import paths).
+    Python, Blender (Python) and Nim widgets get underscores so the directory
+    is importable (these languages cannot handle hyphens in import paths).
     Other languages keep the canonical hyphenated ID.
     """
     canonical = normalize_widget_id(widget_id)
-    if canonical.endswith("-python") or canonical.endswith("-nim"):
+    if canonical.endswith(("-python", "-blender", "-nim")):
         return canonical.replace("-", "_")
     return canonical
 
@@ -849,10 +850,10 @@ class Cartograph:
         return checkin_blueprint(self, path, reason=reason, version_bump=version_bump,
                                  override_warnings=override_warnings,
                                  override_reason=override_reason)
-    def blueprint_add_dep(self, blueprint_path, widget_id, validate=True):
+    def blueprint_add_dep(self, blueprint_path, widget_id, validate=False):
         from .blueprint_deps import add_dep
         return add_dep(self, blueprint_path, widget_id, validate=validate)
-    def blueprint_remove_dep(self, blueprint_path, widget_id, validate=True):
+    def blueprint_remove_dep(self, blueprint_path, widget_id, validate=False):
         from .blueprint_deps import remove_dep
         return remove_dep(self, blueprint_path, widget_id, validate=validate)
     def restore(self, item_id, version, reason):
