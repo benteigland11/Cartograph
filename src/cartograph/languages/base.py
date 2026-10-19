@@ -93,6 +93,11 @@ _DEP_SPLIT_RE = re.compile(r'[><=!~;\[]')
 _PIN_RE = re.compile(r'[><=!~]|\d')
 
 
+def tail(text: str, limit: int) -> str:
+    """A failure's last `limit` characters: a traceback ends with the error, so a head cut loses it."""
+    return text if len(text) <= limit else "..." + text[-limit:]
+
+
 def _dep_bare_name(dep) -> str:
     """Return the bare package name from a dep string like 'fastapi>=0.128.0' or a dict."""
     if isinstance(dep, dict):
@@ -720,7 +725,7 @@ class LanguageEngine:
             return binary
 
     def _fail(self, error: str) -> dict:
-        return {"passed": False, "error": str(error or "Unknown error")[:3000]}
+        return {"passed": False, "error": tail(str(error or "Unknown error"), 3000)}
 
     def _ok(self) -> dict:
         return {"passed": True}

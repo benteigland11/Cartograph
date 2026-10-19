@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 
+from .languages.base import tail as _tail
+
 log = logging.getLogger("cartograph")
 
 
@@ -258,7 +260,7 @@ def validate_item(carto, path):
         if not check(f"{example_file} runs cleanly", example_result["passed"], example_err):
             _print_checklist(checklist, errors, failed=True, test_output=example_err)
             return {"status": "error", "message": f"{example_file} failed to run.",
-                    "test_output": example_err[:500]}
+                    "test_output": _tail(example_err, 1500)}
 
         log.debug("Running tests...")
         result = engine.run_tests(path)
@@ -266,7 +268,7 @@ def validate_item(carto, path):
         if not check("All tests pass", result["passed"], test_error):
             _print_checklist(checklist, errors, failed=True, test_output=test_error)
             return {"status": "error", "message": _test_failure_message(test_error),
-                    "test_output": test_error[:3000]}
+                    "test_output": _tail(test_error, 3000)}
 
         # 9b. Sidecar (e.g. python/ inside an openscad widget)
         sidecar_spec = engine.sidecar()
@@ -291,7 +293,7 @@ def validate_item(carto, path):
                     _print_checklist(checklist, errors, failed=True, test_output=sc_err)
                     return {"status": "error",
                             "message": f"{sc_dir}/ sidecar failed",
-                            "test_output": sc_err[:3000]}
+                            "test_output": _tail(sc_err, 3000)}
 
         # 10. Custom validation rules
         from .rules import run_all_rules
@@ -367,7 +369,7 @@ def _print_checklist(checklist, errors, failed, test_output=None, warnings=None)
     for error in errors:
         log.debug("  Error: %s", error)
     if test_output:
-        log.debug("  Test output: %s", test_output[:500])
+        log.debug("  Test output: %s", _tail(test_output, 500))
     if warnings:
         log.info("Warnings (%d):", len(warnings))
         for w in warnings:

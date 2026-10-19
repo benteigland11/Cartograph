@@ -206,3 +206,18 @@ def test_validate_fails_if_stamp_write_fails(carto, fixture_library, tmp_path):
         result = carto.validate_item(str(widget_path))
     assert result["status"] == "error"
     assert "validation stamp" in result["message"].lower()
+
+
+def test_a_failing_example_reports_the_tail_of_its_output(carto, fixture_library, tmp_path):
+    """A traceback ends with the error: a long failing example's output is cut from the front, not the back."""
+    widget_path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), widget_path)
+    example = next((widget_path / "examples").glob("*.py"))
+    example.write_text(example.read_text() + (
+        "\nimport sys\n"
+        "sys.stderr.write('noise line\\n' * 400)\n"
+        "raise RuntimeError('the real cause is at the end')\n"))
+    result = carto.validate_item(str(widget_path))
+    assert result["status"] == "error" and "failed to run" in result["message"]
+    assert "the real cause is at the end" in result["test_output"]
+    assert result["test_output"].startswith("...")
