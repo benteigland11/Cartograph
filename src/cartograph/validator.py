@@ -219,7 +219,7 @@ def _validate_item(carto, path):
         init_path = os.path.join(path, "src", "__init__.py")
         if language == "python" and os.path.exists(init_path):
             init_result = subprocess.run(
-                [sys.executable, "-c", "import src"],
+                [os.environ.get("CARTOGRAPH_PYTHON") or sys.executable, "-c", "import src"],
                 cwd=path, capture_output=True, text=True, timeout=10
             )
             init_ok = init_result.returncode == 0

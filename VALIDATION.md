@@ -68,6 +68,14 @@ Nim coverage would require compiling via `--debugger:native` and running `gcov`/
 | `src/__init__.py` exists | missing | file check |
 | No print() in src/ | present | AST (ignores docstrings) |
 
+**Validation interpreter:** widgets are validated with the interpreter
+Cartograph runs on, unless `CARTOGRAPH_PYTHON` names another. Then the
+validation venv is made from that interpreter and inherits its package
+directories (including any a `.pth` adds), heavy ML frameworks are looked up
+there, and the `src` import check, sidecar pytest runs and the runtime version
+stamped at checkin use it. Use it when a heavy dependency such as torch is
+installed for a different Python than Cartograph's.
+
 ### JavaScript/TypeScript
 
 | Check | Fails if | Method |

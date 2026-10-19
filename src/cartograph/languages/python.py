@@ -158,6 +158,15 @@ class PythonEngine(LanguageEngine):
         return True
 
     def runtime_version(self) -> str | None:
+        if os.environ.get("CARTOGRAPH_PYTHON"):
+            import subprocess
+            try:
+                out = subprocess.run([self.validation_python(), "-c",
+                                      "import sys; print('%d.%d.%d' % sys.version_info[:3])"],
+                                     capture_output=True, text=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                return None
+            return f"python {out.stdout.strip()}" if out.returncode == 0 and out.stdout.strip() else None
         v = sys.version_info
         return f"python {v.major}.{v.minor}.{v.micro}"
 
@@ -166,7 +175,7 @@ class PythonEngine(LanguageEngine):
         missing = []
         for tool in ("pytest", "coverage"):
             r = subprocess.run(
-                [sys.executable, "-m", tool, "--version"],
+                [self.validation_python(), "-m", tool, "--version"],
                 capture_output=True,
             )
             if r.returncode != 0:
@@ -489,21 +498,43 @@ class PythonEngine(LanguageEngine):
                     "error": (res.stderr or res.stdout or "").strip()}
         return {"passed": True}
 
+    @staticmethod
+    def validation_python() -> str:
+        """The interpreter widgets are validated with: ``$CARTOGRAPH_PYTHON`` when the
+        environment names one (heavy dependencies such as torch installed for another
+        Python), else the interpreter Cartograph runs on."""
+        return os.environ.get("CARTOGRAPH_PYTHON") or sys.executable
+
     def _venv_python(self) -> str:
-        """Return the venv python path if a venv was created, else sys.executable."""
-        return getattr(self, "_venv_py", sys.executable)
+        """Return the venv python path if a venv was created, else the validation interpreter."""
+        return getattr(self, "_venv_py", None) or self.validation_python()
 
     @staticmethod
     def _inherit_parent_site_packages(venv_dir: str) -> None:
         """When cartograph itself runs inside a venv, let the throwaway venv see that
-        venv's packages too (system_site_packages only reaches the base interpreter)."""
+        venv's packages too (system_site_packages only reaches the base interpreter).
+        With CARTOGRAPH_PYTHON, that interpreter's package directories are inherited
+        instead, including any a .pth adds (a .pth listed in another .pth is never
+        processed, so the directories are written out)."""
         import site
-        if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
-            return
-        try:
-            parents = [p for p in site.getsitepackages() if os.path.isdir(p)]
-        except Exception:  # noqa: BLE001
-            return
+        external = os.environ.get("CARTOGRAPH_PYTHON")
+        if external:
+            import json
+            import subprocess
+            try:
+                out = subprocess.run([external, "-c", "import json,sys; print(json.dumps([p for p in sys.path if "
+                                      "p.endswith(('site-packages', 'dist-packages'))]))"],
+                                     capture_output=True, text=True, timeout=30)
+                parents = [p for p in json.loads(out.stdout or "[]") if os.path.isdir(p)]
+            except Exception:  # noqa: BLE001
+                return
+        else:
+            if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
+                return
+            try:
+                parents = [p for p in site.getsitepackages() if os.path.isdir(p)]
+            except Exception:  # noqa: BLE001
+                return
         for lib in (os.path.join(venv_dir, "lib"), os.path.join(venv_dir, "Lib")):
             if not os.path.isdir(lib):
                 continue
@@ -570,7 +601,16 @@ class PythonEngine(LanguageEngine):
         _MAX_RETRIES = 3
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
-                venv.create(venv_dir, with_pip=True, system_site_packages=True)
+                external = os.environ.get("CARTOGRAPH_PYTHON")
+                if external:
+                    import subprocess
+                    made = subprocess.run([external, "-m", "venv", "--system-site-packages", venv_dir],
+                                          capture_output=True, text=True, timeout=120)
+                    if made.returncode != 0:
+                        raise OSError(made.returncode, "CARTOGRAPH_PYTHON could not make a venv: "
+                                      + (made.stderr or made.stdout)[:500])
+                else:
+                    venv.create(venv_dir, with_pip=True, system_site_packages=True)
                 break
             except (OSError, PermissionError) as exc:
                 _errno = getattr(exc, "errno", None)
@@ -609,9 +649,8 @@ class PythonEngine(LanguageEngine):
                 # by Cartograph because they are large, hardware-dependent, and may require
                 # specific CUDA versions. They must be pre-installed in the user's environment.
                 # With system_site_packages=True, the venv inherits them automatically.
-                import importlib.util
-                import_name = base_name.replace("-", "_")
-                if importlib.util.find_spec(import_name) is None:
+                # Asked of the venv that will run the tests, not of the interpreter Cartograph runs on.
+                if not self._importable(py, base_name):
                     raise RuntimeError(
                         f"'{dep_name}' is a heavy ML framework that must be pre-installed before "
                         f"validation. Install it in your environment first, then re-run validation.\n"
@@ -729,7 +768,7 @@ class PythonEngine(LanguageEngine):
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         res = subprocess.run(
             [
-                sys.executable, "-m", "pytest", f"{subdir}/",
+                self.validation_python(), "-m", "pytest", f"{subdir}/",
                 f"--cov={subdir}",
                 f"--cov-fail-under={coverage}",
                 "--cov-report=term-missing",
