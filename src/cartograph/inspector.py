@@ -176,6 +176,9 @@ def inspect(carto, widget_id, show_source=False, show_all_versions=False,
 
     result["kind"] = "widget"
     result["api"] = _api(os.path.join(read_path, "src"))
+    # Canonical notes for its language and domain (validate and checkin restore this text into widget.json).
+    from .scaffolding import _library_notes
+    result["library_notes"] = _library_notes(result["language"], result["domain"])
     if show_source:
         result["source"] = _read_dir(os.path.join(read_path, "src"))
     if show_reviews:

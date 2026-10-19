@@ -20,6 +20,9 @@ _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "library_config.jso
 
 def _library_notes(language: str, domain: str = "") -> dict:
     """Load general + language-specific + domain-specific notes from library_config.json."""
+    if isinstance(language, list):
+        language = language[0] if language else ""
+    language, domain = str(language or ""), str(domain or "")
     try:
         with open(_CONFIG_PATH, encoding="utf-8") as f:
             cfg = json.load(f)

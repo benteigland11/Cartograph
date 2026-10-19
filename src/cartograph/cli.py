@@ -751,6 +751,26 @@ def cmd_delete(args):
     out(result)
 
 
+def cmd_notes(args):
+    """Library notes for a widget, from Cartograph's rules for its language and domain.
+
+    The canonical text (the same text create writes and validate/checkin
+    restore into widget.json): a working copy's language and domain come from
+    its manifest (or --language/--domain), the notes from library_config.json."""
+    language, domain = args.language, args.domain
+    if not language or not domain:
+        manifest_path = os.path.join(os.path.abspath(args.path), "widget.json")
+        try:
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = json.load(f)
+        except (OSError, ValueError) as e:
+            err({"error": f"Could not read {manifest_path} ({e}); pass --language and --domain."})
+        language = language or (manifest.get("tech_stack") or {}).get("language", "")
+        domain = domain or (manifest.get("meta") or {}).get("domain", "")
+    from .scaffolding import _library_notes
+    out({"language": language, "domain": domain, "library_notes": _library_notes(language, domain)})
+
+
 def cmd_create(args):
     _preflight_language(args.language)
     target_abs = os.path.abspath(args.target)
@@ -3948,6 +3968,17 @@ def _build_cli() -> AgentCLI:
                          "Defaults to the title-cased slug."},
                 {"name": "--target", "default": ".",
                  "help": "Project root to create the widget under (widget lands in <target>/cg/<widget_id>/). Default: ."},
+            ],
+        },
+        {
+            "name": "notes",
+            "help": "Show the library notes (Cartograph's rules) for a widget's language and domain",
+            "handler": cmd_notes,
+            "args": [
+                {"name": "path", "nargs": "?", "default": ".",
+                 "help": "Widget directory whose widget.json names the language and domain. Default: ."},
+                {"name": "--language", "default": None, "help": "Language, instead of reading widget.json"},
+                {"name": "--domain", "default": None, "help": "Domain, instead of reading widget.json"},
             ],
         },
         {

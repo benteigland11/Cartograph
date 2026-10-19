@@ -122,3 +122,9 @@ def test_inspect_result_carries_api_without_source(carto):
     plain = carto.inspect(wid)
     assert "api" in plain and "source" not in plain
     assert "source" in carto.inspect(wid, show_source=True)
+
+
+def test_inspect_carries_the_canonical_library_notes(carto):
+    wid = carto.widgets[0]["id"]
+    notes = carto.inspect(wid)["library_notes"]
+    assert notes.get("general", "").startswith("Single responsibility")
