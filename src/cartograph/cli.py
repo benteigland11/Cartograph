@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import urllib.parse
 import zipfile
 from io import BytesIO
@@ -2479,30 +2480,59 @@ def cmd_setup_mathlib(args):
         err({"error": f"provisioning failed: {result.status.reason}"})
 
 
-def doctor_languages() -> dict:
-    """Every language engine: ready or not, its versions, and each toolchain binary resolved to the path validation
-    uses (a config override or PATH). The machine-readable half of `doctor`, for hosts that grant toolchains."""
-    from .languages.registry import _ENGINES
-    out = {}
-    for lang_name, engine in sorted(_ENGINES.items()):
+DOCTOR_PROBE_SECONDS = 60
+
+
+def _probe_engine(engine) -> dict:
+    try:
+        available, message = engine.check_available()
+    except Exception as e:  # noqa: BLE001
+        available, message = False, str(e)
+    binaries = {}
+    for binary in getattr(engine, "toolchain", {}) or {}:
         try:
-            available, message = engine.check_available()
-        except Exception as e:  # noqa: BLE001
-            available, message = False, str(e)
-        binaries = {}
-        for binary in getattr(engine, "toolchain", {}) or {}:
-            try:
-                resolved = engine.resolved_binary(binary)
-            except Exception:  # noqa: BLE001
-                resolved = None
-            if resolved:
-                binaries[binary] = dict(path=resolved.path, real=os.path.realpath(resolved.path),
-                                        source=resolved.source)
-        out[lang_name] = dict(ready=bool(available), message=None if available else message,
-                              engine_version=getattr(engine, "validation_version", None),
-                              runtime_version=engine.runtime_version() if available else None,
-                              binaries=binaries)
-    return out
+            resolved = engine.resolved_binary(binary)
+        except Exception:  # noqa: BLE001
+            resolved = None
+        if resolved:
+            binaries[binary] = dict(path=resolved.path, real=os.path.realpath(resolved.path),
+                                    source=resolved.source)
+    try:
+        runtime = engine.runtime_version() if available else None
+    except Exception:  # noqa: BLE001
+        runtime = None
+    return dict(ready=bool(available), message=None if available else message,
+                engine_version=getattr(engine, "validation_version", None),
+                runtime_version=runtime, binaries=binaries)
+
+
+def doctor_languages(engines=None, timeout: float = DOCTOR_PROBE_SECONDS) -> dict:
+    """Every language engine: ready or not, its versions, and each toolchain binary resolved to the path validation
+    uses (a config override or PATH). The machine-readable half of `doctor`, for hosts that grant toolchains.
+
+    Engines are probed in parallel daemon threads, and one that does not answer within `timeout` seconds is reported
+    as not ready instead of hanging doctor (on Windows a toolchain's helper process can keep a probe's pipes open
+    past its own timeout)."""
+    import threading
+    if engines is None:
+        from .languages.registry import _ENGINES as engines
+    results: dict = {}
+
+    def probe(name, engine):
+        results[name] = _probe_engine(engine)
+
+    threads = {name: threading.Thread(target=probe, args=(name, engine), daemon=True)
+               for name, engine in engines.items()}
+    for thread in threads.values():
+        thread.start()
+    deadline = time.monotonic() + timeout
+    for thread in threads.values():
+        thread.join(max(0.0, deadline - time.monotonic()))
+    return {name: results.get(name) or dict(
+                ready=False, message=f"probe did not answer within {timeout:g}s",
+                engine_version=getattr(engines[name], "validation_version", None),
+                runtime_version=None, binaries={})
+            for name in sorted(engines)}
 
 
 def cmd_doctor(args):
