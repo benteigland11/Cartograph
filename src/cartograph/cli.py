@@ -2479,9 +2479,39 @@ def cmd_setup_mathlib(args):
         err({"error": f"provisioning failed: {result.status.reason}"})
 
 
+def doctor_languages() -> dict:
+    """Every language engine: ready or not, its versions, and each toolchain binary resolved to the path validation
+    uses (a config override or PATH). The machine-readable half of `doctor`, for hosts that grant toolchains."""
+    from .languages.registry import _ENGINES
+    out = {}
+    for lang_name, engine in sorted(_ENGINES.items()):
+        try:
+            available, message = engine.check_available()
+        except Exception as e:  # noqa: BLE001
+            available, message = False, str(e)
+        binaries = {}
+        for binary in getattr(engine, "toolchain", {}) or {}:
+            try:
+                resolved = engine.resolved_binary(binary)
+            except Exception:  # noqa: BLE001
+                resolved = None
+            if resolved:
+                binaries[binary] = dict(path=resolved.path, real=os.path.realpath(resolved.path),
+                                        source=resolved.source)
+        out[lang_name] = dict(ready=bool(available), message=None if available else message,
+                              engine_version=getattr(engine, "validation_version", None),
+                              runtime_version=engine.runtime_version() if available else None,
+                              binaries=binaries)
+    return out
+
+
 def cmd_doctor(args):
     import shutil
     import subprocess
+
+    if getattr(args, "as_json", False):
+        print(json.dumps(dict(languages=doctor_languages()), indent=1))
+        return
 
     groups = []  # list of (group_name, [(label, ok, detail, fix), ...])
 
@@ -4282,7 +4312,10 @@ def _build_cli() -> AgentCLI:
             "name": "doctor",
             "help": "Check language engine dependencies",
             "handler": cmd_doctor,
-            "args": [],
+            "args": [
+                {"name": "--json", "action": "store_true", "default": False, "dest": "as_json",
+                 "help": "Languages only, as JSON: readiness, versions and each toolchain binary's resolved path"},
+            ],
         },
         {
             "name": "setup-mathlib",
