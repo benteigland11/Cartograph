@@ -14,6 +14,14 @@ What Cartograph checks for, per language. Every check here was a deliberate deci
 8. Custom rules (if configured)
 9. Uniqueness check (implementation hash)
 
+The example and the tests run with `CARTOGRAPH_VALIDATION_RUN` in their
+environment and, on Linux, with the validator as their child subreaper:
+whatever they start and leave running is named, stopped, and fails
+validation. Widget source may start a service meant to outlive a call; its
+example and tests show it stopped. Every validate, passed or failed, removes
+the widget's build and validation artifacts (the language's artifact list and
+the dependency-cache stamp) when it ends.
+
 ## Shared Checks (All Languages)
 
 These are requirements. Validation fails if any are not met.
@@ -30,8 +38,10 @@ These are requirements. Validation fails if any are not met.
 | src/, tests/, examples/ exist with files | missing or empty |
 | No widget-on-widget dependencies | present |
 | Dependencies have version pins | missing version spec |
-| Example runs cleanly | exits non-zero |
+| Example runs cleanly | exits non-zero (the tail of its output is reported) |
+| Example leaves nothing running | a process it started still runs afterwards (Linux) |
 | Tests pass | any test fails |
+| Tests leave nothing running | a process they started still runs afterwards (Linux) |
 | Implementation is unique (hash) | duplicate found |
 
 ## Coverage
