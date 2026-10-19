@@ -254,8 +254,30 @@ def validate_item(carto, path):
             _print_checklist(checklist, errors, failed=True)
             return {"status": "error", "message": f"Dependency install failed: {e}"}
 
+        from . import leftovers
+
+        def tracked(run):
+            """Run the example or the tests, tracking what they abandon (leftovers.run_tracked); a process left
+            holding the run's output open makes the run time out, and is reported as what was left running."""
+            def guarded():
+                try:
+                    return run()
+                except subprocess.TimeoutExpired as error:
+                    return {"passed": False, "error": f"timed out after {error.timeout} s"}
+            return leftovers.run_tracked(guarded)
+
+        def left_running(what, left):
+            if not check(f"{what} leaves nothing running", not left, leftovers.describe(left) if left else None):
+                _print_checklist(checklist, errors, failed=True)
+                return {"status": "error", "message": f"{what} left processes running.",
+                        "test_output": leftovers.describe(left)}
+            return None
+
         log.debug("Running example...")
-        example_result = engine.run_example(path)
+        example_result, example_left = tracked(lambda: engine.run_example(path))
+        failure = left_running(example_file, example_left)
+        if failure:
+            return failure
         example_err = example_result.get("error", "")
         if not check(f"{example_file} runs cleanly", example_result["passed"], example_err):
             _print_checklist(checklist, errors, failed=True, test_output=example_err)
@@ -263,7 +285,10 @@ def validate_item(carto, path):
                     "test_output": _tail(example_err, 1500)}
 
         log.debug("Running tests...")
-        result = engine.run_tests(path)
+        result, tests_left = tracked(lambda: engine.run_tests(path))
+        failure = left_running("Tests", tests_left)
+        if failure:
+            return failure
         test_error = result.get("error", "")
         if not check("All tests pass", result["passed"], test_error):
             _print_checklist(checklist, errors, failed=True, test_output=test_error)
