@@ -3830,7 +3830,7 @@ def _build_cli() -> AgentCLI:
             "args": [
                 {"name": "widget_id",
                  "help": "Module id, directory path, or @owner/id (cloud)"},
-                {"name": "--source", "action": "store_true", "default": False, "help": "Include source files"},
+                {"name": "--source", "action": "store_true", "default": False, "help": "Include full source files (the public API is always shown)"},
                 {"name": "--all-versions", "action": "store_true", "default": False, "dest": "all_versions"},
                 {"name": "--reviews", "action": "store_true", "default": False},
                 {"name": "--version", "default": None, "help": "Inspect a specific historical version"},
