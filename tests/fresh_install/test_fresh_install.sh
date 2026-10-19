@@ -48,7 +48,8 @@ PASS=$((PASS + 1))
 # 4. Setup - generates agent instructions (auto-detects or uses --agent)
 check "cartograph setup" cartograph setup --agent claude
 
-# 5. Create a widget
+# 5. Search the library, then create a widget (create refuses in a project that never searched)
+check "cartograph search" cartograph search "hello world greeting" --local-only
 check "cartograph create" cartograph create backend-hello-python \
     --language python --domain backend --name "Hello World"
 

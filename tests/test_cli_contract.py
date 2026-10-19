@@ -199,3 +199,41 @@ def test_create_in_library_errors_with_json(cli_env, tmp_library):
     assert "error" in result or result.get("status") == "error"
     msg = result.get("error", "") or result.get("message", "")
     assert "library" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# create — search before create
+# ---------------------------------------------------------------------------
+
+def _create(project, env, *extra):
+    return _run(["create", "csv-mean", "--language", "python", "--domain", "data", *extra],
+                env, str(project))
+
+
+def test_create_refuses_in_a_project_that_never_searched(cli_env, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    rc, stdout, stderr = _create(project, cli_env)
+    assert rc != 0
+    msg = _parse_json_stdout(stdout, stderr).get("error", "")
+    assert "search" in msg.lower() and "--unsearched" in msg
+    assert not (project / "cg" / "data_csv_mean_python").exists()
+
+
+def test_create_proceeds_after_a_search_from_the_project(cli_env, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    rc, stdout, stderr = _run(["search", "mean of a csv column", "--local-only"], cli_env, str(project))
+    assert rc == 0, stderr
+    assert "mean of a csv column" in (project / "cg" / ".searched").read_text(encoding="utf-8")
+    rc, stdout, stderr = _create(project, cli_env)
+    assert rc == 0, stdout + stderr
+    assert (project / "cg" / "data_csv_mean_python" / "widget.json").exists()
+
+
+def test_create_unsearched_skips_the_check(cli_env, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    rc, stdout, stderr = _create(project, cli_env, "--unsearched")
+    assert rc == 0, stdout + stderr
+    assert (project / "cg" / "data_csv_mean_python" / "widget.json").exists()

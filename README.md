@@ -60,7 +60,10 @@ This auto-detects your agent (Claude, Cursor, Codex, Gemini) and appends Cartogr
 ## Example workflow
 
 ```bash
-# Create a new widget
+# Search first: install or extend a widget that fits
+cartograph search "retry with exponential backoff" --language python --top-k 3
+
+# Nothing fits: create a new widget (create refuses in a project that has never searched; --unsearched skips that)
 cartograph create backend-retry-backoff-python --language python --domain backend
 
 # Write your code in cg/backend_retry_backoff_python/src/ and tests/
@@ -91,7 +94,7 @@ The commands you'll reach for daily. All run from your project root.
 ```
 cartograph search <query>                              # find a widget
 cartograph install <widget_id>                         # install into cg/
-cartograph create <name> --domain <d> --language <l>   # scaffold a new widget
+cartograph create <name> --domain <d> --language <l>   # scaffold a new widget (after a search)
 cartograph validate [path]                             # run the full pipeline
 cartograph checkin [path] --reason "..."               # push edits back
 cartograph status                                      # installed widgets

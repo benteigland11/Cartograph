@@ -402,6 +402,26 @@ def _search_row(w):
     return row
 
 
+SEARCH_MARK = ".searched"
+
+
+def _note_search(project_dir, query):
+    """Record that the library was searched from this project (create checks for it)."""
+    from .engine import DEFAULT_INSTALL_DIR
+    cg_dir = os.path.join(project_dir, DEFAULT_INSTALL_DIR)
+    try:
+        os.makedirs(cg_dir, exist_ok=True)
+        with open(os.path.join(cg_dir, SEARCH_MARK), "a", encoding="utf-8") as handle:
+            handle.write(query.replace("\n", " ") + "\n")
+    except OSError:
+        pass
+
+
+def _searched_here(project_dir):
+    from .engine import DEFAULT_INSTALL_DIR
+    return os.path.exists(os.path.join(project_dir, DEFAULT_INSTALL_DIR, SEARCH_MARK))
+
+
 def cmd_search(args):
     # Validate flag combinations before any work
     registries_filter = getattr(args, "registries", None) or None
@@ -418,6 +438,7 @@ def cmd_search(args):
         language_filter=args.language,
         top_k=args.top_k,
     )
+    _note_search(os.getcwd(), args.query)
 
     # Search registries if cloud is enabled and not --local-only
     from .config import cloud_enabled
@@ -788,6 +809,15 @@ def cmd_create(args):
             f"Refusing to create a widget inside the library at {lib_abs}. "
             f"Run the command from your project root without --target (defaults to .); "
             f"then `cartograph checkin` publishes it to the library."
+        )})
+    # Search is cheap and a near-duplicate widget is not: a project that has
+    # never searched the library cannot create in it. Five agent tasks in a
+    # row minted overlapping CSV widgets without one search.
+    if not getattr(args, "unsearched", False) and not _searched_here(target_abs):
+        err({"error": (
+            "No library search has been run in this project. Search first - "
+            f"`cartograph search \"<what it must do>\" --language {args.language} --top-k 3` - and install or "
+            "extend a widget that fits; create only if nothing does (or pass --unsearched to skip this check)."
         )})
     result = _carto().create(
         item_id=args.widget_id,
@@ -3968,6 +3998,8 @@ def _build_cli() -> AgentCLI:
                          "Defaults to the title-cased slug."},
                 {"name": "--target", "default": ".",
                  "help": "Project root to create the widget under (widget lands in <target>/cg/<widget_id>/). Default: ."},
+                {"name": "--unsearched", "action": "store_true",
+                 "help": "Create without a prior `cartograph search` in this project (refused by default)."},
             ],
         },
         {
