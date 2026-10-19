@@ -786,7 +786,11 @@ distro builds report a different interpreter in `sys.executable` than the
 one they embed (Fedora's Blender names Homebrew's python when it is first
 on PATH), so `<sys.executable> -m pip` can install for the wrong ABI;
 pip-inside-Blender always matches. Nothing is written into Blender's own
-install. First use needs PyPI; afterwards validation is offline.
+install. First use needs PyPI; afterwards validation is offline. An
+environment with no network can ship the tools instead: set
+`CARTOGRAPH_BLENDER_TEST_TOOLS` to a root holding `py<X.Y>/pytest` and
+`py<X.Y>/pytest_cov`, and a matching version is used as is before the
+data-dir install (a root without this Blender's Python version falls back).
 
 **Dependencies (v1):** the standard library and what Blender bundles
 (`bpy`, `bmesh`, `mathutils`, `bpy_extras`, `bl_math`, `gpu`,

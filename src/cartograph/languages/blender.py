@@ -285,7 +285,13 @@ class BlenderEngine(LanguageEngine):
         Installed once per Blender Python version into the Cartograph data
         dir and reused; widget dependencies are refused in validate_widget."""
         info = self._interpreter_info()
-        tools = os.path.join(self._tools_root(), f"py{'.'.join(info['python'].split('.')[:2])}")
+        version = f"py{'.'.join(info['python'].split('.')[:2])}"
+        # An environment that ships the tools (an image with no network) names their root; it is used as is.
+        shipped = os.environ.get("CARTOGRAPH_BLENDER_TEST_TOOLS", "").strip()
+        if shipped and all(os.path.isdir(os.path.join(shipped, version, m)) for m in ("pytest", "pytest_cov")):
+            self._tools_dir = os.path.join(shipped, version)
+            return
+        tools = os.path.join(self._tools_root(), version)
         if all(os.path.isdir(os.path.join(tools, m)) for m in ("pytest", "pytest_cov")):
             self._tools_dir = tools
             return
