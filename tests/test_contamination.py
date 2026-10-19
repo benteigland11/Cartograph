@@ -3373,3 +3373,16 @@ def test_bundled_modules_are_known_without_being_declared(tmp_path):
     result = PythonEngine().scan_contamination(str(tmp_path), {"dependencies": [], "bundled_modules": ["bpy"]})
     assert not any("'bpy'" in f for f in result["blocks"] + result["warnings"])
     assert any("'requests'" in b for b in result["blocks"])
+
+
+def test_a_bundled_wheel_path_declares_its_distribution(tmp_path):
+    """A dependency given as a bundled wheel path declares the distribution its file name names."""
+    from cartograph.languages.base import _dep_bare_name
+    from cartograph.languages.python import PythonEngine
+    assert _dep_bare_name("wheels/mido-1.3.3-py3-none-any.whl") == "mido"
+    assert _dep_bare_name("wheels\\typing_extensions-4.12.2-py3-none-any.whl") == "typing_extensions"
+    src = tmp_path/"src"
+    src.mkdir()
+    (src/"reader.py").write_text("import mido\n")
+    result = PythonEngine().scan_contamination(str(tmp_path), {"dependencies": ["wheels/mido-1.3.3-py3-none-any.whl"]})
+    assert not any("'mido'" in f for f in result["blocks"] + result["warnings"]), result
