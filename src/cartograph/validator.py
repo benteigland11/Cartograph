@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 
+from .languages.base import tail as _tail
+
 log = logging.getLogger("cartograph")
 
 
@@ -31,7 +33,55 @@ VALID_DOMAINS = _load_domains()
 
 
 def validate_item(carto, path):
-    """Validate a widget directory before checkin."""
+    """Validate a widget directory before checkin. Every validate installs what it needs and removes what it built
+    when it ends, passed or failed: the widget dir holds its source, never a venv or a cache."""
+    try:
+        return _validate_item(carto, path)
+    finally:
+        language = "python"
+        try:
+            with open(os.path.join(path, "widget.json"), encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            language = (manifest.get("tech_stack") or {}).get("language") or manifest.get("language") or "python"
+        except (OSError, ValueError, AttributeError):
+            pass
+        if os.path.isdir(path):
+            clean_validation_artifacts(path, language)
+
+
+def clean_validation_artifacts(widget_path: str, language: str) -> None:
+    """Remove build and validation artifacts from a widget dir in place: the language's artifact list (the one
+    checkin applies when it copies into the library) and the dependency-cache stamp."""
+    from .safefs import robust_rmtree
+    from .dep_cache import DEP_STAMP_FILE
+    try:
+        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+            excludes_for,
+        )
+        skip_names = set(excludes_for(language=language))
+    except ImportError:
+        skip_names = {"__pycache__", ".pytest_cache", ".venv", "node_modules",
+                      ".coverage", "coverage"}
+    skip_names |= {".coverage", DEP_STAMP_FILE}
+    skip_names -= {".git"}
+    for root, dirs, files in os.walk(widget_path, topdown=True):
+        for d in list(dirs):
+            if d in skip_names:
+                target = os.path.join(root, d)
+                if os.path.islink(target):
+                    os.unlink(target)   # a generated link (a flutter widget's lib -> src): never followed
+                else:
+                    robust_rmtree(target, ignore_errors=True)
+                dirs.remove(d)
+        for f in files:
+            if f in skip_names:
+                try:
+                    os.remove(os.path.join(root, f))
+                except OSError:
+                    pass
+
+
+def _validate_item(carto, path):
     checklist = []
     errors = []
 
@@ -169,7 +219,7 @@ def validate_item(carto, path):
         init_path = os.path.join(path, "src", "__init__.py")
         if language == "python" and os.path.exists(init_path):
             init_result = subprocess.run(
-                [sys.executable, "-c", "import src"],
+                [os.environ.get("CARTOGRAPH_PYTHON") or sys.executable, "-c", "import src"],
                 cwd=path, capture_output=True, text=True, timeout=10
             )
             init_ok = init_result.returncode == 0
@@ -252,21 +302,46 @@ def validate_item(carto, path):
             _print_checklist(checklist, errors, failed=True)
             return {"status": "error", "message": f"Dependency install failed: {e}"}
 
+        from . import leftovers
+
+        def tracked(run):
+            """Run the example or the tests, tracking what they abandon (leftovers.run_tracked); a process left
+            holding the run's output open makes the run time out, and is reported as what was left running."""
+            def guarded():
+                try:
+                    return run()
+                except subprocess.TimeoutExpired as error:
+                    return {"passed": False, "error": f"timed out after {error.timeout} s"}
+            return leftovers.run_tracked(guarded)
+
+        def left_running(what, left):
+            if not check(f"{what} leaves nothing running", not left, leftovers.describe(left) if left else None):
+                _print_checklist(checklist, errors, failed=True)
+                return {"status": "error", "message": f"{what} left processes running.",
+                        "test_output": leftovers.describe(left)}
+            return None
+
         log.debug("Running example...")
-        example_result = engine.run_example(path)
+        example_result, example_left = tracked(lambda: engine.run_example(path))
+        failure = left_running(example_file, example_left)
+        if failure:
+            return failure
         example_err = example_result.get("error", "")
         if not check(f"{example_file} runs cleanly", example_result["passed"], example_err):
             _print_checklist(checklist, errors, failed=True, test_output=example_err)
             return {"status": "error", "message": f"{example_file} failed to run.",
-                    "test_output": example_err[:500]}
+                    "test_output": _tail(example_err, 1500)}
 
         log.debug("Running tests...")
-        result = engine.run_tests(path)
+        result, tests_left = tracked(lambda: engine.run_tests(path))
+        failure = left_running("Tests", tests_left)
+        if failure:
+            return failure
         test_error = result.get("error", "")
         if not check("All tests pass", result["passed"], test_error):
             _print_checklist(checklist, errors, failed=True, test_output=test_error)
             return {"status": "error", "message": _test_failure_message(test_error),
-                    "test_output": test_error[:3000]}
+                    "test_output": _tail(test_error, 3000)}
 
         # 9b. Sidecar (e.g. python/ inside an openscad widget)
         sidecar_spec = engine.sidecar()
@@ -291,7 +366,7 @@ def validate_item(carto, path):
                     _print_checklist(checklist, errors, failed=True, test_output=sc_err)
                     return {"status": "error",
                             "message": f"{sc_dir}/ sidecar failed",
-                            "test_output": sc_err[:3000]}
+                            "test_output": _tail(sc_err, 3000)}
 
         # 10. Custom validation rules
         from .rules import run_all_rules
@@ -367,7 +442,7 @@ def _print_checklist(checklist, errors, failed, test_output=None, warnings=None)
     for error in errors:
         log.debug("  Error: %s", error)
     if test_output:
-        log.debug("  Test output: %s", test_output[:500])
+        log.debug("  Test output: %s", _tail(test_output, 500))
     if warnings:
         log.info("Warnings (%d):", len(warnings))
         for w in warnings:

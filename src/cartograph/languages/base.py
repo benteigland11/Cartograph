@@ -93,10 +93,20 @@ _DEP_SPLIT_RE = re.compile(r'[><=!~;\[]')
 _PIN_RE = re.compile(r'[><=!~]|\d')
 
 
+def tail(text: str, limit: int) -> str:
+    """A failure's last `limit` characters: a traceback ends with the error, so a head cut loses it."""
+    return text if len(text) <= limit else "..." + text[-limit:]
+
+
 def _dep_bare_name(dep) -> str:
-    """Return the bare package name from a dep string like 'fastapi>=0.128.0' or a dict."""
+    """Return the bare package name from a dep string like 'fastapi>=0.128.0' or a dict.
+
+    A bundled wheel path ('wheels/mido-1.3.3-py3-none-any.whl') names its
+    distribution before the first '-' of the file name."""
     if isinstance(dep, dict):
         return dep.get("name", "")
+    if dep.strip().lower().endswith(".whl"):
+        return os.path.basename(dep.strip().replace("\\", "/")).split("-")[0]
     return _DEP_SPLIT_RE.split(dep)[0].strip()
 
 
@@ -720,7 +730,7 @@ class LanguageEngine:
             return binary
 
     def _fail(self, error: str) -> dict:
-        return {"passed": False, "error": str(error or "Unknown error")[:3000]}
+        return {"passed": False, "error": tail(str(error or "Unknown error"), 3000)}
 
     def _ok(self) -> dict:
         return {"passed": True}

@@ -3344,3 +3344,45 @@ class TestFlutterSpecific:
                       "void pause(Duration d) { sleep(d); }\n")
         assert any("sleep" in w.lower() for w in result["warnings"]), \
             f"non-literal sleep in tests must warn (unknown duration): {result}"
+
+
+def test_a_declared_package_is_honoured_without_being_installed(tmp_path):
+    """Any pip package may be a dependency once declared: the validator's own interpreter need not have it.
+    Pillow provides PIL; an import a declared-but-absent package might provide is a warning, not a block."""
+    from cartograph.languages.python import PythonEngine
+    src = tmp_path/"src"
+    src.mkdir()
+    (src/"frame.py").write_text("from PIL import Image\nimport some_unknown_module\n")
+    lang = PythonEngine()
+    pillow = lang.scan_contamination(str(tmp_path), {"dependencies": ["Pillow>=9.0"]})
+    assert not any("'pil'" in f for f in pillow["blocks"] + pillow["warnings"])
+    bare = lang.scan_contamination(str(tmp_path), {"dependencies": []})
+    assert any("'pil'" in b for b in bare["blocks"]) and any("'some_unknown_module'" in b for b in bare["blocks"])
+    absent = lang.scan_contamination(str(tmp_path), {"dependencies": ["not-installed-anywhere-pkg"]})
+    assert not any("some_unknown_module" in b for b in absent["blocks"])
+    assert any("some_unknown_module" in w and "not-installed-anywhere-pkg" in w for w in absent["warnings"])
+
+
+def test_bundled_modules_are_known_without_being_declared(tmp_path):
+    """A host engine's bundled modules (Blender's bpy, KiCad's pcbnew) are known to the Python scanner
+    without being dependencies, so an unlisted import beside them still blocks."""
+    from cartograph.languages.python import PythonEngine
+    src = tmp_path/"src"
+    src.mkdir()
+    (src/"scene.py").write_text("import bpy\nimport requests\n")
+    result = PythonEngine().scan_contamination(str(tmp_path), {"dependencies": [], "bundled_modules": ["bpy"]})
+    assert not any("'bpy'" in f for f in result["blocks"] + result["warnings"])
+    assert any("'requests'" in b for b in result["blocks"])
+
+
+def test_a_bundled_wheel_path_declares_its_distribution(tmp_path):
+    """A dependency given as a bundled wheel path declares the distribution its file name names."""
+    from cartograph.languages.base import _dep_bare_name
+    from cartograph.languages.python import PythonEngine
+    assert _dep_bare_name("wheels/mido-1.3.3-py3-none-any.whl") == "mido"
+    assert _dep_bare_name("wheels\\typing_extensions-4.12.2-py3-none-any.whl") == "typing_extensions"
+    src = tmp_path/"src"
+    src.mkdir()
+    (src/"reader.py").write_text("import mido\n")
+    result = PythonEngine().scan_contamination(str(tmp_path), {"dependencies": ["wheels/mido-1.3.3-py3-none-any.whl"]})
+    assert not any("'mido'" in f for f in result["blocks"] + result["warnings"]), result

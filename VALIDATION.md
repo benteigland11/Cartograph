@@ -14,6 +14,14 @@ What Cartograph checks for, per language. Every check here was a deliberate deci
 8. Custom rules (if configured)
 9. Uniqueness check (implementation hash)
 
+The example and the tests run with `CARTOGRAPH_VALIDATION_RUN` in their
+environment and, on Linux, with the validator as their child subreaper:
+whatever they start and leave running is named, stopped, and fails
+validation. Widget source may start a service meant to outlive a call; its
+example and tests show it stopped. Every validate, passed or failed, removes
+the widget's build and validation artifacts (the language's artifact list and
+the dependency-cache stamp) when it ends.
+
 ## Shared Checks (All Languages)
 
 These are requirements. Validation fails if any are not met.
@@ -30,8 +38,10 @@ These are requirements. Validation fails if any are not met.
 | src/, tests/, examples/ exist with files | missing or empty |
 | No widget-on-widget dependencies | present |
 | Dependencies have version pins | missing version spec |
-| Example runs cleanly | exits non-zero |
+| Example runs cleanly | exits non-zero (the tail of its output is reported) |
+| Example leaves nothing running | a process it started still runs afterwards (Linux) |
 | Tests pass | any test fails |
+| Tests leave nothing running | a process they started still runs afterwards (Linux) |
 | Implementation is unique (hash) | duplicate found |
 
 ## Coverage
@@ -67,6 +77,14 @@ Nim coverage would require compiling via `--debugger:native` and running `gcov`/
 |-------|----------|--------|
 | `src/__init__.py` exists | missing | file check |
 | No print() in src/ | present | AST (ignores docstrings) |
+
+**Validation interpreter:** widgets are validated with the interpreter
+Cartograph runs on, unless `CARTOGRAPH_PYTHON` names another. Then the
+validation venv is made from that interpreter and inherits its package
+directories (including any a `.pth` adds), heavy ML frameworks are looked up
+there, and the `src` import check, sidecar pytest runs and the runtime version
+stamped at checkin use it. Use it when a heavy dependency such as torch is
+installed for a different Python than Cartograph's.
 
 ### JavaScript/TypeScript
 
@@ -773,8 +791,11 @@ dir) on `sys.path` and calls `pytest.main` or runs the example as
 uncaught exception, so results come from the exit status. Validation sets
 `BLENDER_USER_RESOURCES` to a temp dir (no user prefs, add-ons or scripts)
 and `PYTHONNOUSERSITE=1` (no `~/.local` packages), so it sees a factory
-Blender and works where `$HOME` is read-only. Never the UI and never a GPU
-render - EEVEE needs a GPU that CI and sandboxes don't have.
+Blender and works where `$HOME` is read-only. Never the UI, and tests and
+examples never render on the GPU - EEVEE needs a GPU that CI and sandboxes
+don't have. The rule scopes validation runs, not the module: a widget may take
+a render device as a parameter, and a project renders on whatever GPU its
+environment provides.
 
 **Test tools:** pytest + pytest-cov are installed once per Blender Python
 version (e.g. `py3.11` for 4.2, `py3.13` for 5.2) into
@@ -783,7 +804,11 @@ distro builds report a different interpreter in `sys.executable` than the
 one they embed (Fedora's Blender names Homebrew's python when it is first
 on PATH), so `<sys.executable> -m pip` can install for the wrong ABI;
 pip-inside-Blender always matches. Nothing is written into Blender's own
-install. First use needs PyPI; afterwards validation is offline.
+install. First use needs PyPI; afterwards validation is offline. An
+environment with no network can ship the tools instead: set
+`CARTOGRAPH_BLENDER_TEST_TOOLS` to a root holding `py<X.Y>/pytest` and
+`py<X.Y>/pytest_cov`, and a matching version is used as is before the
+data-dir install (a root without this Blender's Python version falls back).
 
 **Dependencies (v1):** the standard library and what Blender bundles
 (`bpy`, `bmesh`, `mathutils`, `bpy_extras`, `bl_math`, `gpu`,

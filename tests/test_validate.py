@@ -6,6 +6,7 @@ and {"status": "success", ...} on success.
 import os
 import json
 import shutil
+import sys
 from unittest.mock import patch
 import pytest
 
@@ -206,3 +207,85 @@ def test_validate_fails_if_stamp_write_fails(carto, fixture_library, tmp_path):
         result = carto.validate_item(str(widget_path))
     assert result["status"] == "error"
     assert "validation stamp" in result["message"].lower()
+
+
+def test_a_failing_example_reports_the_tail_of_its_output(carto, fixture_library, tmp_path):
+    """A traceback ends with the error: a long failing example's output is cut from the front, not the back."""
+    widget_path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), widget_path)
+    example = next((widget_path / "examples").glob("*.py"))
+    example.write_text(example.read_text() + (
+        "\nimport sys\n"
+        "sys.stderr.write('noise line\\n' * 400)\n"
+        "raise RuntimeError('the real cause is at the end')\n"))
+    result = carto.validate_item(str(widget_path))
+    assert result["status"] == "error" and "failed to run" in result["message"]
+    assert "the real cause is at the end" in result["test_output"]
+    assert result["test_output"].startswith("...")
+
+
+_linux_only = pytest.mark.skipif(not sys.platform.startswith("linux"),
+                                 reason="leftover tracking reads /proc and uses a Linux child subreaper")
+
+
+@_linux_only
+def test_an_example_that_leaves_a_process_running_fails_validation(carto, fixture_library, tmp_path):
+    """The example must shut down everything it starts: a detached child still running afterwards is named, stopped,
+    and fails validation. The source may start things meant to outlive a call; the example shows them stopped."""
+    import time
+    widget_path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), widget_path)
+    example = next((widget_path / "examples").glob("*.py"))
+    marker = tmp_path / "child.pid"
+    example.write_text(example.read_text() + (
+        "\nimport subprocess, sys\n"
+        "child = subprocess.Popen(['sleep', '120'], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        f"open({str(marker)!r}, 'w').write(str(child.pid))\n"))
+    result = carto.validate_item(str(widget_path))
+    assert result.get("status") == "error" and "left processes running" in result["message"]
+    assert "sleep 120" in result["test_output"]
+    pid = int(marker.read_text())
+    time.sleep(0.5)
+    assert not os.path.exists(f"/proc/{pid}") or open(f"/proc/{pid}/stat").read().split()[2] == "Z"
+
+
+@_linux_only
+def test_a_test_that_leaves_a_process_running_fails_validation(carto, fixture_library, tmp_path):
+    widget_path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), widget_path)
+    (widget_path / "tests" / "test_leaks_a_child.py").write_text(
+        "import subprocess\n\n"
+        "def test_starts_and_forgets():\n"
+        "    subprocess.Popen(['sleep', '121'], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n")
+    result = carto.validate_item(str(widget_path))
+    assert result.get("status") == "error" and result["message"] == "Tests left processes running."
+    assert "sleep 121" in result["test_output"]
+
+
+def test_a_run_that_starts_nothing_leaves_nothing():
+    from cartograph import leftovers
+    outcome, left = leftovers.run_tracked(lambda: {"passed": True})
+    assert outcome == {"passed": True} and left == []
+    assert leftovers.MARK not in os.environ
+
+
+def test_validate_leaves_no_venv_or_cache_behind(carto, fixture_library, tmp_path):
+    """Every validate installs what it needs and removes it when it ends: only the widget's own files stay."""
+    path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), path)
+    result = carto.validate_item(str(path))
+    assert result.get("status") == "success", result
+    left = {p.name for p in path.rglob("*")}
+    assert not left & {".venv", "__pycache__", ".pytest_cache", ".coverage", ".dep_cache.json"}, left
+    assert (path / "widget.json").exists()
+
+
+def test_a_failed_validate_cleans_up_too(carto, fixture_library, tmp_path):
+    path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), path)
+    example = next((path / "examples").glob("*.py"))
+    example.write_text(example.read_text() + "\nraise SystemExit(1)\n")
+    result = carto.validate_item(str(path))
+    assert result.get("status") == "error" and "failed to run" in result["message"], result
+    left = {p.name for p in path.rglob("*")}
+    assert not left & {".venv", "__pycache__", ".pytest_cache", ".coverage", ".dep_cache.json"}, left

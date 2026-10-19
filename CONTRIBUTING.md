@@ -97,8 +97,9 @@ Dart's nested block comments and raw strings. Coverage floor is the standard
 **Blender-specific notes:** Blender widgets are Python that only runs inside
 Blender, so the engine is standalone (not a Python subclass) but reuses the
 Python AST scanner. Tests, the coverage run and the example all execute in
-headless Blender through `scanners/blender_runner.py`; never the UI, never a
-GPU render. pytest + pytest-cov are installed by pip running *inside* Blender
+headless Blender through `scanners/blender_runner.py`; never the UI, and
+tests and examples never render on the GPU (a widget's module may take a render
+device as a parameter). pytest + pytest-cov are installed by pip running *inside* Blender
 into `<data_dir>/blender-test-tools/py<X.Y>` - never into Blender's own
 install, and never via the interpreter `sys.executable` reports (distro builds
 can name a different Python than they embed). Scaffolded tests get a

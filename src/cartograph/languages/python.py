@@ -158,6 +158,15 @@ class PythonEngine(LanguageEngine):
         return True
 
     def runtime_version(self) -> str | None:
+        if os.environ.get("CARTOGRAPH_PYTHON"):
+            import subprocess
+            try:
+                out = subprocess.run([self.validation_python(), "-c",
+                                      "import sys; print('%d.%d.%d' % sys.version_info[:3])"],
+                                     capture_output=True, text=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                return None
+            return f"python {out.stdout.strip()}" if out.returncode == 0 and out.stdout.strip() else None
         v = sys.version_info
         return f"python {v.major}.{v.minor}.{v.micro}"
 
@@ -166,7 +175,7 @@ class PythonEngine(LanguageEngine):
         missing = []
         for tool in ("pytest", "coverage"):
             r = subprocess.run(
-                [sys.executable, "-m", tool, "--version"],
+                [self.validation_python(), "-m", tool, "--version"],
                 capture_output=True,
             )
             if r.returncode != 0:
@@ -219,6 +228,18 @@ class PythonEngine(LanguageEngine):
         return lines
 
     _STDLIB = sys.stdlib_module_names
+    # Import names a pip package provides when they differ from its name (lower case), known without installing it.
+    _KNOWN_MODULES = {
+        "pillow": {"pil"}, "opencv-python": {"cv2"}, "opencv-python-headless": {"cv2"},
+        "opencv-contrib-python": {"cv2"}, "pyyaml": {"yaml"}, "scikit-learn": {"sklearn"},
+        "scikit-image": {"skimage"}, "beautifulsoup4": {"bs4"}, "python-dateutil": {"dateutil"},
+        "python-docx": {"docx"}, "python-pptx": {"pptx"}, "pymupdf": {"fitz", "pymupdf"},
+        "pycryptodome": {"crypto"}, "protobuf": {"google"}, "attrs": {"attr", "attrs"}, "pyserial": {"serial"},
+        "pyzmq": {"zmq"}, "pyjwt": {"jwt"}, "python-magic": {"magic"}, "pycairo": {"cairo"}, "pygobject": {"gi"},
+        "msgpack-python": {"msgpack"}, "python-multipart": {"multipart"}, "google-cloud-storage": {"google"},
+        "faiss-cpu": {"faiss"}, "tensorflow-cpu": {"tensorflow"}, "psycopg2-binary": {"psycopg2"},
+        "mysqlclient": {"mysqldb"}, "pyopengl": {"opengl"}, "pywin32": {"win32api", "win32con", "pywintypes"},
+    }
     _TEST_FRAMEWORKS = {"pytest", "hypothesis", "faker", "mock", "unittest"}
     _ENVVAR_RE = re.compile(r'os\.getenv\(|os\.environ')
     _SLEEP_MODULES = {"time", "asyncio"}
@@ -243,16 +264,30 @@ class PythonEngine(LanguageEngine):
 
         # Map declared pip packages → top-level import names they provide.
         # Handles python-docx → docx, Pillow → PIL, beautifulsoup4 → bs4, etc.
-        # Falls back to raw dep name when metadata isn't available (dep not installed).
-        provided_modules = set(dep_names)
+        # Any pip package may be a dependency; the rule is only that it is declared. The metadata lookup knows
+        # only what is installed in the interpreter running the validator, so the same widget passed in a
+        # sandbox that had Pillow and was blocked on a host that did not ("Unlisted import 'pil'", 2026-09-23).
+        # The well-known aliases are known without installing anything, and a declared package that is not
+        # installed here cannot be ruled out: an import it might provide is a warning, not a block.
+        provided_modules = set(dep_names) | {d.replace("-", "_") for d in dep_names}
+        for dep in dep_names:
+            provided_modules |= self._KNOWN_MODULES.get(dep.replace("_", "-"), set())
+        # Modules a host engine bundles (Blender's bpy, KiCad's pcbnew) are known without being declared.
+        provided_modules |= {str(m).lower() for m in widget.get("bundled_modules", [])}
+        unverified: set[str] = set()
         try:
-            from importlib.metadata import packages_distributions
+            from importlib.metadata import PackageNotFoundError, distribution, packages_distributions
             mod_to_pkgs = packages_distributions()
             for mod, pkgs in mod_to_pkgs.items():
                 if any(p.lower() in dep_names for p in pkgs):
                     provided_modules.add(mod.lower())
+            for dep in dep_names:
+                try:
+                    distribution(dep)
+                except PackageNotFoundError:
+                    unverified.add(dep)
         except Exception:
-            pass
+            unverified = set(dep_names)
 
         own_modules = {"src"}
         src_dir = os.path.join(path, "src")
@@ -368,20 +403,23 @@ class PythonEngine(LanguageEngine):
             # a local src module, or a test framework will fail to install for
             # users. Not overridable - fix is always trivial (add to deps or
             # remove).
-            unlisted_sink = blocks if is_src else warnings
+            unlisted_sink = blocks if is_src and not unverified else warnings
+            unlisted_hint = ("add to dependencies or remove" if not unverified else
+                             "add to dependencies or remove, unless a declared dependency not installed here provides it ("
+                             + ", ".join(sorted(unverified)) + ")")
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         top = alias.name.split(".")[0].lower()
                         if top and top not in self._STDLIB and top not in provided_modules and top not in own_modules and top not in self._TEST_FRAMEWORKS:
                             unlisted_sink.append(
-                                f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
+                                f"Unlisted import '{top}' in {rel}:{node.lineno} - {unlisted_hint}"
                             )
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     top = node.module.split(".")[0].lower()
                     if top and top not in self._STDLIB and top not in provided_modules and top not in own_modules and top not in self._TEST_FRAMEWORKS:
                         unlisted_sink.append(
-                            f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
+                            f"Unlisted import '{top}' in {rel}:{node.lineno} - {unlisted_hint}"
                         )
 
             # Remaining AST checks are src/ only
@@ -460,21 +498,43 @@ class PythonEngine(LanguageEngine):
                     "error": (res.stderr or res.stdout or "").strip()}
         return {"passed": True}
 
+    @staticmethod
+    def validation_python() -> str:
+        """The interpreter widgets are validated with: ``$CARTOGRAPH_PYTHON`` when the
+        environment names one (heavy dependencies such as torch installed for another
+        Python), else the interpreter Cartograph runs on."""
+        return os.environ.get("CARTOGRAPH_PYTHON") or sys.executable
+
     def _venv_python(self) -> str:
-        """Return the venv python path if a venv was created, else sys.executable."""
-        return getattr(self, "_venv_py", sys.executable)
+        """Return the venv python path if a venv was created, else the validation interpreter."""
+        return getattr(self, "_venv_py", None) or self.validation_python()
 
     @staticmethod
     def _inherit_parent_site_packages(venv_dir: str) -> None:
         """When cartograph itself runs inside a venv, let the throwaway venv see that
-        venv's packages too (system_site_packages only reaches the base interpreter)."""
+        venv's packages too (system_site_packages only reaches the base interpreter).
+        With CARTOGRAPH_PYTHON, that interpreter's package directories are inherited
+        instead, including any a .pth adds (a .pth listed in another .pth is never
+        processed, so the directories are written out)."""
         import site
-        if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
-            return
-        try:
-            parents = [p for p in site.getsitepackages() if os.path.isdir(p)]
-        except Exception:  # noqa: BLE001
-            return
+        external = os.environ.get("CARTOGRAPH_PYTHON")
+        if external:
+            import json
+            import subprocess
+            try:
+                out = subprocess.run([external, "-c", "import json,sys; print(json.dumps([p for p in sys.path if "
+                                      "p.endswith(('site-packages', 'dist-packages'))]))"],
+                                     capture_output=True, text=True, timeout=30)
+                parents = [p for p in json.loads(out.stdout or "[]") if os.path.isdir(p)]
+            except Exception:  # noqa: BLE001
+                return
+        else:
+            if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
+                return
+            try:
+                parents = [p for p in site.getsitepackages() if os.path.isdir(p)]
+            except Exception:  # noqa: BLE001
+                return
         for lib in (os.path.join(venv_dir, "lib"), os.path.join(venv_dir, "Lib")):
             if not os.path.isdir(lib):
                 continue
@@ -541,7 +601,16 @@ class PythonEngine(LanguageEngine):
         _MAX_RETRIES = 3
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
-                venv.create(venv_dir, with_pip=True, system_site_packages=True)
+                external = os.environ.get("CARTOGRAPH_PYTHON")
+                if external:
+                    import subprocess
+                    made = subprocess.run([external, "-m", "venv", "--system-site-packages", venv_dir],
+                                          capture_output=True, text=True, timeout=120)
+                    if made.returncode != 0:
+                        raise OSError(made.returncode, "CARTOGRAPH_PYTHON could not make a venv: "
+                                      + (made.stderr or made.stdout)[:500])
+                else:
+                    venv.create(venv_dir, with_pip=True, system_site_packages=True)
                 break
             except (OSError, PermissionError) as exc:
                 _errno = getattr(exc, "errno", None)
@@ -580,9 +649,8 @@ class PythonEngine(LanguageEngine):
                 # by Cartograph because they are large, hardware-dependent, and may require
                 # specific CUDA versions. They must be pre-installed in the user's environment.
                 # With system_site_packages=True, the venv inherits them automatically.
-                import importlib.util
-                import_name = base_name.replace("-", "_")
-                if importlib.util.find_spec(import_name) is None:
+                # Asked of the venv that will run the tests, not of the interpreter Cartograph runs on.
+                if not self._importable(py, base_name):
                     raise RuntimeError(
                         f"'{dep_name}' is a heavy ML framework that must be pre-installed before "
                         f"validation. Install it in your environment first, then re-run validation.\n"
@@ -700,7 +768,7 @@ class PythonEngine(LanguageEngine):
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         res = subprocess.run(
             [
-                sys.executable, "-m", "pytest", f"{subdir}/",
+                self.validation_python(), "-m", "pytest", f"{subdir}/",
                 f"--cov={subdir}",
                 f"--cov-fail-under={coverage}",
                 "--cov-report=term-missing",

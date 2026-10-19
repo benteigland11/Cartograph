@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import urllib.parse
 import zipfile
 from io import BytesIO
@@ -2479,9 +2480,68 @@ def cmd_setup_mathlib(args):
         err({"error": f"provisioning failed: {result.status.reason}"})
 
 
+DOCTOR_PROBE_SECONDS = 60
+
+
+def _probe_engine(engine) -> dict:
+    try:
+        available, message = engine.check_available()
+    except Exception as e:  # noqa: BLE001
+        available, message = False, str(e)
+    binaries = {}
+    for binary in getattr(engine, "toolchain", {}) or {}:
+        try:
+            resolved = engine.resolved_binary(binary)
+        except Exception:  # noqa: BLE001
+            resolved = None
+        if resolved:
+            binaries[binary] = dict(path=resolved.path, real=os.path.realpath(resolved.path),
+                                    source=resolved.source)
+    try:
+        runtime = engine.runtime_version() if available else None
+    except Exception:  # noqa: BLE001
+        runtime = None
+    return dict(ready=bool(available), message=None if available else message,
+                engine_version=getattr(engine, "validation_version", None),
+                runtime_version=runtime, binaries=binaries)
+
+
+def doctor_languages(engines=None, timeout: float = DOCTOR_PROBE_SECONDS) -> dict:
+    """Every language engine: ready or not, its versions, and each toolchain binary resolved to the path validation
+    uses (a config override or PATH). The machine-readable half of `doctor`, for hosts that grant toolchains.
+
+    Engines are probed in parallel daemon threads, and one that does not answer within `timeout` seconds is reported
+    as not ready instead of hanging doctor (on Windows a toolchain's helper process can keep a probe's pipes open
+    past its own timeout)."""
+    import threading
+    if engines is None:
+        from .languages.registry import _ENGINES as engines
+    results: dict = {}
+
+    def probe(name, engine):
+        results[name] = _probe_engine(engine)
+
+    threads = {name: threading.Thread(target=probe, args=(name, engine), daemon=True)
+               for name, engine in engines.items()}
+    for thread in threads.values():
+        thread.start()
+    deadline = time.monotonic() + timeout
+    for thread in threads.values():
+        thread.join(max(0.0, deadline - time.monotonic()))
+    return {name: results.get(name) or dict(
+                ready=False, message=f"probe did not answer within {timeout:g}s",
+                engine_version=getattr(engines[name], "validation_version", None),
+                runtime_version=None, binaries={})
+            for name in sorted(engines)}
+
+
 def cmd_doctor(args):
     import shutil
     import subprocess
+
+    if getattr(args, "as_json", False):
+        print(json.dumps(dict(languages=doctor_languages()), indent=1))
+        return
 
     groups = []  # list of (group_name, [(label, ok, detail, fix), ...])
 
@@ -3236,34 +3296,9 @@ def _import_summary(imported, imported_widget_ids, quarantine_dir, skipped,
 
 
 def _clean_validation_artifacts(widget_path: str, language: str) -> None:
-    """Remove build/validation artifacts from a library widget dir in place.
-
-    Mirrors the artifact filter checkin applies when copying into the
-    library; import's re-validation gate is the one path that validates
-    directly inside the library entry.
-    """
-    from .safefs import robust_rmtree
-    from .dep_cache import DEP_STAMP_FILE
-    try:
-        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
-            excludes_for,
-        )
-        skip_names = set(excludes_for(language=language))
-    except ImportError:
-        skip_names = {"__pycache__", ".pytest_cache", ".venv", "node_modules",
-                      ".coverage", "coverage"}
-    skip_names |= {".coverage", DEP_STAMP_FILE}
-    for root, dirs, files in os.walk(widget_path, topdown=True):
-        for d in list(dirs):
-            if d in skip_names:
-                robust_rmtree(os.path.join(root, d), ignore_errors=True)
-                dirs.remove(d)
-        for f in files:
-            if f in skip_names:
-                try:
-                    os.remove(os.path.join(root, f))
-                except OSError:
-                    pass
+    """Remove build/validation artifacts from a library widget dir in place (validator.clean_validation_artifacts)."""
+    from .validator import clean_validation_artifacts
+    clean_validation_artifacts(widget_path, language)
 
 
 def _quarantine_widget(widget_path: str, quarantine_dir: str, reason: str) -> None:
@@ -3830,7 +3865,7 @@ def _build_cli() -> AgentCLI:
             "args": [
                 {"name": "widget_id",
                  "help": "Module id, directory path, or @owner/id (cloud)"},
-                {"name": "--source", "action": "store_true", "default": False, "help": "Include source files"},
+                {"name": "--source", "action": "store_true", "default": False, "help": "Include full source files (the public API is always shown)"},
                 {"name": "--all-versions", "action": "store_true", "default": False, "dest": "all_versions"},
                 {"name": "--reviews", "action": "store_true", "default": False},
                 {"name": "--version", "default": None, "help": "Inspect a specific historical version"},
@@ -4307,7 +4342,10 @@ def _build_cli() -> AgentCLI:
             "name": "doctor",
             "help": "Check language engine dependencies",
             "handler": cmd_doctor,
-            "args": [],
+            "args": [
+                {"name": "--json", "action": "store_true", "default": False, "dest": "as_json",
+                 "help": "Languages only, as JSON: readiness, versions and each toolchain binary's resolved path"},
+            ],
         },
         {
             "name": "setup-mathlib",

@@ -2,7 +2,9 @@
 
 Validates reusable Blender Python - geometry generators, bmesh operations,
 node/material builders, export helpers - inside headless Blender
-(`blender -b --factory-startup`), never the UI and never a GPU render.
+(`blender -b --factory-startup`), never the UI; tests and examples render on
+the CPU so they validate on any machine (a project renders on whatever GPU its
+environment provides).
 
 Blender widgets are Python, but they only run in Blender's embedded
 interpreter with `bpy`, so tests, installs and examples all differ from the
@@ -239,10 +241,10 @@ class BlenderEngine(LanguageEngine):
         return self._ok()
 
     def scan_contamination(self, path, widget):
-        # The Python scanner treats declared deps as importable; Blender's
+        # The Python scanner knows bundled modules without a declaration; Blender's
         # bundled modules are importable without being declared.
         scan_widget = dict(widget)
-        scan_widget["dependencies"] = list(widget.get("dependencies", [])) + _BUNDLED_MODULES
+        scan_widget["bundled_modules"] = list(_BUNDLED_MODULES)
         result = _python.PythonEngine().scan_contamination(path, scan_widget)
         blocks, warnings = list(result["blocks"]), list(result["warnings"])
 
@@ -283,7 +285,13 @@ class BlenderEngine(LanguageEngine):
         Installed once per Blender Python version into the Cartograph data
         dir and reused; widget dependencies are refused in validate_widget."""
         info = self._interpreter_info()
-        tools = os.path.join(self._tools_root(), f"py{'.'.join(info['python'].split('.')[:2])}")
+        version = f"py{'.'.join(info['python'].split('.')[:2])}"
+        # An environment that ships the tools (an image with no network) names their root; it is used as is.
+        shipped = os.environ.get("CARTOGRAPH_BLENDER_TEST_TOOLS", "").strip()
+        if shipped and all(os.path.isdir(os.path.join(shipped, version, m)) for m in ("pytest", "pytest_cov")):
+            self._tools_dir = os.path.join(shipped, version)
+            return
+        tools = os.path.join(self._tools_root(), version)
         if all(os.path.isdir(os.path.join(tools, m)) for m in ("pytest", "pytest_cov")):
             self._tools_dir = tools
             return

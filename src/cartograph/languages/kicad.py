@@ -442,10 +442,10 @@ class KicadEngine(LanguageEngine):
                 + "\n".join(lines) + more]
 
     def scan_contamination(self, path, widget):
-        # The Python scanner treats declared deps as importable; pcbnew is
+        # The Python scanner knows bundled modules without a declaration; pcbnew is
         # importable in KiCad's interpreter without being declared.
         scan_widget = dict(widget)
-        scan_widget["dependencies"] = list(widget.get("dependencies", [])) + _BUNDLED_MODULES
+        scan_widget["bundled_modules"] = list(_BUNDLED_MODULES)
         result = _python.PythonEngine().scan_contamination(path, scan_widget)
         blocks, warnings = list(result["blocks"]), list(result["warnings"])
 
