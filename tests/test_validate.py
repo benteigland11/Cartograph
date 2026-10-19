@@ -199,6 +199,26 @@ def test_validate_widget_with_dependency(carto, tmp_path):
     assert result["status"] == "success", f"Validation failed: {result}"
 
 
+def test_validate_restores_deleted_library_notes(carto, fixture_library, tmp_path):
+    """library_notes removed from widget.json come back: edits to them never survive a validate."""
+    widget_dir = tmp_path / "http-client-no-notes"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), widget_dir)
+    manifest_path = widget_dir / "widget.json"
+    data = json.loads(manifest_path.read_text())
+    data["meta"]["id"] = "http-client-no-notes"
+    data.pop("library_notes", None)
+    manifest_path.write_text(json.dumps(data))
+    for fname in os.listdir(widget_dir / "src"):
+        if fname.endswith(".py"):
+            p = widget_dir / "src" / fname
+            p.write_text(p.read_text() + "\n# perturb\n")
+            break
+    result = carto.validate_item(str(widget_dir))
+    assert result.get("status") == "success", result
+    post = json.loads(manifest_path.read_text())
+    assert post["library_notes"]["general"].startswith("Single responsibility")
+
+
 def test_validate_fails_if_stamp_write_fails(carto, fixture_library, tmp_path):
     widget_path = tmp_path / "http-client"
     shutil.copytree(os.path.join(fixture_library, "http-client"), widget_path)
