@@ -33,7 +33,55 @@ VALID_DOMAINS = _load_domains()
 
 
 def validate_item(carto, path):
-    """Validate a widget directory before checkin."""
+    """Validate a widget directory before checkin. Every validate installs what it needs and removes what it built
+    when it ends, passed or failed: the widget dir holds its source, never a venv or a cache."""
+    try:
+        return _validate_item(carto, path)
+    finally:
+        language = "python"
+        try:
+            with open(os.path.join(path, "widget.json"), encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            language = (manifest.get("tech_stack") or {}).get("language") or manifest.get("language") or "python"
+        except (OSError, ValueError, AttributeError):
+            pass
+        if os.path.isdir(path):
+            clean_validation_artifacts(path, language)
+
+
+def clean_validation_artifacts(widget_path: str, language: str) -> None:
+    """Remove build and validation artifacts from a widget dir in place: the language's artifact list (the one
+    checkin applies when it copies into the library) and the dependency-cache stamp."""
+    from .safefs import robust_rmtree
+    from .dep_cache import DEP_STAMP_FILE
+    try:
+        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
+            excludes_for,
+        )
+        skip_names = set(excludes_for(language=language))
+    except ImportError:
+        skip_names = {"__pycache__", ".pytest_cache", ".venv", "node_modules",
+                      ".coverage", "coverage"}
+    skip_names |= {".coverage", DEP_STAMP_FILE}
+    skip_names -= {".git"}
+    for root, dirs, files in os.walk(widget_path, topdown=True):
+        for d in list(dirs):
+            if d in skip_names:
+                target = os.path.join(root, d)
+                if os.path.islink(target):
+                    os.unlink(target)   # a generated link (a flutter widget's lib -> src): never followed
+                else:
+                    robust_rmtree(target, ignore_errors=True)
+                dirs.remove(d)
+        for f in files:
+            if f in skip_names:
+                try:
+                    os.remove(os.path.join(root, f))
+                except OSError:
+                    pass
+
+
+def _validate_item(carto, path):
     checklist = []
     errors = []
 

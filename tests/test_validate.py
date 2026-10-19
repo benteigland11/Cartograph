@@ -267,3 +267,26 @@ def test_a_run_that_starts_nothing_leaves_nothing():
     outcome, left = leftovers.run_tracked(lambda: {"passed": True})
     assert outcome == {"passed": True} and left == []
     assert leftovers.MARK not in os.environ
+
+
+def test_validate_leaves_no_venv_or_cache_behind(carto, fixture_library, tmp_path):
+    """Every validate installs what it needs and removes it when it ends: only the widget's own files stay."""
+    path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), path)
+    result = carto.validate_item(str(path))
+    assert result.get("status") == "success", result
+    left = {p.name for p in path.rglob("*")}
+    assert not left & {".venv", "__pycache__", ".pytest_cache", ".coverage", ".dep_cache.json"}, left
+    assert (path / "widget.json").exists()
+
+
+def test_a_failed_validate_cleans_up_too(carto, fixture_library, tmp_path):
+    path = tmp_path / "http-client"
+    shutil.copytree(os.path.join(fixture_library, "http-client"), path)
+    (path / ".venv" / "bin").mkdir(parents=True)
+    (path / ".venv" / "bin" / "python").write_text("stale")
+    example = next((path / "examples").glob("*.py"))
+    example.write_text(example.read_text() + "\nraise SystemExit(1)\n")
+    result = carto.validate_item(str(path))
+    assert result.get("status") == "error" and "failed to run" in result["message"]
+    assert not (path / ".venv").exists()

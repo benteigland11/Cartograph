@@ -3236,34 +3236,9 @@ def _import_summary(imported, imported_widget_ids, quarantine_dir, skipped,
 
 
 def _clean_validation_artifacts(widget_path: str, language: str) -> None:
-    """Remove build/validation artifacts from a library widget dir in place.
-
-    Mirrors the artifact filter checkin applies when copying into the
-    library; import's re-validation gate is the one path that validates
-    directly inside the library entry.
-    """
-    from .safefs import robust_rmtree
-    from .dep_cache import DEP_STAMP_FILE
-    try:
-        from cg.universal_build_artifact_ignore_python.src.build_artifact_ignore import (
-            excludes_for,
-        )
-        skip_names = set(excludes_for(language=language))
-    except ImportError:
-        skip_names = {"__pycache__", ".pytest_cache", ".venv", "node_modules",
-                      ".coverage", "coverage"}
-    skip_names |= {".coverage", DEP_STAMP_FILE}
-    for root, dirs, files in os.walk(widget_path, topdown=True):
-        for d in list(dirs):
-            if d in skip_names:
-                robust_rmtree(os.path.join(root, d), ignore_errors=True)
-                dirs.remove(d)
-        for f in files:
-            if f in skip_names:
-                try:
-                    os.remove(os.path.join(root, f))
-                except OSError:
-                    pass
+    """Remove build/validation artifacts from a library widget dir in place (validator.clean_validation_artifacts)."""
+    from .validator import clean_validation_artifacts
+    clean_validation_artifacts(widget_path, language)
 
 
 def _quarantine_widget(widget_path: str, quarantine_dir: str, reason: str) -> None:
