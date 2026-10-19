@@ -773,8 +773,11 @@ dir) on `sys.path` and calls `pytest.main` or runs the example as
 uncaught exception, so results come from the exit status. Validation sets
 `BLENDER_USER_RESOURCES` to a temp dir (no user prefs, add-ons or scripts)
 and `PYTHONNOUSERSITE=1` (no `~/.local` packages), so it sees a factory
-Blender and works where `$HOME` is read-only. Never the UI and never a GPU
-render - EEVEE needs a GPU that CI and sandboxes don't have.
+Blender and works where `$HOME` is read-only. Never the UI, and tests and
+examples never render on the GPU - EEVEE needs a GPU that CI and sandboxes
+don't have. The rule scopes validation runs, not the module: a widget may take
+a render device as a parameter, and a project renders on whatever GPU its
+environment provides.
 
 **Test tools:** pytest + pytest-cov are installed once per Blender Python
 version (e.g. `py3.11` for 4.2, `py3.13` for 5.2) into

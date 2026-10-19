@@ -2,7 +2,9 @@
 
 Validates reusable Blender Python - geometry generators, bmesh operations,
 node/material builders, export helpers - inside headless Blender
-(`blender -b --factory-startup`), never the UI and never a GPU render.
+(`blender -b --factory-startup`), never the UI; tests and examples render on
+the CPU so they validate on any machine (a project renders on whatever GPU its
+environment provides).
 
 Blender widgets are Python, but they only run in Blender's embedded
 interpreter with `bpy`, so tests, installs and examples all differ from the
