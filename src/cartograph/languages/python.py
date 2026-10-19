@@ -263,6 +263,8 @@ class PythonEngine(LanguageEngine):
         provided_modules = set(dep_names) | {d.replace("-", "_") for d in dep_names}
         for dep in dep_names:
             provided_modules |= self._KNOWN_MODULES.get(dep.replace("_", "-"), set())
+        # Modules a host engine bundles (Blender's bpy, KiCad's pcbnew) are known without being declared.
+        provided_modules |= {str(m).lower() for m in widget.get("bundled_modules", [])}
         unverified: set[str] = set()
         try:
             from importlib.metadata import PackageNotFoundError, distribution, packages_distributions

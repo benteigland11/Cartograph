@@ -3361,3 +3361,15 @@ def test_a_declared_package_is_honoured_without_being_installed(tmp_path):
     absent = lang.scan_contamination(str(tmp_path), {"dependencies": ["not-installed-anywhere-pkg"]})
     assert not any("some_unknown_module" in b for b in absent["blocks"])
     assert any("some_unknown_module" in w and "not-installed-anywhere-pkg" in w for w in absent["warnings"])
+
+
+def test_bundled_modules_are_known_without_being_declared(tmp_path):
+    """A host engine's bundled modules (Blender's bpy, KiCad's pcbnew) are known to the Python scanner
+    without being dependencies, so an unlisted import beside them still blocks."""
+    from cartograph.languages.python import PythonEngine
+    src = tmp_path/"src"
+    src.mkdir()
+    (src/"scene.py").write_text("import bpy\nimport requests\n")
+    result = PythonEngine().scan_contamination(str(tmp_path), {"dependencies": [], "bundled_modules": ["bpy"]})
+    assert not any("'bpy'" in f for f in result["blocks"] + result["warnings"])
+    assert any("'requests'" in b for b in result["blocks"])

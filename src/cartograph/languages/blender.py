@@ -239,10 +239,10 @@ class BlenderEngine(LanguageEngine):
         return self._ok()
 
     def scan_contamination(self, path, widget):
-        # The Python scanner treats declared deps as importable; Blender's
+        # The Python scanner knows bundled modules without a declaration; Blender's
         # bundled modules are importable without being declared.
         scan_widget = dict(widget)
-        scan_widget["dependencies"] = list(widget.get("dependencies", [])) + _BUNDLED_MODULES
+        scan_widget["bundled_modules"] = list(_BUNDLED_MODULES)
         result = _python.PythonEngine().scan_contamination(path, scan_widget)
         blocks, warnings = list(result["blocks"]), list(result["warnings"])
 
