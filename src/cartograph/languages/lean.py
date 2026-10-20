@@ -21,12 +21,14 @@ kernel-checked during elaboration before main runs, so proof-style assertions
 (`example : f x = y := rfl`) piggyback on the same run.
 
 Dependencies: `mathlib` is the only supported external dependency, served
-from one shared, version-pinned workspace under the platform data dir
-(provisioned explicitly via `cartograph setup-mathlib` - never fetched
-automatically, per the ML-frameworks policy). All other widgets build
-against the Lean core library only. The workspace wiring (a path require +
-lean-toolchain pin) is injected per build and stripped by cleanup, so
-checked-in widgets stay machine-independent.
+from one shared workspace per pin in the heavy-dependency store
+(`<heavy-deps root>/lean-mathlib/<pin>`, provisioned explicitly via
+`cartograph setup-mathlib [--pin <pin>]` - never fetched automatically, per
+the ML-frameworks policy). A widget names the pin (`mathlib==v4.32.0`) or
+takes the engine default (bare `mathlib`); never a path. All other widgets
+build against the Lean core library only. The workspace wiring (a path
+require + lean-toolchain pin) is injected per build and stripped by
+cleanup, so checked-in widgets stay machine-independent.
 
 Layout
 ------
@@ -39,9 +41,10 @@ Layout
 Widgets do NOT carry a lean-toolchain pin - the library validates against the
 machine's default elan toolchain (like GDScript widgets don't pin a Godot
 version), and the toolchain version is stamped into widget.json at checkin
-via runtime_version(). Exception: mathlib widgets build under the engine's
-pinned toolchain (written transiently, removed at cleanup) because .olean
-compatibility requires the exact workspace toolchain.
+via runtime_version(). Exception: mathlib widgets build under their
+workspace's own toolchain (read from its lean-toolchain, written
+transiently, removed at cleanup) because .olean compatibility requires the
+exact workspace toolchain.
 """
 
 import glob as _glob
@@ -244,7 +247,9 @@ class LeanEngine(LanguageEngine):
             errors.append(build)
 
         if errors:
-            out = self._fail("\n".join(e for e in errors if e))
+            # A bad mathlib spec is reported by both the dep check and the
+            # build's wiring step - say it once.
+            out = self._fail("\n".join(dict.fromkeys(e for e in errors if e)))
         else:
             out = self._ok()
         if result.get("warnings"):
@@ -333,10 +338,11 @@ class LeanEngine(LanguageEngine):
 
     def install_deps(self, path, dependencies):
         # The only supported external dependency is `mathlib`, served from
-        # the shared pinned workspace (never fetched per-widget, never
+        # the shared workspace for its pin (never fetched per-widget, never
         # auto-installed - ML-frameworks policy). Everything else builds
         # against the Lean core library only.
-        names = [d if isinstance(d, str) else (d or {}).get("name")
+        from .base import _dep_bare_name
+        names = [_dep_bare_name(d) if isinstance(d, (str, dict)) else d
                  for d in (dependencies or [])]
         others = [n for n in names if n != "mathlib"]
         if others:
@@ -346,42 +352,61 @@ class LeanEngine(LanguageEngine):
                 "otherwise build against the Lean core library only."
             )
         if "mathlib" in names:
-            from ..mathlib_setup import mathlib_status, \
-                missing_workspace_error
-            state = mathlib_status()
+            from ..mathlib_setup import (mathlib_status,
+                                         missing_workspace_error,
+                                         widget_mathlib_pin)
+            try:
+                pin = widget_mathlib_pin(dependencies)
+            except ValueError as e:
+                raise RuntimeError(str(e))
+            state = mathlib_status(pin)
             if not state.ready:
-                raise RuntimeError(missing_workspace_error(state.reason))
+                raise RuntimeError(missing_workspace_error(state.reason, pin))
 
     @staticmethod
     def _check_dep_pinning(dependencies):
-        # `mathlib` is engine-pinned (one workspace pin per Cartograph
-        # release), so the generic version-floor rule does not apply to it -
-        # a widget-level pin would be ignored and only mislead.
-        from .base import LanguageEngine
-        rest = [d for d in dependencies
-                if (d if isinstance(d, str)
-                    else (d or {}).get("name")) != "mathlib"]
-        return LanguageEngine._check_dep_pinning(rest)
+        # `mathlib` names one provisioned workspace: bare `mathlib` takes the
+        # engine default pin, `mathlib==<pin>` an exact one. The generic
+        # version-floor rule does not apply; a range cannot name a
+        # workspace, so it is an error.
+        from .base import LanguageEngine, _dep_bare_name
+        from ..heavy_deps import requested_version
+        errors, rest = [], []
+        for d in dependencies:
+            if isinstance(d, (str, dict)) and _dep_bare_name(d) == "mathlib":
+                try:
+                    requested_version(d)
+                except ValueError as e:
+                    errors.append(str(e))
+            else:
+                rest.append(d)
+        return errors + LanguageEngine._check_dep_pinning(rest)
 
     @staticmethod
-    def _wants_mathlib(path):
-        """True when the widget declares a mathlib dependency."""
+    def _declared_deps(path):
         try:
             with open(os.path.join(path, "widget.json"),
                       encoding="utf-8") as f:
                 deps = _json.load(f).get("tech_stack", {}).get(
                     "dependencies", [])
         except (OSError, ValueError):
-            return False
-        return any((d if isinstance(d, str) else (d or {}).get("name"))
-                   == "mathlib" for d in deps)
+            return []
+        return deps if isinstance(deps, list) else []
+
+    @classmethod
+    def _wants_mathlib(cls, path):
+        """True when the widget declares a mathlib dependency."""
+        from .base import _dep_bare_name
+        return any(isinstance(d, (str, dict)) and _dep_bare_name(d)
+                   == "mathlib" for d in cls._declared_deps(path))
 
     def _sync_mathlib_require(self, path):
         """Point a mathlib widget at the shared workspace for this build.
 
-        Injects a managed [[require]] path entry into lakefile.toml and a
-        matching lean-toolchain file. Both carry machine-specific state
-        (an absolute path; a pin the engine owns), so they are transient:
+        Injects a managed [[require]] path entry into lakefile.toml for the
+        workspace of the widget's pin, and a lean-toolchain file copied from
+        that workspace. Both carry machine-specific state (an absolute path;
+        a toolchain the workspace owns), so they are transient:
         regenerated before every build, stripped by cleanup() so neither
         is ever checked in. Returns an error string, or None.
         """
@@ -397,24 +422,29 @@ class LeanEngine(LanguageEngine):
             with open(lakefile, "w", newline="\n", encoding="utf-8") as f:
                 f.write(content)
             return None
-        from ..mathlib_setup import (MATHLIB_TOOLCHAIN, mathlib_package_dir,
-                                     mathlib_status,
-                                     missing_workspace_error)
-        state = mathlib_status()
+        from ..mathlib_setup import (mathlib_package_dir, mathlib_status,
+                                     mathlib_toolchain,
+                                     missing_workspace_error,
+                                     widget_mathlib_pin)
+        try:
+            pin = widget_mathlib_pin(self._declared_deps(path))
+        except ValueError as e:
+            return str(e)
+        state = mathlib_status(pin)
         if not state.ready:
-            return missing_workspace_error(state.reason)
-        pkg = mathlib_package_dir().replace("\\", "/")
+            return missing_workspace_error(state.reason, pin)
+        pkg = mathlib_package_dir(pin).replace("\\", "/")
         content += (f"\n[[require]]\n{_MATHLIB_REQUIRE_MARK}\n"
                     f'name = "mathlib"\npath = "{pkg}"\n')
         with open(lakefile, "w", newline="\n", encoding="utf-8") as f:
             f.write(content)
         with open(os.path.join(path, "lean-toolchain"), "w",
                   newline="\n", encoding="utf-8") as f:
-            f.write(MATHLIB_TOOLCHAIN + "\n")
-        self._seed_mathlib_packages(path)
+            f.write(mathlib_toolchain(pin) + "\n")
+        self._seed_mathlib_packages(path, pin)
         return None
 
-    def _seed_mathlib_packages(self, path):
+    def _seed_mathlib_packages(self, path, pin):
         """Pre-seed the widget's lockfile and packages from the workspace.
 
         Without this, the widget's first `lake build` git-clones Mathlib's
@@ -425,18 +455,17 @@ class LeanEngine(LanguageEngine):
         path entry) lets Lake resolve everything from disk. Best-effort: on
         any failure the seed is skipped and Lake falls back to fetching.
         """
-        from ..mathlib_setup import MATHLIB_PIN, mathlib_package_dir, \
-            mathlib_root
+        from ..mathlib_setup import mathlib_package_dir, mathlib_root
         from cg.infra_mathlib_workspace_python.src.mathlib_workspace import (
             seed_manifest, workspace_path)
         widget_manifest = os.path.join(path, "lake-manifest.json")
         if os.path.isfile(widget_manifest):
             return
-        ws = str(workspace_path(mathlib_root(), MATHLIB_PIN))
+        ws = str(workspace_path(mathlib_root(), pin))
         try:
             with open(os.path.join(ws, "lake-manifest.json"),
                       encoding="utf-8") as f:
-                plan = seed_manifest(f.read(), mathlib_package_dir())
+                plan = seed_manifest(f.read(), mathlib_package_dir(pin))
         except (OSError, ValueError):
             return
         pkg_src = os.path.join(ws, ".lake", "packages")
@@ -584,8 +613,8 @@ class LeanEngine(LanguageEngine):
         except OSError:
             pass
         # Strip the transient mathlib wiring: the managed require carries an
-        # absolute machine path and lean-toolchain carries the engine-owned
-        # pin - neither belongs in a checked-in widget.
+        # absolute machine path and lean-toolchain is copied from the
+        # workspace - neither belongs in a checked-in widget.
         lakefile = os.path.join(path, "lakefile.toml")
         if os.path.isfile(lakefile):
             with open(lakefile, encoding="utf-8") as f:

@@ -561,11 +561,21 @@ exit 0 - a clean exit with no `ASSERT_PASS` is rejected. Proof-level
 assertions (`example : f x = y := rfl` in the test file) are kernel-checked
 during elaboration before `main` runs, so both layers ride the same command.
 
-**Dependencies:** v1 is deliberately dependency-free - widgets build against
-the Lean core library only, and `install_deps` rejects any declared dependency
-with a clear error. Mathlib support is a deliberate future decision: it is
-multi-gigabyte, tightly pinned to toolchain versions, and needs a
-pre-installed-cache policy like the ML frameworks (never auto-installed).
+**Dependencies:** `mathlib` is the only external dependency; everything else
+builds against the Lean core library and `install_deps` rejects any other
+declared dependency with a clear error. A widget says *which* Mathlib it needs
+- `mathlib==<pin>` (exact; a range is a structure error) or a bare `mathlib`
+for the engine's default pin - never where it lives. Each pin is one shared
+workspace in the heavy-dependency store, `<root>/lean-mathlib/<pin>/`, where
+`<root>` is `$CARTOGRAPH_HEAVY_DEPS_ROOT`, else `cartograph config
+heavy-deps-root`, else the user data dir (`CARTOGRAPH_MATHLIB_ROOT`, naming
+`<root>/lean-mathlib` itself, is honoured as a deprecated alias). Workspaces
+are provisioned explicitly with `cartograph setup-mathlib [--pin <pin>]` and
+never automatically (the ML-frameworks pre-installed policy); a widget whose
+pin is not provisioned fails with an error naming the pin and that command.
+The build uses the workspace's own `lean-toolchain`, so `.olean` files always
+match. The path require and toolchain file are injected per build and
+stripped at cleanup, so checked-in widgets stay machine-independent.
 
 **Scanner:** native `lean_scanner.lean`, run via `lean --run` (no lake project
 needed - it uses only the core `Lean.Data.Json`). A hand-written lexer

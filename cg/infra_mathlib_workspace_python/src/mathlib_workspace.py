@@ -79,6 +79,22 @@ def workspace_path(root: Union[str, Path], pin: str) -> Path:
     return Path(root) / pin
 
 
+def workspace_toolchain(root: Union[str, Path], pin: str) -> Optional[str]:
+    """Toolchain the workspace for ``pin`` was written for, or None.
+
+    Read from the workspace's own ``lean-toolchain`` file, so a consumer
+    building against the workspace uses exactly the toolchain its
+    ``.olean`` files were compiled with - whatever pin it holds.
+    """
+    try:
+        text = (workspace_path(root, pin) / "lean-toolchain").read_text(
+            encoding="utf-8")
+    except OSError:
+        return None
+    value = text.strip()
+    return value or None
+
+
 def status(root: Union[str, Path], pin: str,
            toolchain: Optional[str] = None) -> WorkspaceStatus:
     """Classify the workspace for ``pin`` as missing/corrupt/stale/ready.

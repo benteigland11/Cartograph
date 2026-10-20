@@ -21,6 +21,8 @@ def data_dir(tmp_path, monkeypatch):
     import cartograph.engine as engine_mod
     monkeypatch.setattr(engine_mod, "_user_data_dir",
                         lambda: str(tmp_path / "data"))
+    monkeypatch.delenv("CARTOGRAPH_HEAVY_DEPS_ROOT", raising=False)
+    monkeypatch.delenv("CARTOGRAPH_MATHLIB_ROOT", raising=False)
     return tmp_path / "data"
 
 
@@ -245,3 +247,96 @@ def test_cleanup_preserves_blueprint_requires(engine, data_dir, tmp_path):
     lakefile = (root / "lakefile.toml").read_text(encoding="utf-8")
     assert "other_leaf" in lakefile
     assert _MATHLIB_REQUIRE_MARK not in lakefile
+
+
+# ---- pin from the widget ---------------------------------------------------
+
+OTHER = "v4.31.0"
+OTHER_TOOLCHAIN = "leanprover/lean4:v4.31.0"
+
+
+def test_bare_mathlib_takes_default_pin():
+    assert mathlib_setup.widget_mathlib_pin(["mathlib"]) == PIN
+    assert mathlib_setup.widget_mathlib_pin([{"name": "mathlib"}]) == PIN
+    assert mathlib_setup.widget_mathlib_pin([]) is None
+
+
+def test_widget_pin_string_and_dict_forms():
+    assert mathlib_setup.widget_mathlib_pin([f"mathlib=={OTHER}"]) == OTHER
+    assert mathlib_setup.widget_mathlib_pin(
+        [{"name": "mathlib", "version": OTHER}]) == OTHER
+
+
+@pytest.mark.parametrize("bad", ["mathlib>=v4.31.0", "mathlib==../x"])
+def test_widget_pin_rejects_ranges_and_paths(data_dir, bad):
+    with pytest.raises(ValueError):
+        mathlib_setup.widget_mathlib_pin([bad])
+
+
+def test_setup_given_pin_infers_toolchain(data_dir):
+    result = mathlib_setup.setup_mathlib(runner=lambda a, c: 0, pin=OTHER)
+    assert result.status.ready
+    assert mathlib_setup.mathlib_toolchain(OTHER) == OTHER_TOOLCHAIN
+    assert not mathlib_setup.mathlib_status(PIN).ready  # pins independent
+
+
+def test_setup_non_tag_pin_needs_toolchain(data_dir):
+    with pytest.raises(ValueError, match="toolchain"):
+        mathlib_setup.setup_mathlib(runner=lambda a, c: 0, pin="abc123")
+    result = mathlib_setup.setup_mathlib(
+        runner=lambda a, c: 0, pin="abc123",
+        toolchain="leanprover/lean4:v4.30.0")
+    assert result.status.ready
+
+
+def test_widget_pin_wires_that_workspace_and_its_toolchain(engine, data_dir,
+                                                           tmp_path):
+    # The toolchain comes from the workspace file, not a constant: write
+    # an unusual one to prove it.
+    mathlib_setup.setup_mathlib(runner=lambda a, c: 0, pin="custom-rev",
+                                toolchain="leanprover/lean4:nightly-x")
+    root = make_widget(tmp_path, ["mathlib==custom-rev"])
+    assert engine._sync_mathlib_require(str(root)) is None
+    lakefile = (root / "lakefile.toml").read_text(encoding="utf-8")
+    assert mathlib_setup.mathlib_package_dir("custom-rev").replace(
+        "\\", "/") in lakefile
+    assert (root / "lean-toolchain").read_text(
+        encoding="utf-8").strip() == "leanprover/lean4:nightly-x"
+    engine.cleanup(str(root))
+    assert not (root / "lean-toolchain").exists()
+
+
+def test_missing_pin_error_names_pin_and_command(engine, data_dir, tmp_path):
+    provision_ready(data_dir)  # default pin ready, OTHER is not
+    root = make_widget(tmp_path, [f"mathlib=={OTHER}"])
+    with pytest.raises(RuntimeError) as exc:
+        engine.install_deps(str(root), [f"mathlib=={OTHER}"])
+    assert OTHER in str(exc.value)
+    assert f"cartograph setup-mathlib --pin {OTHER}" in str(exc.value)
+    error = engine._sync_mathlib_require(str(root))
+    assert error is not None and f"--pin {OTHER}" in error
+
+
+def test_default_pin_error_keeps_plain_command(data_dir):
+    msg = mathlib_setup.missing_workspace_error("missing")
+    assert "cartograph setup-mathlib\n" in msg and "--pin" not in msg
+
+
+def test_ready_without_toolchain_file_is_corrupt(data_dir):
+    provision_ready(data_dir)
+    os.remove(os.path.join(mathlib_setup.mathlib_root(), PIN,
+                           "lean-toolchain"))
+    assert mathlib_setup.mathlib_status().state == "corrupt"
+
+
+def test_install_deps_accepts_exact_pin(engine, data_dir, tmp_path):
+    mathlib_setup.setup_mathlib(runner=lambda a, c: 0, pin=OTHER)
+    root = make_widget(tmp_path, [f"mathlib=={OTHER}"])
+    engine.install_deps(str(root), [f"mathlib=={OTHER}"])
+
+
+def test_dep_pinning_rule(engine):
+    assert engine._check_dep_pinning(["mathlib"]) == []
+    assert engine._check_dep_pinning([f"mathlib=={OTHER}"]) == []
+    errors = engine._check_dep_pinning(["mathlib>=v4.0.0"])
+    assert errors and "mathlib==<version>" in errors[0]

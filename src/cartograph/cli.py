@@ -2475,27 +2475,55 @@ def cmd_workflow(args):
 
 
 def cmd_setup_mathlib(args):
-    from .mathlib_setup import (MATHLIB_PIN, MATHLIB_TOOLCHAIN,
-                                mathlib_status, setup_mathlib)
+    from .mathlib_setup import (MATHLIB_PIN, default_toolchain,
+                                mathlib_root, mathlib_root_source,
+                                mathlib_status, mathlib_toolchain,
+                                setup_mathlib)
+    from cg.infra_heavy_deps_store_python.src.heavy_deps_store import \
+        installed_versions
+    from cg.infra_mathlib_workspace_python.src.mathlib_workspace import \
+        STAMP_FILENAME
 
-    state = mathlib_status()
+    pin = (getattr(args, "pin", None) or MATHLIB_PIN).strip()
+    toolchain = getattr(args, "toolchain", None)
+    try:
+        state = mathlib_status(pin)
+    except ValueError as e:
+        err({"error": str(e)})
+        return
+    shown_toolchain = (mathlib_toolchain(pin) or toolchain
+                       or default_toolchain(pin) or "(pass --toolchain)")
     print(f"\n  Mathlib workspace: {state.state} ({state.reason})")
-    print(f"  Pin: {MATHLIB_PIN}   Toolchain: {MATHLIB_TOOLCHAIN}")
-    print(f"  Path: {state.path}\n")
+    print(f"  Pin: {pin}{' (default)' if pin == MATHLIB_PIN else ''}"
+          f"   Toolchain: {shown_toolchain}")
+    print(f"  Path: {state.path}")
+    print(f"  Store: {mathlib_root()}  (from {mathlib_root_source()})")
+    store = mathlib_root()
+    ready_pins = installed_versions(os.path.dirname(store),
+                                    os.path.basename(store),
+                                    marker=STAMP_FILENAME)
+    if ready_pins:
+        print(f"  Provisioned pins: {', '.join(ready_pins)}")
+    print()
     if args.status_only or state.ready:
         return
     print("  Provisioning - this downloads several GB of prebuilt Mathlib "
           "binaries.\n")
     try:
-        result = setup_mathlib(progress=lambda line: print(f"  {line}"))
+        result = setup_mathlib(progress=lambda line: print(f"  {line}"),
+                               pin=pin, toolchain=toolchain)
+    except ValueError as e:
+        err({"error": str(e)})
+        return
     except FileNotFoundError:
         err({"error": "lake not found - install Lean 4 via elan "
                       "(lean-lang.org/install), then re-run "
                       "`cartograph setup-mathlib`."})
         return
     if result.status.ready:
-        print("\n  Mathlib workspace ready - Lean widgets may now declare "
-              "a `mathlib` dependency.\n")
+        print(f"\n  Mathlib {pin} workspace ready - Lean widgets may now "
+              f"declare `mathlib=={pin}`"
+              f"{' (or a bare `mathlib`)' if pin == MATHLIB_PIN else ''}.\n")
     else:
         err({"error": f"provisioning failed: {result.status.reason}"})
 
@@ -4380,13 +4408,20 @@ def _build_cli() -> AgentCLI:
         },
         {
             "name": "setup-mathlib",
-            "help": "Provision the shared Mathlib workspace for Lean widgets "
-                    "(multi-GB, one-time)",
+            "help": "Provision a shared Mathlib workspace for Lean widgets "
+                    "(multi-GB, one-time per pin)",
             "handler": cmd_setup_mathlib,
             "args": [
                 {"name": "--status", "action": "store_true", "default": False,
                  "dest": "status_only",
                  "help": "Report workspace readiness without provisioning"},
+                {"name": "--pin", "default": None,
+                 "help": "Mathlib revision to provision (default: the "
+                         "engine's pin). Widgets ask for it as "
+                         "`mathlib==<pin>`"},
+                {"name": "--toolchain", "default": None,
+                 "help": "Lean toolchain for --pin (default: "
+                         "leanprover/lean4:<pin> for release tags)"},
             ],
         },
     ])
