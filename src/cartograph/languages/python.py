@@ -110,6 +110,11 @@ def _version_satisfies(installed: str, specifier: str) -> bool:
     return True
 
 
+def _canonical_dist(name: str) -> str:
+    """A distribution name as pip compares it: case and runs of -, _ and . do not matter."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 class PythonEngine(LanguageEngine):
     name = "python"
     validation_version = 1
@@ -288,6 +293,16 @@ class PythonEngine(LanguageEngine):
                     unverified.add(dep)
         except Exception:
             unverified = set(dep_names)
+        # This interpreter is not where the widget's dependencies are installed. The widget's validation venv
+        # is (while validate runs), and the stamp validate leaves records what it found there (for checkin),
+        # so a declared package provides what it really installs (warp-lang provides warp) with no name table.
+        if unverified:
+            resolved = self._dependency_modules(path, widget.get("language") or self.name)
+            for dep in list(unverified):
+                mods = resolved.get(_canonical_dist(dep))
+                if mods is not None:
+                    provided_modules |= set(mods)
+                    unverified.discard(dep)
 
         own_modules = {"src"}
         src_dir = os.path.join(path, "src")
@@ -440,7 +455,52 @@ class PythonEngine(LanguageEngine):
                 line_no = code[:m.start()].count("\n") + 1
                 warnings.append(f"os.environ/getenv call in {rel}:{line_no} - verify it's not project-specific")
 
-        return {"blocks": blocks, "warnings": warnings}
+        # Declared packages nothing here could resolve: validate scans again once it has installed them.
+        return {"blocks": blocks, "warnings": warnings, "unverified": sorted(unverified)}
+
+    # One line: on Windows _run goes through cmd.exe, which ends the command at a newline.
+    _DIST_MODULES_CODE = "import json,importlib.metadata as m; print(json.dumps(m.packages_distributions()))"
+
+    def _installed_dependency_modules(self, path: str) -> dict:
+        """Canonical distribution name -> top-level import names, as the widget's validation venv has them
+        installed; empty when there is no venv."""
+        venv_dir = os.path.join(path, self.env_dir)
+        py = (os.path.join(venv_dir, "Scripts", "python.exe") if os.name == "nt"
+              else os.path.join(venv_dir, "bin", "python"))
+        if not os.path.exists(py):
+            return {}
+        try:
+            res = self._run([py, "-c", self._DIST_MODULES_CODE], cwd=path, timeout=30)
+            mod_to_dists = json.loads(res.stdout) if res.returncode == 0 else {}
+        except Exception:  # noqa: BLE001
+            return {}
+        provided: dict = {}
+        for mod, dists in mod_to_dists.items():
+            for dist in dists:
+                provided.setdefault(_canonical_dist(dist), set()).add(mod.lower())
+        return provided
+
+    def _dependency_modules(self, path: str, language: str) -> dict:
+        """What each declared package provides: from the validation venv when one is here, else from a
+        fresh validation stamp, which records what the venv held when these exact files passed."""
+        provided = self._installed_dependency_modules(path)
+        if provided:
+            return provided
+        from ..validation_stamp import is_stamp_valid, read_stamp
+        try:
+            if not is_stamp_valid(path, language, self):
+                return {}
+            recorded = (read_stamp(path) or {}).get("dependency_modules") or {}
+        except Exception:  # noqa: BLE001
+            return {}
+        return {dist: set(mods) for dist, mods in recorded.items() if isinstance(mods, list)}
+
+    def stamp_metadata(self, path: str, dependencies: list) -> dict:
+        """The import names each declared package installed in the validation venv, for checkin's scan."""
+        provided = self._installed_dependency_modules(path)
+        declared = {_canonical_dist(_dep_bare_name(d)) for d in dependencies if isinstance(d, str)}
+        found = {dist: sorted(provided[dist]) for dist in sorted(declared) if dist in provided}
+        return {"dependency_modules": found} if found else {}
 
     def _check_assign_targets(self, targets, value, lineno, rel="") -> list[str]:
         """Check if an assignment's value is a hardcoded constant."""

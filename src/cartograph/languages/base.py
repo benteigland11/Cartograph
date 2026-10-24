@@ -423,6 +423,11 @@ class LanguageEngine:
         """
         return None
 
+    def stamp_metadata(self, path: str, dependencies: list) -> dict:
+        """Facts found in the validation environment, recorded in the stamp for checkin, which runs
+        without that environment. Called after the tests pass, before cleanup."""
+        return {}
+
     def cleanup(self, path: str) -> None:
         """Remove any temp artifacts created during validation. Best-effort."""
         pass
