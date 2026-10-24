@@ -29,7 +29,7 @@ STAMP_FILE = ".validation_stamp.json"
 
 
 def write_stamp(widget_path: str, language: str, engine,
-                test_results: dict | None = None) -> None:
+                test_results: dict | None = None, extra: dict | None = None) -> None:
     """Write a fresh validation stamp. Called after successful validate_item()."""
     patterns = engine.watched_patterns(widget_path)
     from datetime import datetime, timezone
@@ -40,6 +40,7 @@ def write_stamp(widget_path: str, language: str, engine,
         "runtime": rv,
         "test_results": test_results or {},
         "validated_at": datetime.now(timezone.utc).isoformat(),
+        **(extra or {}),
     }
     _write_stamp(widget_path, metadata=metadata, stamp_name=STAMP_FILE,
                  patterns=patterns)

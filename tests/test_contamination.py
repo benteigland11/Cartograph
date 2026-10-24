@@ -3386,3 +3386,62 @@ def test_a_bundled_wheel_path_declares_its_distribution(tmp_path):
     (src/"reader.py").write_text("import mido\n")
     result = PythonEngine().scan_contamination(str(tmp_path), {"dependencies": ["wheels/mido-1.3.3-py3-none-any.whl"]})
     assert not any("'mido'" in f for f in result["blocks"] + result["warnings"]), result
+
+
+def _venv_with_distribution(widget, dist, version, module):
+    """A real venv in the widget dir holding a distribution whose import name differs from its name."""
+    import subprocess
+    import venv
+    venv_dir = widget/".venv"
+    venv.create(str(venv_dir), with_pip=False)
+    py = venv_dir/("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    purelib = subprocess.run([str(py), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+    info = os.path.join(purelib, f"{dist.replace('-', '_')}-{version}.dist-info")
+    os.makedirs(info)
+    os.makedirs(os.path.join(purelib, module))
+    _write(os.path.join(purelib, module, "__init__.py"), "")
+    _write(os.path.join(info, "METADATA"), f"Metadata-Version: 2.1\nName: {dist}\nVersion: {version}\n")
+    _write(os.path.join(info, "top_level.txt"), f"{module}\n")
+
+
+def test_a_declared_package_provides_what_the_validation_venv_installed(tmp_path):
+    """warp-lang provides warp: no name table knows it, the widget's validation venv does. Once the
+    package is installed there, an import nothing declared provides is a block again, not a warning."""
+    from cartograph.languages.python import PythonEngine
+    (tmp_path/"src").mkdir()
+    (tmp_path/"src"/"sim.py").write_text("import warp\nimport some_unknown_module\n")
+    lang = PythonEngine()
+    deps = {"dependencies": ["warp-lang>=1.8.1"]}
+    before = lang.scan_contamination(str(tmp_path), deps)
+    assert before["unverified"] == ["warp-lang"]
+    assert any("'warp'" in w for w in before["warnings"]) and not before["blocks"]
+    _venv_with_distribution(tmp_path, "warp-lang", "1.8.1", "warp")
+    after = lang.scan_contamination(str(tmp_path), deps)
+    assert after["unverified"] == []
+    assert not any("'warp'" in f for f in after["blocks"] + after["warnings"]), after
+    assert any("'some_unknown_module'" in b for b in after["blocks"]), after
+
+
+def test_the_stamp_carries_what_the_venv_provided_to_checkin(tmp_path):
+    """validate removes its venv; the stamp it writes records what the declared packages provided, which
+    checkin's scan honours while the stamp is fresh, and not once the files change."""
+    import json
+    from cartograph.languages.python import PythonEngine
+    from cartograph.safefs import robust_rmtree
+    from cartograph.validation_stamp import write_stamp
+    (tmp_path/"src").mkdir()
+    (tmp_path/"src"/"sim.py").write_text("import warp\n")
+    (tmp_path/"widget.json").write_text(json.dumps({"tech_stack": {"language": "python"}}))
+    lang = PythonEngine()
+    deps = {"language": "python", "dependencies": ["warp_lang>=1.8.1"]}
+    _venv_with_distribution(tmp_path, "warp-lang", "1.8.1", "warp")
+    recorded = lang.stamp_metadata(str(tmp_path), deps["dependencies"] + ["numpy>=1.0"])
+    assert recorded == {"dependency_modules": {"warp-lang": ["warp"]}}
+    write_stamp(str(tmp_path), "python", lang, extra=recorded)
+    robust_rmtree(str(tmp_path/".venv"))
+    fresh = lang.scan_contamination(str(tmp_path), deps)
+    assert not any("'warp'" in f for f in fresh["blocks"] + fresh["warnings"]), fresh
+    (tmp_path/"src"/"sim.py").write_text("import warp\nimport os\n")
+    stale = lang.scan_contamination(str(tmp_path), deps)
+    assert any("'warp'" in w for w in stale["warnings"]), stale
