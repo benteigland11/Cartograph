@@ -3488,15 +3488,17 @@ class TestFlutterSpecific:
             "import 'package:flutter/widgets.dart';\n\n"
             "Widget hello() => const Text('hi', "
             "textDirection: TextDirection.ltr);\n")
-        assert not any("Unlisted" in w for w in result["warnings"]), \
-            f"package:flutter must not need declaring: {result['warnings']}"
+        assert not any("Unlisted" in f
+                       for f in result["warnings"] + result["blocks"]), \
+            f"package:flutter must not need declaring: {result}"
 
     def test_relative_import_not_flagged(self, tmp_path):
         result = self._fl_scan(tmp_path,
             "import 'other_helper.dart';\n\n"
             "String hello() => 'world';\n")
-        assert not any("Unlisted" in w for w in result["warnings"]), \
-            f"relative imports must not need declaring: {result['warnings']}"
+        assert not any("Unlisted" in f
+                       for f in result["warnings"] + result["blocks"]), \
+            f"relative imports must not need declaring: {result}"
 
     def test_pubspec_path_dep_import_not_flagged(self, tmp_path):
         # Blueprint-composed widgets are declared as pub path deps in
@@ -3509,8 +3511,10 @@ class TestFlutterSpecific:
         result = self._fl_scan(tmp_path,
             "import 'package:greet/greet.dart';\n\n"
             "String shout(String n) => greet(n).toUpperCase();\n")
-        assert not any("Unlisted" in w for w in result["warnings"]), \
-            f"pubspec path deps must count as declared: {result['warnings']}"
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "package:greet" in f
+                       for f in findings), \
+            f"pubspec path deps must be quiet: {findings}"
 
     def test_sleep_non_literal_in_test_warns(self, tmp_path):
         clean_src = CLEAN["flutter"][0]
@@ -3519,6 +3523,76 @@ class TestFlutterSpecific:
                       "void pause(Duration d) { sleep(d); }\n")
         assert any("sleep" in w.lower() for w in result["warnings"]), \
             f"non-literal sleep in tests must warn (unknown duration): {result}"
+
+    # -- Unlisted imports: block in src/, warn in tests/ and examples/ --
+
+    def test_unlisted_import_in_src_blocks(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "import 'package:http/http.dart' as http;\n\n"
+            "String label(http.Client c) => c.toString();\n")
+        assert any("package:http/http.dart" in b for b in result["blocks"]), \
+            f"unlisted import in src/ must block: {result['blocks']}"
+        assert not any("package:http/http.dart" in w or "unlisted" in w.lower()
+                       for w in result["warnings"]), \
+            f"unlisted import in src/ must not warn: {result['warnings']}"
+
+    def test_unlisted_import_in_tests_warns(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "String hello() => 'world';\n",
+            test_code="import 'package:http/http.dart' as http;\n\n"
+                      "void main() { http.Client(); }\n")
+        assert any("package:http/http.dart" in w for w in result["warnings"]), \
+            f"unlisted import in tests/ must warn: {result['warnings']}"
+        assert not any("package:http/http.dart" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted import in tests/ must not block: {result['blocks']}"
+
+    def test_unlisted_import_in_examples_warns(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "String hello() => 'world';\n",
+            example_code="import 'package:http/http.dart' as http;\n\n"
+                         "void main() { http.Client(); }\n")
+        assert any("package:http/http.dart" in w for w in result["warnings"]), \
+            f"unlisted import in examples/ must warn: {result['warnings']}"
+        assert not any("package:http/http.dart" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted import in examples/ must not block: {result['blocks']}"
+
+    def test_own_package_import_quiet(self, tmp_path):
+        """pubspec.yaml name: is the widget itself.
+
+        _make_widget does not write a pubspec.yaml, so this test does.
+        The scaffolded test imports package:<module>/<module>.dart.
+        """
+        _skip_if_missing("flutter")
+        _write(os.path.join(str(tmp_path), "pubspec.yaml"),
+               "name: module\n")
+        result = self._fl_scan(tmp_path,
+            "import 'package:module/module.dart';\n\n"
+            "String hello() => 'world';\n",
+            test_code=(
+                "import 'package:flutter_test/flutter_test.dart';\n\n"
+                "import 'package:module/module.dart';\n\n"
+                "void main() {\n"
+                "  test('renders', () {});\n"
+                "}\n"
+            ))
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "package:module" in f
+                       or "flutter_test" in f for f in findings), \
+            f"own package must be quiet in src/ and tests/: {findings}"
+
+    def test_declared_dep_and_dart_import_quiet(self, tmp_path):
+        result = self._fl_scan(tmp_path,
+            "import 'dart:convert';\n"
+            "import 'package:http/http.dart' as http;\n\n"
+            "String label(Object o) => jsonEncode(o);\n"
+            "String client(http.Client c) => c.toString();\n",
+            dependencies=["http>=1.2.0"])
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "package:http" in f
+                       or "dart:convert" in f for f in findings), \
+            f"declared dep and dart: import must be quiet: {findings}"
 
 
 def test_a_declared_package_is_honoured_without_being_installed(tmp_path):

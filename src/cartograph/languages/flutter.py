@@ -159,7 +159,7 @@ def _dart_class_name(module_name: str) -> str:
 
 class FlutterEngine(LanguageEngine):
     name = "flutter"
-    validation_version = 1
+    validation_version = 2
     file_ext = "dart"
     toolchain = {
         "flutter": "Install the Flutter SDK 3.x - docs.flutter.dev/get-started/install",
