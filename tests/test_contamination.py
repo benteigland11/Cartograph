@@ -3208,8 +3208,8 @@ class TestLeanSpecific:
     block both - and its lexer must not trip on the same tokens inside
     strings, line comments, or (nested) block comments."""
 
-    def _lean_scan(self, tmp_path, src, test_code=""):
-        return _scan(tmp_path, "lean", "lean", src, test_code)
+    def _lean_scan(self, tmp_path, src, test_code="", **kw):
+        return _scan(tmp_path, "lean", "lean", src, test_code, **kw)
 
     def test_sorry_in_src_blocks(self, tmp_path):
         _skip_if_missing("lean")
@@ -3290,6 +3290,103 @@ class TestLeanSpecific:
             "/-- Doc mentioning sorry, axiom, IO.println. -/\n"
             'def hello : String := "world"\n')
         assert result["blocks"] == [], result
+
+    # -- Unlisted imports: block in src/, warn in tests/ and examples/ --
+
+    def test_unlisted_import_in_src_blocks(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(tmp_path, "import Somepkg\n")
+        assert any("Somepkg" in b for b in result["blocks"]), \
+            f"unlisted import in src/ must block: {result['blocks']}"
+        assert not any("Somepkg" in w or "not in widget.json" in w
+                       for w in result["warnings"]), \
+            f"unlisted import in src/ must not warn: {result['warnings']}"
+
+    def test_unlisted_import_in_tests_warns(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path, CLEAN["lean"][0],
+            test_code="import Somepkg\n")
+        assert any("Somepkg" in w for w in result["warnings"]), \
+            f"unlisted import in tests/ must warn: {result['warnings']}"
+        assert not any("Somepkg" in b or "not in widget.json" in b
+                       for b in result["blocks"]), \
+            f"unlisted import in tests/ must not block: {result['blocks']}"
+
+    def test_unlisted_import_in_examples_warns(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path, CLEAN["lean"][0],
+            example_code="import Somepkg\n")
+        assert any("Somepkg" in w for w in result["warnings"]), \
+            f"unlisted import in examples/ must warn: {result['warnings']}"
+        assert not any("Somepkg" in b or "not in widget.json" in b
+                       for b in result["blocks"]), \
+            f"unlisted import in examples/ must not block: {result['blocks']}"
+
+    def test_own_module_import_quiet(self, tmp_path):
+        """src/<slug>.lean covers `import <slug>` via the scanned basename.
+
+        _make_widget writes src/module.lean, so the slug here is module.
+        """
+        _skip_if_missing("lean")
+        result = self._lean_scan(tmp_path, "import module\n")
+        findings = result["warnings"] + result["blocks"]
+        assert not any("not in widget.json" in f for f in findings), \
+            f"own module must be quiet: {findings}"
+
+    def test_nested_src_module_import_quiet(self, tmp_path):
+        """src/Foo/Bar.lean imported as Foo.Bar has root Foo, not the filename."""
+        _skip_if_missing("lean")
+        _write(os.path.join(str(tmp_path), "src", "Foo", "Bar.lean"),
+               "/-- Nested module. -/\ndef bar : Nat := 0\n")
+        result = self._lean_scan(tmp_path, "import Foo.Bar\n")
+        findings = result["warnings"] + result["blocks"]
+        assert not any("Foo" in f and "not in widget.json" in f
+                       for f in findings), \
+            f"import Foo.Bar must be quiet when src/Foo/ exists: {findings}"
+
+    def test_lakefile_lean_lib_name_quiet(self, tmp_path):
+        """[[lean_lib]] name is an own root even when it is not a filename.
+
+        The package-level name and [[lean_exe]] name are different on purpose,
+        so only the lean_lib table counts.
+        """
+        _skip_if_missing("lean")
+        _write(os.path.join(str(tmp_path), "lakefile.toml"),
+               'name = "package_name"\n\n'
+               '[[lean_exe]]\n'
+               'name = "runner"\n\n'
+               '[[lean_lib]]\n'
+               'name = "WidgetLib"\n'
+               'srcDir = "src"\n')
+        result = self._lean_scan(tmp_path, "import WidgetLib\n")
+        findings = result["warnings"] + result["blocks"]
+        assert not any("WidgetLib" in f for f in findings), \
+            f"lakefile [[lean_lib]] name must be quiet: {findings}"
+
+    def test_declared_mathlib_and_stdlib_import_quiet(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(
+            tmp_path,
+            "import Mathlib\nimport Init\nimport Std\n"
+            "import Lean\nimport Lake\n",
+            dependencies=["mathlib>=4.0.0"])
+        findings = result["warnings"] + result["blocks"]
+        assert not any(
+            name in f
+            for f in findings
+            for name in ("Mathlib", "Init", "Std", "Lean", "Lake",
+                         "not in widget.json")), \
+            f"declared Mathlib and Init/Std/Lean/Lake must be quiet: {findings}"
+
+    def test_undeclared_mathlib_import_in_src_blocks(self, tmp_path):
+        _skip_if_missing("lean")
+        result = self._lean_scan(tmp_path, "import Mathlib\n")
+        assert any("Mathlib" in b for b in result["blocks"]), \
+            f"undeclared Mathlib import in src/ must block: {result['blocks']}"
+        assert not any("Mathlib" in w for w in result["warnings"]), \
+            f"undeclared Mathlib import in src/ must not warn: {result['warnings']}"
 
 
 @pytest.mark.csharp
