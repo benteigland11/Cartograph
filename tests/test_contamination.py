@@ -2442,6 +2442,80 @@ class TestGoSpecific:
         assert not any("errors.is" in w.lower() for w in result["warnings"]), \
             f"errors.Is is the correct form, must not warn: {result['warnings']}"
 
+    # -- Unlisted imports: block in src/, warn in tests/ and examples/ --
+
+    def test_unlisted_import_in_src_blocks(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport "github.com/google/uuid"\n\n'
+            'var _ = uuid.New\n')
+        assert any("github.com/google/uuid" in b for b in result["blocks"]), \
+            f"unlisted import in src/ must block: {result['blocks']}"
+        assert not any("github.com/google/uuid" in w or "unlisted" in w.lower()
+                       for w in result["warnings"]), \
+            f"unlisted import in src/ must not warn: {result['warnings']}"
+
+    def test_unlisted_import_in_tests_warns(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\n// Hello returns a greeting.\n'
+            'func Hello() string { return "world" }\n',
+            test_code='package tests\n\nimport "github.com/google/uuid"\n\n'
+                      'func TestUUID() { _ = uuid.New }\n')
+        assert any("github.com/google/uuid" in w for w in result["warnings"]), \
+            f"unlisted import in tests/ must warn: {result['warnings']}"
+        assert not any("github.com/google/uuid" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted import in tests/ must not block: {result['blocks']}"
+
+    def test_unlisted_import_in_examples_warns(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\n// Hello returns a greeting.\n'
+            'func Hello() string { return "world" }\n',
+            example_code='package main\n\nimport "github.com/google/uuid"\n\n'
+                         'func main() { _ = uuid.New }\n')
+        assert any("github.com/google/uuid" in w for w in result["warnings"]), \
+            f"unlisted import in examples/ must warn: {result['warnings']}"
+        assert not any("github.com/google/uuid" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted import in examples/ must not block: {result['blocks']}"
+
+    def test_own_module_import_quiet(self, tmp_path):
+        """go.mod's module path (and subpaths) is the widget itself."""
+        _skip_if_missing("go")
+        src = (
+            'package module\n\n'
+            'import "example.com/acme/src"\n\n'
+            '// Hello references this module.\n'
+            'func Hello() string { _ = src.Thing; return "ok" }\n'
+        )
+        test = (
+            'package tests\n\n'
+            'import "example.com/acme"\n\n'
+            'func TestOwn() { _ = acme.Hello }\n'
+        )
+        wdir = _make_widget(tmp_path, "go", "module.go", src, test_code=test)
+        _write(os.path.join(wdir, "go.mod"),
+               "module example.com/acme\n\ngo 1.24\n")
+        result = GoEngine().scan_contamination(
+            wdir, {"language": "go", "dependencies": []})
+        findings = result["warnings"] + result["blocks"]
+        assert not any("example.com/acme" in f or "unlisted" in f.lower()
+                       for f in findings), \
+            f"own module must be quiet in src/ and tests/: {findings}"
+
+    def test_declared_dep_and_stdlib_import_quiet(self, tmp_path):
+        result = self._go_scan(tmp_path,
+            'package module\n\nimport (\n'
+            '\t"fmt"\n'
+            '\t"github.com/google/uuid"\n'
+            ')\n\n'
+            'var _ = uuid.New\n'
+            'var _ = fmt.Sprintf\n',
+            dependencies=["github.com/google/uuid>=1.6.0"])
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "github.com/google/uuid" in f
+                       or "fmt" in f for f in findings), \
+            f"declared dep and stdlib import must be quiet: {findings}"
+
 
 _SUBCKT_CLEAN = (
     "* clean parametric block\n"
