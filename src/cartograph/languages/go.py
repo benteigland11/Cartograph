@@ -106,7 +106,7 @@ def _go_package_name(module_name: str) -> str:
 
 class GoEngine(LanguageEngine):
     name = "go"
-    validation_version = 1
+    validation_version = 2
     file_ext = "go"
     aliases = ["golang"]
     toolchain = {"go": "Install Go 1.23+ - go.dev/dl"}

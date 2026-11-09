@@ -221,14 +221,15 @@ string- and comment-aware by construction. Compiled once to a cached binary
 because `go run scanner.go <files...>` would consume the target files as
 additional sources rather than passing them as argv. Blocks in src/:
 `fmt.Print*/print/println`, `os.Exit`/`log.Fatal*`, `panic` inside
-`init()`, credentials, absolute paths, hardcoded IPs, `time.Sleep`, and the
+`init()`, credentials, absolute paths, hardcoded IPs, `time.Sleep`, the
 deprecated `io/ioutil` import (named replacements live in `io`/`os` since
-Go 1.16). Warnings: hardcoded URLs, env var access
-(`os.Getenv`/`os.LookupEnv`), top-level mutable `var`s, hardcoded numeric
-tunables, unlisted module imports (resolved against go.mod's module path
+Go 1.16), and unlisted module imports (resolved against go.mod's module path
 and widget.json deps; stdlib detected by the no-dot-in-first-path-element
-rule). Sleeps in tests warn only above 1s, with durations estimated
-statically from `N * time.Second`-shaped expressions.
+rule). The same unlisted import warns in tests/ and examples/. Warnings:
+hardcoded URLs, env var access (`os.Getenv`/`os.LookupEnv`), top-level
+mutable `var`s, and hardcoded numeric tunables. Sleeps in tests warn only
+above 1s, with durations estimated statically from `N * time.Second`-shaped
+expressions.
 
 **Modern-standards warnings** (overridable at checkin, all src/-only):
 - `math/rand` -> prefer `math/rand/v2` (Go 1.22+); `math/rand/v2` is exempt

@@ -167,8 +167,9 @@ func main() {
 		}
 
 		// Imports: deprecated/legacy stdlib (modern-standards), then
-		// unlisted external modules (all files - tests and examples
-		// install the same deps as src).
+		// unlisted external modules. Tests and examples install the
+		// same deps as src, so an unlisted import there warns; in
+		// src/ it blocks.
 		for _, imp := range f.Imports {
 			p := strings.Trim(imp.Path.Value, `"`)
 			switch p {
@@ -197,7 +198,7 @@ func main() {
 				}
 			}
 			if !listed {
-				add("unlisted_import", path, line(imp), p, "warning")
+				add("unlisted_import", path, line(imp), p, sev)
 			}
 		}
 
