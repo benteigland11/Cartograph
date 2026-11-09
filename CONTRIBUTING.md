@@ -46,10 +46,10 @@ Run `cartograph doctor` to verify all language engine dependencies are installed
 
 ## Writing code
 
-- Run `pytest` before submitting. Tests live in `tests/`. All 240+ tests must pass.
+- Run `pytest` before submitting. Tests live in `tests/`. The full suite must pass.
 - No extra dependencies. The core uses only the stdlib.
 - Keep cloud logic in `src/cartograph/cloud.py`. Keep auth logic in `src/cartograph/auth.py`. The CLI is in `src/cartograph/cli.py`.
-- If you add a new command, update `_SETUP_INSTRUCTIONS` in `cli.py` and the command reference in `CLAUDE.md`.
+- If you add a new command, update `_build_setup_instructions` in `cli.py`. Agent instructions live in `AGENTS.md`. Do not paste a command list there. The command surface is `cartograph --help`.
 
 ## Adding a language
 
@@ -127,7 +127,15 @@ A language engine must:
 - Run tests and report pass/fail
 - Measure code coverage (if possible to measure, it should be measured and sit at 80%)
 - Execute example files (if the language supports it)
-- Provide a native contamination scanner written in the target language (exception: languages with no file I/O capability may use a Python fallback scanner). The scanner must enforce the shared unlisted-import policy: any import that is not stdlib, not a local src/ module, and not declared in widget.json `dependencies` must **block in src/** and **warn in tests/examples**. The fix is trivial (declare the dep or remove the import), so this is not overridable.
+- Provide a native contamination scanner written in the target language (exception: languages with no file I/O capability may use a Python fallback scanner). The scanner must flag any import that is not stdlib, not a local src/ module, and not declared in widget.json `dependencies`. Severity follows `tests/test_contamination.py`, and it is not one rule for every language:
+  - `TestContaminationStandard.test_unlisted_import_flagged` passes when the `src/` finding is in `warnings` or in `blocks`.
+  - Python, Blender, and KiCad share the Python AST scanner. Tests require a **block in src/** when declared dependencies can be verified (`test_a_declared_package_is_honoured_without_being_installed`, `TestBlenderSpecific.test_unlisted_import_still_blocks`, `TestKicadSpecific.test_unlisted_import_still_blocks`). Tests require a **warning in tests/ and examples/**, with no matching block (`TestPythonSpecific.test_unlisted_import_in_test_warns`, `TestPythonSpecific.test_unlisted_import_in_example_warns`). When a declared dependency is not installed in the interpreter running the validator, `test_a_declared_package_is_honoured_without_being_installed` requires a **warning** instead of a block.
+  - JavaScript tests require a **block in src/** (`TestJSSpecific.test_multiline_require_blocks_unlisted`, `TestJSSpecific.test_multiline_import_blocks_unlisted`) and a **warning in examples** (`TestJSSpecific.test_unlisted_import_in_example_warns`). Angular calls the same `js_scanner.js`, which emits `severity: "block"` for `src/`. TypeScript subclasses the JavaScript engine. Angular and TypeScript have no separate test that pins the bucket.
+  - PHP tests require a **block in src/** when composer's autoload tables are present (`TestPhpSpecific.test_resolver_blocks_unknown_namespace_in_src`) and a **warning in tests/** with no matching block (`TestPhpSpecific.test_resolver_warns_in_tests_not_blocks`). Without that resolver the scanner appends a warning only, including for `src/`.
+  - Go, Java, C#, Flutter, Rust, and Lean scanners emit `severity: "warning"` for an unlisted import in `src/`. The shared test accepts that warning.
+  - Nim's scanner emits `severity: "block"` in `src/` and `"warning"` in tests/examples. `TestNimSpecific.test_nim_import_forms` accepts either list. `TestNimSpecific.test_unlisted_import_in_example_warns` requires a warning.
+  - SystemVerilog, GDScript, and Terraform are outside `LANGUAGES_SOFTWARE`, so the shared unlisted-import check does not run for them. `TestOpenSCADContamination` and `TestSpiceSpecific` do not assert an unlisted-import severity. The OpenSCAD scanner blocks an undeclared library `use`/`include` in `src/` and warns in tests/examples. SPICE has no unlisted-import check.
+  - A block cannot be overridden. A warning can, with `--override-warnings` and `--override-reason`. The fix is still to declare the dependency or remove the import.
 - Isolate dependency installation so validation never pollutes the user's environment
 - Include a custom rules template in `src/cartograph/rules.py` so users can write validation rules in that language
 - Clean up after itself. No temp files, no compiled binaries left behind.
