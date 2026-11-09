@@ -19,8 +19,9 @@
 //
 // Severity contract (mirrors the Go/Rust/Java scanners):
 //   - print/exit: emitted for src/ only, severity block
-//   - abs_path/credential/ip/sleep: block in src/, warning in tests/examples
-//   - url/hardcoded_value/env_var/unlisted_import: warning
+//   - abs_path/credential/ip/sleep/unlisted_import: block in src/, warning
+//     in tests/examples
+//   - url/hardcoded_value/env_var: warning
 //   - sleep in tests/examples: warn only above ~1s (statically estimated)
 
 import 'dart:convert';
@@ -135,15 +136,20 @@ void scanFile(String path, List<String> declaredDeps, String? ownPackage) {
         emit('sleep', path, ln, strip(code), 'warning');
       }
     }
+    // Unlisted package imports: block in src/, warn in tests/ and
+    // examples/. Tests and examples install the same deps as src.
+    // The severity string must be exactly "block": the engine only lets
+    // that value escape the scanner_warning_messages grouping.
     final imp = importLine.firstMatch(withStrings);
-    if (imp != null && isSrc) {
+    if (imp != null) {
       final uri = imp.group(1)!;
       if (!uri.startsWith('dart:') && uri.startsWith('package:')) {
         final pkg = uri.substring('package:'.length).split('/').first;
         if (!providedPackages.contains(pkg) &&
             pkg != ownPackage &&
             !declaredDeps.contains(pkg)) {
-          emit('unlisted_import', path, ln, uri, 'warning');
+          emit('unlisted_import', path, ln, uri,
+              isSrc ? 'block' : 'warning');
         }
       }
     }

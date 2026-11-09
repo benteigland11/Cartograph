@@ -756,14 +756,15 @@ credentials, import URIs). Interpolation holes count as string content -
 acceptable for warning-grade checks. Blocks in src/: console output
 (`print`, `debugPrint`, `stdout`/`stderr` writes), `exit()`, credentials,
 absolute paths (drive-letter branch guarded so `https://` never matches
-via `s://`), hardcoded IPs, and blocking `sleep()` (`Future.delayed` is
-deliberately not flagged - awaited delays don't block the caller).
-Warnings: hardcoded URLs (localhost/127.0.0.1/example.* /.test exempted),
-`Platform.environment` access, top-level numeric `const`/`final`s other
-than 0/±1, and unlisted `package:` imports (resolved against widget.json
-deps plus pubspec path deps; `dart:*`, `package:flutter`,
-`package:flutter_test`, relative imports, and the widget's own package are
-exempt). Sleeps in tests warn only above 1s, statically estimated from
+via `s://`), hardcoded IPs, blocking `sleep()` (`Future.delayed` is
+deliberately not flagged - awaited delays don't block the caller), and
+unlisted `package:` imports (resolved against widget.json deps plus
+pubspec path deps; `dart:*`, `package:flutter`, `package:flutter_test`,
+relative imports, and the widget's own package are exempt). The same
+unlisted import warns in tests/ and examples/. Warnings: hardcoded URLs
+(localhost/127.0.0.1/example.* /.test exempted), `Platform.environment`
+access, and top-level numeric `const`/`final`s other than 0/±1. Sleeps
+in tests warn only above 1s, statically estimated from
 `Duration(unit: literal)` arguments; non-literal durations count as long.
 
 **Blueprints:** composition is wired as pub *path dependencies* -
