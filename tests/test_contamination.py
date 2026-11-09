@@ -2589,6 +2589,107 @@ class TestRustSpecific:
         assert any("todo" in w.lower() for w in result["warnings"]), \
             f"todo! must warn: {result['warnings']}"
 
+    # -- Unlisted imports: block in src/, warn in tests/ and examples/ --
+
+    def test_unlisted_import_in_src_blocks(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            'use some_unregistered_crate::Thing;\n')
+        assert any("some_unregistered_crate" in b for b in result["blocks"]), \
+            f"unlisted import in src/ must block: {result['blocks']}"
+        assert not any("some_unregistered_crate" in w or "unlisted" in w.lower()
+                       for w in result["warnings"]), \
+            f"unlisted import in src/ must not warn: {result['warnings']}"
+
+    def test_unlisted_import_in_tests_warns(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            '/// Hello returns a greeting.\n'
+            'pub fn hello() -> String { String::from("world") }\n',
+            test_code='use some_unregistered_crate::Thing;\n\n'
+                      'fn test_thing() { let _ = Thing; }\n')
+        assert any("some_unregistered_crate" in w for w in result["warnings"]), \
+            f"unlisted import in tests/ must warn: {result['warnings']}"
+        assert not any("some_unregistered_crate" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted import in tests/ must not block: {result['blocks']}"
+
+    def test_unlisted_import_in_examples_warns(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            '/// Hello returns a greeting.\n'
+            'pub fn hello() -> String { String::from("world") }\n',
+            example_code='use some_unregistered_crate::Thing;\n\n'
+                         'fn main() { let _ = Thing; }\n')
+        assert any("some_unregistered_crate" in w for w in result["warnings"]), \
+            f"unlisted import in examples/ must warn: {result['warnings']}"
+        assert not any("some_unregistered_crate" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted import in examples/ must not block: {result['blocks']}"
+
+    def test_own_crate_import_quiet(self, tmp_path):
+        """Cargo.toml [package] name is the widget itself.
+
+        _make_widget does not write a Cargo.toml, so this test does.
+        Hyphens in the package name are underscores in `use`.
+        """
+        _skip_if_missing("rust")
+        src = (
+            "use test_widget::process;\n\n"
+            "fn quiet() { let _ = process; }\n"
+        )
+        test = (
+            "use test_widget::process;\n\n"
+            "fn test_own() { let _ = process; }\n"
+        )
+        wdir = _make_widget(tmp_path, "rust", "module.rs", src, test_code=test)
+        _write(os.path.join(wdir, "Cargo.toml"),
+               '[package]\nname = "test-widget"\nversion = "0.1.0"\n'
+               'edition = "2021"\n')
+        result = RustEngine().scan_contamination(
+            wdir, {"language": "rust", "dependencies": []})
+        findings = result["warnings"] + result["blocks"]
+        assert not any("test_widget" in f or "unlisted" in f.lower()
+                       for f in findings), \
+            f"own crate must be quiet in src/ and tests/: {findings}"
+
+    def test_declared_dep_and_stdlib_import_quiet(self, tmp_path):
+        result = self._rust_scan(tmp_path,
+            'use std::collections::HashMap;\n'
+            'use some_registered_pkg::Thing;\n\n'
+            'fn quiet() {\n'
+            '    let _ = Thing;\n'
+            '    let _m: HashMap<u8, u8> = HashMap::new();\n'
+            '}\n',
+            dependencies=["some-registered-pkg>=1.0.0"])
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "some_registered_pkg" in f
+                       or "use std" in f for f in findings), \
+            f"declared dep and stdlib import must be quiet: {findings}"
+
+    def test_local_module_rs_quiet(self, tmp_path):
+        """use child::X is a local module when src/child.rs exists."""
+        _skip_if_missing("rust")
+        wdir = _make_widget(tmp_path, "rust", "module.rs",
+                            "use child::X;\n\nfn quiet() { let _ = X; }\n")
+        _write(os.path.join(wdir, "src", "child.rs"), "struct X;\n")
+        result = RustEngine().scan_contamination(
+            wdir, {"language": "rust", "dependencies": []})
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "use child" in f
+                       for f in findings), \
+            f"use child::X must be quiet when src/child.rs exists: {findings}"
+
+    def test_local_module_mod_rs_quiet(self, tmp_path):
+        """use child::X is a local module when src/child/mod.rs exists."""
+        _skip_if_missing("rust")
+        wdir = _make_widget(tmp_path, "rust", "module.rs",
+                            "use child::X;\n\nfn quiet() { let _ = X; }\n")
+        _write(os.path.join(wdir, "src", "child", "mod.rs"), "struct X;\n")
+        result = RustEngine().scan_contamination(
+            wdir, {"language": "rust", "dependencies": []})
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "use child" in f
+                       for f in findings), \
+            f"use child::X must be quiet when src/child/mod.rs exists: {findings}"
+
 
 class TestJavaSpecific:
     """Checks unique to the Java engine's native scanner, including the
