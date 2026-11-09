@@ -587,14 +587,17 @@ comments (`/- /- -/ -/`), doc comments, line comments, multi-line strings with
 escapes, interpolated strings, and char literals - so `sorry` in a docstring
 or an IP in a comment never trips. Blocks: `sorry`/`admit` (everywhere),
 `axiom` (src/), `IO.println`/`dbg_trace` (src/), `IO.sleep` (src/), absolute
-paths, credentials, hardcoded IPs (src/; warnings in tests/). Warnings:
+paths, credentials, hardcoded IPs (src/; warnings in tests/), and
+unlisted imports in src/ (declared deps read from widget.json, matched
+case-insensitively on the import root; `Init`/`Std`/`Lean`/`Lake` are exempt;
+own roots are scanned-file basenames, directory names directly under src/,
+and `[[lean_lib]]` names in lakefile.toml). The same unlisted import warns
+in tests/ and examples/. Warnings:
 `native_decide` (trusts the compiled evaluator instead of the kernel),
 `unsafe` and `partial` defs in src/ (totality is the point of a Lean widget),
-`IO.getEnv`, hardcoded URLs (localhost/example.* allowlisted), top-level
-numeric constants, unlisted imports (declared deps read from widget.json;
-`Init`/`Std`/`Lean`/`Lake` and the widget's own modules allowlisted). The
-scanner filters its own basename from the target list, so the self-scan trap
-is structurally avoided.
+`IO.getEnv`, hardcoded URLs (localhost/example.* allowlisted), and top-level
+numeric constants. The scanner filters its own basename from the target
+list, so the self-scan trap is structurally avoided.
 
 **Blueprints:** Lean composition uses lake path-requires: `blueprint add-dep`
 appends `[[require]] name = "<dep-lib>" path = "cg/<dep-widget>"` to the

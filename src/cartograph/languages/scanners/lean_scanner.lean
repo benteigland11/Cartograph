@@ -6,8 +6,9 @@ with cwd = the widget root (so widget.json is readable for declared deps).
 
 Outputs a JSON array of findings on the last stdout line:
   [{"kind": ..., "file": ..., "line": N, "detail": ..., "severity": ...}]
-Severity is "error" (hard block), or "warning". The engine folds errors
-into contamination blocks; validate_widget treats them as errors directly.
+Severity is "error" (kinds in scanner_messages, folded into blocks),
+"block" (unlisted_import: that kind sits in scanner_warning_messages, and
+only the string "block" escapes that grouping), or "warning".
 
 The lexer walks each file character-by-character tracking nested block
 comments (/- -/ including doc comments), line comments (--), string
@@ -206,6 +207,93 @@ def Finding.toJson (f : Finding) : Json :=
 /-- Roots that never count as unlisted imports: the Lean distribution. -/
 def stdlibRoots : List String := ["Init", "Std", "Lean", "Lake"]
 
+def pushUnique (xs : List String) (x : String) : List String :=
+  if x.length == 0 || xs.contains x then xs else x :: xs
+
+def dropTrailSlash (s : String) : String := Id.run do
+  if !s.endsWith "/" then
+    return s
+  let chars := s.toList
+  let mut out := ""
+  let mut i := 0
+  for c in chars do
+    if i + 1 < chars.length then
+      out := out.push c
+    i := i + 1
+  return out
+
+/-- First directory directly under `src/` when `path` is nested there.
+    `src/Foo/Bar.lean` yields `Foo`; `src/slug.lean` yields none.
+    Absolute paths must sit under `<cwd>/src/` so an ancestor directory
+    named `src` is not treated as the widget source root. -/
+def srcChildDir (cwd path : String) : Option String := Id.run do
+  let normPath := path.replace "\\" "/"
+  let srcPrefix := dropTrailSlash (cwd.replace "\\" "/") ++ "/src/"
+  let rest :=
+    if normPath.startsWith srcPrefix then
+      dropStr normPath srcPrefix.length
+    else if normPath.startsWith "src/" then
+      dropStr normPath 4
+    else
+      ""
+  if rest.length == 0 then
+    return none
+  match (rest.splitOn "/").filter (fun s => s.length > 0) with
+  | dir :: _ :: _ => return some dir
+  | _ => return none
+
+/-- Toml value after `=`, without surrounding quotes or a trailing comment. -/
+def unquoteToml (v : String) : String := Id.run do
+  let t := strip v
+  if t.startsWith "\"" then
+    match (dropStr t 1).splitOn "\"" with
+    | n :: _ => return n
+    | [] => return ""
+  else if t.startsWith "'" then
+    match (dropStr t 1).splitOn "'" with
+    | n :: _ => return n
+    | [] => return ""
+  else
+    let mut name := ""
+    for c in t.toList do
+      if c == ' ' || c == '#' || c == '\t' then
+        break
+      name := name.push c
+    return name
+
+/-- `name = "..."` inside a `[[lean_lib]]` table, if this line is that key. -/
+def leanLibNameValue (line : String) : Option String := Id.run do
+  let t := strip line
+  if !(t.startsWith "name") then
+    return none
+  let rest := strip (dropStr t 4)
+  if !(rest.startsWith "=") then
+    return none
+  let v := unquoteToml (strip (dropStr rest 1))
+  if v.length == 0 then
+    return none
+  return some v
+
+/-- `[[lean_lib]]` name values from lakefile.toml in cwd. Absent file is empty.
+    The package-level `name` and other tables (`[[lean_exe]]`) are not roots. -/
+def leanLibNames : IO (List String) := do
+  try
+    let txt ← IO.FS.readFile "lakefile.toml"
+    let mut names : List String := []
+    let mut inLib := false
+    for line in txt.splitOn "\n" do
+      let t := strip line
+      if t.startsWith "[[" then
+        let header := strip ((t.splitOn "#").head!)
+        inLib := header == "[[lean_lib]]"
+      else if inLib then
+        names := match leanLibNameValue t with
+          | some n => pushUnique names n
+          | none => names
+    return names
+  catch _ =>
+    return []
+
 def depBareName (dep : String) : String := Id.run do
   let mut name := ""
   for c in dep.toList do
@@ -245,6 +333,9 @@ def scanFile (path : String) (ownModules deps : List String)
   let text ← IO.FS.readFile path
   let isSrc := isSrcFile path
   let hard := if isSrc then "error" else "warning"
+  -- "block" in src/, "warning" elsewhere. unlisted_import sits in
+  -- scanner_warning_messages, and only the string "block" escapes that grouping.
+  let importSev := if isSrc then "block" else "warning"
   let mut fs := out
   let mut lineNo := 0
   for (code, strl) in shadowLines text do
@@ -301,24 +392,35 @@ def scanFile (path : String) (ownModules deps : List String)
       | some n => if n > 1 then
           fs := fs.push (add "hardcoded_value" "numeric constant - consider a parameter" "warning")
       | none => pure ()
-    -- unlisted imports
-    if isSrc || !isSrc then
-      let t := strip code
-      if t.startsWith "import " then
-        let root := strip ((strip (dropStr t 7)).splitOn ".").head!
-        -- Dep names are package names (lowercase, e.g. "mathlib"); import
-        -- roots are module names (capitalized, e.g. "Mathlib") - match
-        -- case-insensitively.
-        if root.length > 0 && !stdlibRoots.contains root
-            && !ownModules.contains root
-            && !deps.any (fun d => d.toLower == root.toLower) then
-          fs := fs.push (add "unlisted_import"
-            s!"import {root} not in widget.json dependencies" "warning")
+    -- unlisted imports: block in src/, warn in tests/ and examples/.
+    let t := strip code
+    if t.startsWith "import " then
+      let root := strip ((strip (dropStr t 7)).splitOn ".").head!
+      -- Dep names are package names (lowercase, e.g. "mathlib"); import
+      -- roots are module names (capitalized, e.g. "Mathlib") - match
+      -- case-insensitively. Own roots stay case-sensitive: file basenames,
+      -- directories directly under src/, and [[lean_lib]] names.
+      if root.length > 0 && !stdlibRoots.contains root
+          && !ownModules.contains root
+          && !deps.any (fun d => d.toLower == root.toLower) then
+        fs := fs.push (add "unlisted_import"
+          s!"import {root} not in widget.json dependencies" importSev)
   return fs
 
 def main (args : List String) : IO Unit := do
   let files := args.filter (fun a => a.endsWith ".lean" && baseName a != "lean_scanner.lean")
-  let ownModules := files.map moduleOf
+  let cwd ← IO.currentDir
+  -- Own roots: basenames of scanned files (src/<slug>.lean covers
+  -- `import <slug>`), directory names directly under src/ (src/Foo/Bar.lean
+  -- covers `import Foo.Bar`), and [[lean_lib]] names from lakefile.toml.
+  let mut ownModules := files.map moduleOf
+  for f in files do
+    ownModules := match srcChildDir cwd.toString f with
+      | some d => pushUnique ownModules d
+      | none => ownModules
+  let libs ← leanLibNames
+  for n in libs do
+    ownModules := pushUnique ownModules n
   let deps ← declaredDeps
   let mut findings : Array Finding := #[]
   for f in files do

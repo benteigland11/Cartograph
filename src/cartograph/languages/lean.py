@@ -127,7 +127,7 @@ def main : IO Unit := do
 
 class LeanEngine(LanguageEngine):
     name = "lean"
-    validation_version = 1
+    validation_version = 2
     file_ext = "lean"
     aliases = ["lean4"]
     toolchain = {
