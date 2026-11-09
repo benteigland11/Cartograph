@@ -299,14 +299,16 @@ raw strings (`r"..."`, `r#"..."#`) before applying checks, which regex cannot
 do reliably across raw strings. The scanner skips its own source file (the
 harness passes the scanner path as the first argv, exactly like go_scanner).
 Blocks in src/: `println!/print!/eprintln!/eprint!`, `process::exit`/`abort`,
-`unsafe`, credentials, absolute paths, hardcoded IPs, `thread::sleep`.
-Warnings: hardcoded URLs (localhost/127.0.0.1/example.* /.test exempted), env
-var access (`env::var`), `todo!`/`unimplemented!`, hardcoded numeric tunables
-(`const`/`static` bound to a literal other than 0/1), unlisted external crate
-imports (resolved against widget.json deps and the crate's own Cargo package
-name; `std`/`core`/`alloc`/`crate`/`self`/`super` exempt), and public items
-without a `///` doc comment. Sleeps in tests warn only above 1s, with durations
-estimated statically from `Duration::from_secs/millis/...` calls.
+`unsafe`, credentials, absolute paths, hardcoded IPs, `thread::sleep`, and
+unlisted external crate imports (resolved against widget.json deps and the
+crate's own Cargo package name; `std`/`core`/`alloc`/`crate`/`self`/`super`
+exempt; a first path segment is also local when `src/<seg>.rs` or
+`src/<seg>/mod.rs` exists). The same unlisted import warns in tests/ and
+examples/. Warnings: hardcoded URLs (localhost/127.0.0.1/example.* /.test
+exempted), env var access (`env::var`), `todo!`/`unimplemented!`, hardcoded
+numeric tunables (`const`/`static` bound to a literal other than 0/1), and
+public items without a `///` doc comment. Sleeps in tests warn only above 1s,
+with durations estimated statically from `Duration::from_secs/millis/...` calls.
 
 **Blueprints:** Rust composition uses Cargo path dependencies
 (`<dep> = { path = "cg/<dep-widget>" }`) in the blueprint's Cargo.toml. Cargo

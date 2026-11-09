@@ -112,7 +112,7 @@ def _insert_under_section(text: str, header: str, line: str) -> str:
 
 class RustEngine(LanguageEngine):
     name = "rust"
-    validation_version = 1
+    validation_version = 2
     file_ext = "rs"
     aliases = ["rs"]
     toolchain = {
