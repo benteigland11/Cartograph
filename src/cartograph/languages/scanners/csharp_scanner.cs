@@ -19,9 +19,14 @@
  *
  * Severity contract (mirrors the Go/Rust/Java scanners):
  *   - print/exit: emitted for src/ only, severity block
- *   - abs_path/credential/ip/sleep: block in src/, warning in tests/examples
- *   - url/hardcoded_value/env_var/unlisted_import/static_mutable: warning
+ *   - abs_path/credential/ip/sleep/unlisted_import: block in src/, warning
+ *     in tests/examples
+ *   - url/hardcoded_value/env_var/static_mutable: warning
  *   - sleep in tests/examples: warn only above ~1s (statically estimated)
+ *
+ * unlisted_import sits in scanner_warning_messages. The severity string
+ * in src/ is exactly "block", which is the only value that escapes that
+ * grouping.
  */
 
 using System.Text;
@@ -61,8 +66,9 @@ internal sealed class CartographCSharpScanner
     private static readonly Regex HardcodedValue = new(
         @"^\s*(?:(?:public|internal|protected|private)\s+)?const\s+(?:int|long|double|float|decimal|short|byte|uint|ulong|ushort|sbyte)\s+\w+\s*=\s*(-?[\d_]+(?:\.\d+)?(?:[eE][+-]?\d+)?)[MmFfDdLlUu]*\s*;");
 
-    // Using prefixes that never need declaring: the BCL + the test
-    // framework the scaffold itself provides + the widget's own namespace.
+    // Using prefixes that never need declaring: the BCL plus the test
+    // framework the scaffold itself provides. Own namespaces are collected
+    // from src/ and are not prefixes in this list.
     private static readonly string[] StdlibPrefixes =
     {
         "System", "Microsoft.CSharp", "Microsoft.VisualBasic", "Xunit",
@@ -73,18 +79,23 @@ internal sealed class CartographCSharpScanner
     public void Run(string[] args)
     {
         List<string> declaredDeps = ReadDeclaredDeps();
+        // Namespaces declared in src/ are own in every scanned file, so the
+        // scaffolded test (`namespace Tests` + `using <Pascal>Widget`) stays
+        // quiet once that namespace exists under src/.
+        List<string> ownNamespaces = CollectSrcNamespaces();
         foreach (string arg in args)
         {
             if (Path.GetFileName(arg) == "csharp_scanner.cs")
             {
                 continue; // never scan ourselves
             }
-            ScanFile(arg, declaredDeps);
+            ScanFile(arg, declaredDeps, ownNamespaces);
         }
         Console.Out.WriteLine("[" + string.Join(",", findings) + "]");
     }
 
-    private void ScanFile(string path, List<string> declaredDeps)
+    private void ScanFile(string path, List<string> declaredDeps,
+        List<string> ownNamespaces)
     {
         string norm = path.Replace('\\', '/');
         bool isSrc = norm.Contains("/src/") || norm.StartsWith("src/");
@@ -184,13 +195,17 @@ internal sealed class CartographCSharpScanner
                 }
             }
             Match ud = UsingDirective.Match(code);
-            if (ud.Success && isSrc)
+            if (ud.Success)
             {
                 string ns = ud.Groups[1].Value;
-                if (!IsStdlib(ns) && !IsOwn(ns, widgetNs)
-                    && !IsDeclared(ns, declaredDeps))
+                // Collected src/ namespaces apply in every file. src/ also
+                // keeps the per-file first-segment IsOwn check.
+                bool own = IsOwnNamespace(ns, ownNamespaces)
+                    || (isSrc && IsOwn(ns, widgetNs));
+                if (!IsStdlib(ns) && !own && !IsDeclared(ns, declaredDeps))
                 {
-                    Emit("unlisted_import", path, ln, ns, "warning");
+                    Emit("unlisted_import", path, ln, ns,
+                        isSrc ? "block" : "warning");
                 }
             }
         }
@@ -215,12 +230,90 @@ internal sealed class CartographCSharpScanner
     }
 
     /*
+     * True when ns is a namespace declared in src/, or a namespace under
+     * one of those declarations.
+     */
+    private static bool IsOwnNamespace(string ns, List<string> ownNamespaces)
+    {
+        foreach (string own in ownNamespaces)
+        {
+            if (ns == own || ns.StartsWith(own + "."))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /*
+     * Every namespace declaration in the widget's src/*.cs files. Block
+     * form (`namespace Name {`) and file-scoped form (`namespace Name;`)
+     * both match NamespaceDecl, which captures the name before `;` or `{`.
+     * Comment and string contents are blanked first, same as the scan.
+     * Absent or unreadable src/ yields an empty list.
+     */
+    private static List<string> CollectSrcNamespaces()
+    {
+        var own = new List<string>();
+        if (!Directory.Exists("src"))
+        {
+            return own;
+        }
+        string[] files;
+        try
+        {
+            files = Directory.GetFiles("src", "*.cs",
+                SearchOption.AllDirectories);
+        }
+        catch (IOException)
+        {
+            return own;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return own;
+        }
+        foreach (string file in files)
+        {
+            if (Path.GetFileName(file) == "csharp_scanner.cs")
+            {
+                continue;
+            }
+            string content;
+            try
+            {
+                content = File.ReadAllText(file, Encoding.UTF8);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            (_, string[] codeOnly) = Lex(content);
+            foreach (string line in codeOnly)
+            {
+                Match nm = NamespaceDecl.Match(line);
+                if (!nm.Success)
+                {
+                    continue;
+                }
+                string ns = nm.Groups[1].Value;
+                if (!own.Contains(ns))
+                {
+                    own.Add(ns);
+                }
+            }
+        }
+        return own;
+    }
+
+    /*
      * Loose package matching: a using is "declared" when the declared
      * NuGet package id shares a dotted-segment prefix with the imported
      * namespace in either direction (Newtonsoft.Json ships
      * Newtonsoft.Json.Linq; Dapper ships Dapper). Case-insensitive
-     * because package ids are. Warning-only check, so false negatives
-     * are acceptable.
+     * because package ids are. The check blocks in src/. The match stays
+     * loose: it can miss some real unlisted usings and rarely flag a
+     * declared one. Tightening the matcher is out of scope.
      */
     private static bool IsDeclared(string ns, List<string> deps)
     {

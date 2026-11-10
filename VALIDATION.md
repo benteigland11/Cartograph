@@ -667,14 +667,22 @@ IPs, credentials). Interpolated strings are treated as plain strings
 checks). Blocks in src/: `Console` printing (`Write`/`WriteLine` on
 `Console`, `Console.Out`, `Console.Error`), `Environment.Exit`/`FailFast`,
 credentials, absolute paths (drive-letter branch guarded so `https://` never
-matches via `s://`), hardcoded IPs, `Thread.Sleep`. Warnings: hardcoded URLs
+matches via `s://`), hardcoded IPs, `Thread.Sleep`, and unlisted `using` imports (resolved
+against widget.json deps with loose case-insensitive prefix matching,
+since package ids don't always equal namespace roots; `System.*`,
+`Microsoft.CSharp.*`, `Microsoft.VisualBasic.*`, `Xunit.*`, and the
+widget's own namespaces are exempt). Own namespaces are every `namespace`
+declaration in the widget's src/*.cs files, block form and file-scoped
+(`namespace Name;`), plus their sub-namespaces, and they count in every
+scanned file so the scaffolded test `using <Pascal>Widget` stays quiet. A
+src/ file also treats the first segment of the namespace it declares as
+own. The same unlisted using warns in tests/ and examples/. The NuGet
+match stays loose: it can miss some real unlisted usings and rarely flag
+a declared one. Warnings: hardcoded URLs
 (localhost/127.0.0.1/example.* /.test exempted), env var access
 (`Environment.GetEnvironmentVariable`), mutable static fields (shared
-mutable state; `static readonly` exempt), hardcoded numeric `const`s other
-than 0/±1, and unlisted `using` imports (resolved against widget.json deps
-with loose case-insensitive prefix matching, since package ids don't always
-equal namespace roots; `System.*`, `Microsoft.CSharp.*`, `Xunit.*`, and the
-widget's own namespace are exempt). `Task.Delay` is deliberately not
+mutable state; `static readonly` exempt), and hardcoded numeric `const`s
+other than 0/±1. `Task.Delay` is deliberately not
 flagged - awaited delays are non-blocking, and the async-abuse variants
 (`.Result`/`.Wait()`) are left to custom rules. Sleeps in tests warn only
 above 1s, estimated statically from the literal argument. Examples are

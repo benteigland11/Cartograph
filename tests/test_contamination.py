@@ -3512,6 +3512,137 @@ class TestCSharpSpecific:
         assert any("sleep" in w.lower() for w in result["warnings"]), \
             f"non-literal sleep in tests must warn (unknown duration): {result}"
 
+    # -- Unlisted usings: block in src/, warn in tests/ and examples/ --
+
+    def test_unlisted_import_in_src_blocks(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'using Some.Unlisted.Lib;\n\n'
+            'public static class Module\n'
+            '{\n'
+            '    public static string Hello() { return "world"; }\n'
+            '}\n')
+        assert any("Some.Unlisted.Lib" in b for b in result["blocks"]), \
+            f"unlisted using in src/ must block: {result['blocks']}"
+        assert not any("Some.Unlisted.Lib" in w or "unlisted" in w.lower()
+                       for w in result["warnings"]), \
+            f"unlisted using in src/ must not warn: {result['warnings']}"
+
+    def test_unlisted_import_in_tests_warns(self, tmp_path):
+        result = self._cs_scan(tmp_path, CLEAN["csharp"][0],
+            test_code='using Some.Unlisted.Lib;\n\n'
+                      'public class ModuleTests\n'
+                      '{\n'
+                      '    public void UsesIt() { }\n'
+                      '}\n')
+        assert any("Some.Unlisted.Lib" in w for w in result["warnings"]), \
+            f"unlisted using in tests/ must warn: {result['warnings']}"
+        assert not any("Some.Unlisted.Lib" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted using in tests/ must not block: {result['blocks']}"
+
+    def test_unlisted_import_in_examples_warns(self, tmp_path):
+        result = self._cs_scan(tmp_path, CLEAN["csharp"][0],
+            example_code='using Some.Unlisted.Lib;\n\n'
+                         'var demo = "hello";\n')
+        assert any("Some.Unlisted.Lib" in w for w in result["warnings"]), \
+            f"unlisted using in examples/ must warn: {result['warnings']}"
+        assert not any("Some.Unlisted.Lib" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted using in examples/ must not block: {result['blocks']}"
+
+    def test_scaffolded_test_using_quiet(self, tmp_path):
+        """Scaffolded tests are `namespace Tests` with `using <Pascal>Widget`.
+
+        src/ declares that namespace, so the test using must stay quiet.
+        """
+        result = self._cs_scan(tmp_path,
+            'namespace ModuleWidget;\n\n'
+            'public static class Module\n'
+            '{\n'
+            '    public static string Process(string value) => value;\n'
+            '}\n',
+            test_code='using Xunit;\n'
+                      'using ModuleWidget;\n\n'
+                      'namespace Tests;\n\n'
+                      'public class ModuleTests\n'
+                      '{\n'
+                      '    public void ProcessReturnsInput()\n'
+                      '    {\n'
+                      '        Assert.Equal("hello", Module.Process("hello"));\n'
+                      '    }\n'
+                      '}\n')
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "ModuleWidget" in f
+                       or "Xunit" in f for f in findings), \
+            f"scaffolded test using must stay quiet: {findings}"
+
+    def test_own_namespace_quiet(self, tmp_path):
+        """The namespace declared in the same src/ file is own.
+
+        IsOwn uses that file's first segment, so `namespace Acme.Widgets`
+        covers `using Acme.Other`. The collected full name would not.
+        """
+        result = self._cs_scan(tmp_path,
+            'namespace Acme.Widgets;\n\n'
+            'using Acme.Other;\n\n'
+            'public static class Module\n'
+            '{\n'
+            '    public static string Hello() { return "world"; }\n'
+            '}\n')
+        findings = result["warnings"] + result["blocks"]
+        assert not any("Acme" in f or "unlisted" in f.lower()
+                       for f in findings), \
+            f"own namespace must be quiet in src/: {findings}"
+
+    def test_declared_dep_and_system_using_quiet(self, tmp_path):
+        result = self._cs_scan(tmp_path,
+            'using System;\n'
+            'using System.Text;\n'
+            'using Newtonsoft.Json;\n\n'
+            'public static class Module\n'
+            '{\n'
+            '    public static string Js(object o) '
+            '{ return JsonConvert.SerializeObject(o); }\n'
+            '}\n',
+            dependencies=["Newtonsoft.Json>=13.0.3"])
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "Newtonsoft" in f
+                       or "System" in f for f in findings), \
+            f"declared NuGet dep and System using must be quiet: {findings}"
+
+    def test_file_scoped_namespace_own(self, tmp_path):
+        """A file-scoped namespace in src/ is own in every scanned file.
+
+        `namespace Acme.Widgets;` covers `using Acme.Widgets.Helpers` from a
+        src file that declares no namespace of its own. A sibling under the
+        first segment (`using Acme.Other`) is not that namespace.
+        """
+        _skip_if_missing("csharp")
+        wdir = _make_widget(
+            tmp_path, "csharp", "module.cs",
+            'namespace Acme.Widgets;\n\n'
+            'public static class Module\n'
+            '{\n'
+            '    public static string Hello() { return "world"; }\n'
+            '}\n')
+        _write(os.path.join(wdir, "src", "other.cs"),
+               'using Acme.Widgets.Helpers;\n'
+               'using Acme.Other;\n\n'
+               'public static class Other\n'
+               '{\n'
+               '    public static string Id() { return "x"; }\n'
+               '}\n')
+        result = CSharpEngine().scan_contamination(
+            wdir, {"language": "csharp", "dependencies": []})
+        findings = result["warnings"] + result["blocks"]
+        assert not any("Acme.Widgets" in f for f in findings), \
+            f"file-scoped namespace must be own: {findings}"
+        assert any("Acme.Other" in b for b in result["blocks"]), \
+            f"sibling under the first segment must still block: {result['blocks']}"
+        assert not any("Acme.Other" in w or "unlisted" in w.lower()
+                       for w in result["warnings"]), \
+            f"that sibling is in src/, so it must not warn: {result['warnings']}"
+
 
 # ---------------------------------------------------------------------------
 # Flutter-specific validation
