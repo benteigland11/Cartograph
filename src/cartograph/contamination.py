@@ -8,9 +8,11 @@ blueprint non-portable. Widgets and blueprints have different contamination
 rules — see scan_blueprint_contamination() below for the blueprint contract.
 
 Returns {"blocks": [...], "warnings": [...]}.
-  - Blocks are hard failures (absolute paths, credentials). No override.
+  - Blocks are hard failures (absolute paths, credentials, unlisted imports
+    in src/). No override.
   - Warnings are quality concerns (hardcoded values, URLs, IPs, env vars,
-    unlisted imports). Overridable with --override-warnings --override-reason.
+    unlisted imports in tests/ and examples/). Overridable with
+    --override-warnings --override-reason.
 """
 
 import glob as _glob

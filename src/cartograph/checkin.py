@@ -13,11 +13,13 @@ Contamination scanning
 Hard blocks (checkin fails, no override):
   - Absolute paths baked into source strings (/home/, /Users/, C:\\, C:/)
   - Apparent credential assignments (api_key = "...", token = "abc123", etc.)
+  - Unlisted imports in src/ (not stdlib, not a listed dependency, and not
+    the widget's own module)
 
 Warnings (checkin pauses, agent must pass override_warnings=True + override_reason):
   - os.getenv / os.environ calls
   - Hardcoded non-local URLs / IP addresses
-  - Imports that aren't stdlib, listed dependencies, or the widget's own src/
+  - Unlisted imports in tests/ and examples/
 
 On override the reason is recorded in the changelog entry as an audit trail.
 """

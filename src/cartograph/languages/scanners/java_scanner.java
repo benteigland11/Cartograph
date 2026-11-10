@@ -16,16 +16,22 @@
  *   - codeOnly:   comments AND string contents blanked (for API-call
  *     checks: print, exit, sleep, getenv, imports, static fields)
  *
- * Severity contract (mirrors the Go/Rust scanners):
+ * Severity contract (mirrors the Go/Rust/C# scanners):
  *   - print/exit: emitted for src/ only, severity block
- *   - abs_path/credential/ip/sleep: block in src/, warning in tests/examples
- *   - url/hardcoded_value/env_var/unlisted_import/static_mutable: warning
+ *   - abs_path/credential/ip/sleep/unlisted_import: block in src/, warning
+ *     in tests/examples
+ *   - url/hardcoded_value/env_var/static_mutable: warning
  *   - sleep in tests/examples: warn only above ~1s (statically estimated)
+ *
+ * unlisted_import sits in scanner_warning_messages. The severity string
+ * in src/ is exactly "block", which is the only value that escapes that
+ * grouping.
  */
 
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -54,15 +60,19 @@ public final class java_scanner {
             "(?:Thread\\s*\\.\\s*sleep|TimeUnit\\s*\\.\\s*\\w+\\s*\\.\\s*sleep)\\s*\\(\\s*([\\d_]*)");
     private static final Pattern ENV_VAR = Pattern.compile(
             "System\\s*\\.\\s*(?:getenv|getProperty)\\s*\\(");
+    // Star imports (`import com.foo.*`) do not match: `*` is outside [\w.].
     private static final Pattern IMPORT = Pattern.compile(
             "^\\s*import\\s+(?:static\\s+)?([\\w.]+)\\s*;");
+    private static final Pattern PACKAGE_DECL = Pattern.compile(
+            "^\\s*package\\s+([\\w.]+)\\s*;");
     private static final Pattern STATIC_FIELD = Pattern.compile(
             "^\\s*(?:public\\s+|protected\\s+|private\\s+)?static\\s+(?!final\\b)\\w[\\w<>\\[\\], ]*\\s+\\w+\\s*[=;]");
     private static final Pattern HARDCODED_VALUE = Pattern.compile(
             "^\\s*(?:public\\s+|protected\\s+|private\\s+)?(?:static\\s+)?final\\s+(?:int|long|double|float|short|byte)\\s+\\w+\\s*=\\s*(-?[\\d_]+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)[LlFfDd]?\\s*;");
 
-    // Import prefixes that never need declaring: JDK + the test framework
-    // the scaffold itself provides + the widget's own local packages.
+    // Import prefixes that never need declaring: the JDK plus the test
+    // framework the scaffold itself provides. Own packages are collected
+    // from src/ and are not prefixes in this list.
     private static final String[] STDLIB_PREFIXES = {
             "java.", "javax.", "jdk.", "com.sun.", "org.w3c.", "org.xml.",
             "org.junit.",
@@ -72,21 +82,25 @@ public final class java_scanner {
 
     public static void main(String[] args) throws IOException {
         List<String> declaredDeps = readDeclaredDeps();
+        // Packages declared in src/ are own in every scanned file, so the
+        // scaffolded test (`package tests` + `import <module>.<Class>`) stays
+        // quiet once that package exists under src/.
+        List<String> ownPackages = collectSrcPackages();
         for (String arg : args) {
             Path p = Paths.get(arg);
             String base = p.getFileName().toString();
             if (base.equals("java_scanner.java")) {
                 continue; // never scan ourselves
             }
-            scanFile(p, declaredDeps);
+            scanFile(p, declaredDeps, ownPackages);
         }
         PrintStream out = new PrintStream(System.out, true,
                 StandardCharsets.UTF_8);
         out.println("[" + String.join(",", findings) + "]");
     }
 
-    private static void scanFile(Path path, List<String> declaredDeps)
-            throws IOException {
+    private static void scanFile(Path path, List<String> declaredDeps,
+            List<String> ownPackages) throws IOException {
         String norm = path.toString().replace('\\', '/');
         boolean isSrc = norm.contains("/src/") || norm.startsWith("src/");
         String content = Files.readString(path, StandardCharsets.UTF_8);
@@ -97,8 +111,7 @@ public final class java_scanner {
 
         String widgetPkg = null;
         for (String line : codeOnly) {
-            Matcher pm = Pattern.compile("^\\s*package\\s+([\\w.]+)\\s*;")
-                    .matcher(line);
+            Matcher pm = PACKAGE_DECL.matcher(line);
             if (pm.find()) {
                 widgetPkg = pm.group(1).split("\\.")[0];
                 break;
@@ -171,11 +184,16 @@ public final class java_scanner {
                 }
             }
             Matcher imp = IMPORT.matcher(code);
-            if (imp.find() && isSrc) {
+            if (imp.find()) {
                 String fqcn = imp.group(1);
-                if (!isStdlib(fqcn) && !isOwn(fqcn, widgetPkg)
+                // Collected src/ packages apply in every file. src/ also
+                // keeps the per-file first-segment isOwn check.
+                boolean own = isOwnPackage(fqcn, ownPackages)
+                        || (isSrc && isOwn(fqcn, widgetPkg));
+                if (!isStdlib(fqcn) && !own
                         && !isDeclared(fqcn, declaredDeps)) {
-                    emit("unlisted_import", path, ln, fqcn, "warning");
+                    emit("unlisted_import", path, ln, fqcn,
+                            isSrc ? "block" : "warning");
                 }
             }
         }
@@ -190,9 +208,73 @@ public final class java_scanner {
         return false;
     }
 
+    // First segment only. `package com.acme.widget` treats every `com.*`
+    // import in this file as own. Known leak; do not tighten it here.
     private static boolean isOwn(String fqcn, String widgetPkg) {
         return widgetPkg != null && (fqcn.equals(widgetPkg)
                 || fqcn.startsWith(widgetPkg + "."));
+    }
+
+    /**
+     * True when fqcn is a package declared in src/, or a name under one of
+     * those packages.
+     */
+    private static boolean isOwnPackage(String fqcn, List<String> ownPackages) {
+        for (String own : ownPackages) {
+            if (fqcn.equals(own) || fqcn.startsWith(own + ".")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Every package declaration in the widget's src java files, including
+     * nested directories. Comment and string contents are blanked first,
+     * same as the scan. Absent or unreadable src/ yields an empty list.
+     */
+    private static List<String> collectSrcPackages() {
+        List<String> own = new ArrayList<>();
+        Path src = Paths.get("src");
+        if (!Files.isDirectory(src)) {
+            return own;
+        }
+        collectPackagesUnder(src, own);
+        return own;
+    }
+
+    private static void collectPackagesUnder(Path dir, List<String> own) {
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(dir)) {
+            for (Path file : entries) {
+                if (Files.isDirectory(file)) {
+                    collectPackagesUnder(file, own);
+                    continue;
+                }
+                Path name = file.getFileName();
+                if (name == null || !name.toString().endsWith(".java")
+                        || name.toString().equals("java_scanner.java")) {
+                    continue;
+                }
+                String content;
+                try {
+                    content = Files.readString(file, StandardCharsets.UTF_8);
+                } catch (IOException ignored) {
+                    continue;
+                }
+                for (String line : lex(content)[1]) {
+                    Matcher pm = PACKAGE_DECL.matcher(line);
+                    if (!pm.find()) {
+                        continue;
+                    }
+                    String pkg = pm.group(1);
+                    if (!own.contains(pkg)) {
+                        own.add(pkg);
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+            // unreadable directory: skip it, keep packages already found
+        }
     }
 
     /**
@@ -200,8 +282,9 @@ public final class java_scanner {
      * dep's group or artifact shares a prefix with the import's package.
      * Maven groups don't always equal package roots (com.google.code.gson
      * ships com.google.gson), so match on any dotted-segment overlap of the
-     * first two package segments in either direction. Warning-only check,
-     * so false negatives are acceptable.
+     * first two package segments in either direction. The check blocks in
+     * src/. The match stays loose: it can miss some real unlisted imports
+     * and rarely flag a declared one. Tightening the matcher is out of scope.
      */
     private static boolean isDeclared(String fqcn, List<String> deps) {
         String[] seg = fqcn.split("\\.");

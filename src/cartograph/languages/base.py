@@ -248,7 +248,10 @@ class LanguageEngine:
                                  (warn in both src/ and tests/)
           6. Hardcoded values  - numeric and string constant assignments
           7. Env var access    - language-specific env var APIs
-          8. Unlisted imports  - imports not in widget.json dependencies or stdlib
+
+        Required checks (block in src/, warning in tests/ and examples/):
+          8. Unlisted imports  - imports not in widget.json dependencies, stdlib,
+                                 or the widget's own src/ module
 
         Both src/ and tests/ files must be scanned. Credentials and IPs in tests/
         are warnings (verify they're fake), not blocks.
