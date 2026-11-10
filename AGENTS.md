@@ -57,17 +57,28 @@ Sources of truth (don't restate them here, they drift):
   (`library_lock`, `staged_dir`/`atomic_swap_dir`, `safe_extractall`). Sleep and
   poll loops live in glue, never in widget `src/` (the validator blocks `sleep()`).
 - **JSON scope:** commands in the MCP surface (install, uninstall, upgrade,
-  status, search, inspect, stats, create, validate, checkin, rollback, rate)
-  print pure JSON and exit non-zero on error. Human commands (login, doctor,
-  config, setup, rules, cloud publish/sync/proposals, ...) may print prose.
+  status, search, inspect, stats, create, validate, checkin, rollback, rate,
+  ledger) print pure JSON and exit non-zero on error. Human commands (login,
+  doctor, config, setup, rules, cloud publish/sync/proposals, ...) may print prose.
 - **Search contract:** separate `local` and `registry` pools, registry results
-  in received order, bounded rows, per-pool `omitted` counts. Pagination for
-  search was rejected; better queries beat page 7.
+  in received order, bounded rows, per-pool `omitted` counts. A `prior` pool
+  from the local usage ledger may be listed first. It does not reorder either
+  pool and does not spend the `top_k` budget. Pagination for search was
+  rejected; better queries beat page 7.
 - **Blueprints are not public.** The public registry refuses blueprint
   publishes (403); `publish_blueprint` preflights `/v1/registry/info`. Org
   registries opt in.
-- **`setup` and every other command write only inside the project**, never to
-  `~/.claude`, `~/.codex`, or other agent globals.
+- **`setup` writes only inside the project**, never to `~/.claude`,
+  `~/.codex`, or other agent globals. Other commands follow that rule, except
+  files that already live in the Cartograph data directory (`config.toml`,
+  `stats.json`) and the usage ledger.
+- **Usage ledger:** machine-local file `<data-dir>/.state/usage-ledger.jsonl`.
+  It records install, upgrade, uninstall, and `ledger note` (widget id,
+  version, project path, git origin when one exists, time, and purpose).
+  Search adds a `prior` pool and `prior_use` on matching rows without
+  reordering local or registry results. Ledger contents are never sent to a
+  registry. `cartograph config usage-ledger false` turns recording and search
+  reads off. `cartograph ledger forget --all` deletes the rows.
 - **Nim widgets are pure Nim.** `{.importc.}` / `{.compile.}` stay banned; point
   users to stdlib composition or a nimble package.
 - **Heavy ML frameworks** are allowed only if pre-installed; never auto-install,

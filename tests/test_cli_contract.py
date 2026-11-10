@@ -38,6 +38,9 @@ def cli_env(tmp_library, tmp_path):
     # would break site-packages resolution when cartograph is --user-installed).
     env["XDG_DATA_HOME"] = str(tmp_path / "xdg-data")
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
+    # Usage history must not land in a real data dir, including on macOS
+    # where _user_data_dir() ignores XDG_DATA_HOME.
+    env["CARTOGRAPH_USAGE_LEDGER"] = str(tmp_path / "usage-ledger.jsonl")
     # Ensure src/ (cartograph) and the repo root (the cg/ widget tree) are
     # importable regardless of how cartograph was installed. Without the repo
     # root, `import cg` falls through to any stale --user-installed copy.

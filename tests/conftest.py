@@ -14,6 +14,12 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_usage_ledger(tmp_path, monkeypatch):
+    """Keep ledger writes out of the real Cartograph data directory."""
+    monkeypatch.setenv("CARTOGRAPH_USAGE_LEDGER", str(tmp_path / "usage-ledger.jsonl"))
+
+
 # ---------------------------------------------------------------------------
 # Auto-apply language markers to parametrized tests
 # ---------------------------------------------------------------------------
