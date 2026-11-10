@@ -113,17 +113,23 @@ def test_library_lock_reentrant_same_thread(tmp_path):
 def test_library_lock_serializes_threads(tmp_path):
     d = str(tmp_path)
     order = []
+    # Start the second thread only after the first is inside the lock.
+    # A short sleep is not enough: on a slow Windows runner the first
+    # thread can still be starting, so the second acquires the lock first.
+    holding = threading.Event()
 
-    def worker(tag, hold):
+    def worker(tag, hold, announce):
         with library_lock(d, timeout=5):
             order.append(f"{tag}-in")
+            if announce:
+                announce.set()
             time.sleep(hold)
             order.append(f"{tag}-out")
 
-    t1 = threading.Thread(target=worker, args=("a", 0.3))
+    t1 = threading.Thread(target=worker, args=("a", 0.3, holding))
     t1.start()
-    time.sleep(0.05)
-    t2 = threading.Thread(target=worker, args=("b", 0.0))
+    assert holding.wait(timeout=5), "first thread did not acquire the lock"
+    t2 = threading.Thread(target=worker, args=("b", 0.0, None))
     t2.start()
     t1.join()
     t2.join()
