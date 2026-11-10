@@ -434,16 +434,26 @@ before applying code checks, while keeping string contents visible to the
 checks that look inside strings (paths, URLs, IPs, credentials).
 Blocks in src/: `System.out/System.err` printing, `System.exit`/
 `Runtime.getRuntime().halt/exit`, credentials, absolute paths, hardcoded
-IPs, `Thread.sleep`/`TimeUnit.*.sleep`. Warnings: hardcoded URLs
+IPs, `Thread.sleep`/`TimeUnit.*.sleep`, and unlisted package imports
+(resolved against widget.json deps with loose group/artifact matching,
+since Maven groups don't always equal package roots -
+`com.google.code.gson` ships `com.google.gson`; `java.*`/`javax.*`/`jdk.*`/
+`com.sun.*`/`org.w3c.*`/`org.xml.*` and `org.junit.*` are exempt). Own
+packages are every `package` declaration in the widget's `src/**/*.java`
+files, plus anything under those packages, and they count in every scanned
+file so the scaffolded test `import <module>.<Class>` stays quiet. A src/
+file also treats the first segment of the package it declares as own
+(`package com.acme.widget` treats every `com.*` import in that file as
+own). The same unlisted import warns in tests/ and examples/. The Maven
+match stays loose: it can miss some real unlisted imports and rarely flag
+a declared one. A star import (`import com.foo.*`) does not match the
+import pattern. Warnings: hardcoded URLs
 (localhost/127.0.0.1/example.* /.test exempted), env var access
 (`System.getenv`/`getProperty`), non-final static fields (shared mutable
-state), hardcoded numeric `final` constants other than 0/±1, and unlisted
-package imports (resolved against widget.json deps with loose group/artifact
-matching, since Maven groups don't always equal package roots -
-`com.google.code.gson` ships `com.google.gson`; `java.*`/`javax.*`/`jdk.*`
-and `org.junit.*` are exempt). Sleeps in tests warn only above 1s, estimated
-statically from the literal argument. Examples are exempt from the print
-block - they demonstrate by printing.
+state), and hardcoded numeric `final` constants other than 0/±1. Sleeps
+in tests warn only above 1s, estimated statically from the literal
+argument. Examples are exempt from the print block - they demonstrate by
+printing.
 
 **Blueprints:** Java composition adds the dep widget's sources to the
 blueprint's main source set (`srcDirs = ['src', 'cg/<dep-widget>/src']`) in
@@ -964,8 +974,9 @@ The unifying rule for contamination checks:
 - **Tests keep real safety nets** (absolute home paths, credentials,
   unlisted imports). A real secret or real user path in a test is still
   wrong.
-- **Examples are not scanned** - they are validated by being executed
-  (Python/JS/Nim) or rendered (OpenSCAD/SV), not by static scanning.
+- **Examples are scanned.** An unlisted import in examples/ warns, the same
+  as in tests/. Executing the example (Python, JS, Nim) or rendering it
+  (OpenSCAD, SystemVerilog) is a separate check and does not replace the scan.
 
 **Unlisted imports policy (all languages):** an import that is not in
 widget.json `dependencies`, not stdlib, and not a local src/ module is

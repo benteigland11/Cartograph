@@ -83,6 +83,17 @@ def _make_widget(tmp_path, language, src_filename, src_code,
 # Per-language scan helpers
 # ---------------------------------------------------------------------------
 
+def _unlisted_import_text(finding):
+    """True when a finding is an unlisted-import result.
+
+    Lean's header says "not declared" and its detail says "not in
+    widget.json"; the other engines say "unlisted".
+    """
+    text = finding.lower()
+    return ("unlisted" in text or "not in widget.json" in text
+            or "not declared" in text)
+
+
 def _scan(tmp_path, language, ext, src_code, test_code="", dependencies=None,
           example_code=""):
     """Run scan_contamination for a given language engine."""
@@ -549,33 +560,55 @@ class TestContaminationStandard:
         assert any("env" in w.lower() for w in result["warnings"]), \
             f"{lang}: env var should warn: {result['warnings']}"
 
-    # -- Check 8: Unlisted imports -> warning --
-    # (Not applicable to SystemVerilog - no package imports in the same sense)
+    # -- Check 8: Unlisted imports -> block in src/ --
+    # PHP's sample has no composer autoload, so it warns. Every other
+    # LANGUAGES_SOFTWARE entry blocks. (Not applicable to SystemVerilog.)
 
     @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_unlisted_import_flagged(self, tmp_path, lang):
-        """Unlisted imports must be flagged (block for python, warn for others)."""
+        """Unlisted imports in src/ block.
+
+        PHP's sample has no composer autoload, so that finding stays a
+        warning. TestPhpSpecific.test_resolver_blocks_unknown_namespace_in_src
+        pins the PHP block once those tables exist.
+        """
         _skip_if_missing(lang)
         result = _scan(tmp_path, lang, EXT[lang], UNLISTED_IMPORT[lang])
-        all_findings = result["warnings"] + result["blocks"]
-        assert any("unlisted" in f.lower() or "import" in f.lower()
-                    for f in all_findings), \
-            f"{lang}: unlisted import should be flagged: {result}"
+        if lang == "php":
+            assert any("unlisted" in w.lower() for w in result["warnings"]), \
+                f"{lang}: unlisted import should warn without composer autoload: {result}"
+            assert not any("unlisted" in b.lower() for b in result["blocks"]), \
+                f"{lang}: unlisted import must not block without composer autoload: {result['blocks']}"
+            return
+        assert any("unlisted" in b.lower() or "import" in b.lower()
+                   for b in result["blocks"]), \
+            f"{lang}: unlisted import in src/ must block: {result}"
+        assert not any(
+            "unlisted" in w.lower() or "not in widget.json" in w.lower()
+            or "not declared" in w.lower()
+            for w in result["warnings"]), \
+            f"{lang}: unlisted import in src/ must not warn: {result['warnings']}"
 
     @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_listed_import_no_warning(self, tmp_path, lang):
+        """A declared dependency is absent from warnings and from blocks."""
         _skip_if_missing(lang)
         src, deps = LISTED_IMPORT[lang]
         result = _scan(tmp_path, lang, EXT[lang], src, dependencies=deps)
-        assert not any("unlisted" in w.lower() for w in result["warnings"]), \
+        assert not any(_unlisted_import_text(w) for w in result["warnings"]), \
             f"{lang}: listed import should not warn: {result['warnings']}"
+        assert not any(_unlisted_import_text(b) for b in result["blocks"]), \
+            f"{lang}: listed import should not block: {result['blocks']}"
 
     @pytest.mark.parametrize("lang", LANGUAGES_SOFTWARE)
     def test_stdlib_import_no_warning(self, tmp_path, lang):
+        """A stdlib import is absent from warnings and from blocks."""
         _skip_if_missing(lang)
         result = _scan(tmp_path, lang, EXT[lang], STDLIB_IMPORT[lang])
-        assert not any("unlisted" in w.lower() for w in result["warnings"]), \
+        assert not any(_unlisted_import_text(w) for w in result["warnings"]), \
             f"{lang}: stdlib import should not warn: {result['warnings']}"
+        assert not any(_unlisted_import_text(b) for b in result["blocks"]), \
+            f"{lang}: stdlib import should not block: {result['blocks']}"
 
 
 # ---------------------------------------------------------------------------
@@ -2808,6 +2841,140 @@ class TestJavaSpecific:
         result = JavaEngine().scan_contamination(wdir, {})
         assert result["blocks"] == [], \
             f"examples demonstrate by printing - must not block: {result['blocks']}"
+
+    # -- Unlisted imports: block in src/, warn in tests/ and examples/ --
+
+    def test_unlisted_import_in_src_blocks(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'import com.example.unlisted.Lib;\n\n'
+            'public final class Module {\n'
+            '    private Module() {}\n'
+            '    public static String hello() { return "world"; }\n'
+            '}\n')
+        assert any("com.example.unlisted.Lib" in b for b in result["blocks"]), \
+            f"unlisted import in src/ must block: {result['blocks']}"
+        assert not any("com.example.unlisted.Lib" in w or "unlisted" in w.lower()
+                       for w in result["warnings"]), \
+            f"unlisted import in src/ must not warn: {result['warnings']}"
+
+    def test_unlisted_import_in_tests_warns(self, tmp_path):
+        result = self._java_scan(tmp_path, CLEAN["java"][0],
+            test_code='import com.example.unlisted.Lib;\n\n'
+                      'public final class ModuleTest {\n'
+                      '    void usesIt() {}\n'
+                      '}\n')
+        assert any("com.example.unlisted.Lib" in w for w in result["warnings"]), \
+            f"unlisted import in tests/ must warn: {result['warnings']}"
+        assert not any("com.example.unlisted.Lib" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted import in tests/ must not block: {result['blocks']}"
+
+    def test_unlisted_import_in_examples_warns(self, tmp_path):
+        result = self._java_scan(tmp_path, CLEAN["java"][0],
+            example_code='import com.example.unlisted.Lib;\n\n'
+                         'public final class ExampleUsage {\n'
+                         '    public static void main(String[] args) {}\n'
+                         '}\n')
+        assert any("com.example.unlisted.Lib" in w for w in result["warnings"]), \
+            f"unlisted import in examples/ must warn: {result['warnings']}"
+        assert not any("com.example.unlisted.Lib" in b or "unlisted" in b.lower()
+                       for b in result["blocks"]), \
+            f"unlisted import in examples/ must not block: {result['blocks']}"
+
+    def test_scaffolded_test_import_quiet(self, tmp_path):
+        """Scaffolded tests are `package tests` with `import <module>.<Class>`.
+
+        src/ declares that package, so the test import must stay quiet.
+        """
+        result = self._java_scan(tmp_path,
+            'package module;\n\n'
+            'public final class Module {\n'
+            '    private Module() {}\n'
+            '    public static String process(String value) { return value; }\n'
+            '}\n',
+            test_code='package tests;\n\n'
+                      'import static org.junit.jupiter.api.Assertions.assertEquals;\n\n'
+                      'import org.junit.jupiter.api.Test;\n\n'
+                      'import module.Module;\n\n'
+                      'class ModuleTest {\n'
+                      '    @Test\n'
+                      '    void processReturnsInput() {\n'
+                      '        assertEquals("hello", Module.process("hello"));\n'
+                      '    }\n'
+                      '}\n')
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "module.Module" in f
+                       or "org.junit" in f for f in findings), \
+            f"scaffolded test import must stay quiet: {findings}"
+
+    def test_own_package_quiet(self, tmp_path):
+        """The package declared in the same src/ file is own.
+
+        isOwn uses that file's first segment, so `package com.acme.widget`
+        covers `import com.other.Thing`. The collected full name would not.
+        """
+        result = self._java_scan(tmp_path,
+            'package com.acme.widget;\n\n'
+            'import com.acme.widget.Helpers;\n'
+            'import com.other.Thing;\n\n'
+            'public final class Module {\n'
+            '    private Module() {}\n'
+            '    public static String hello() { return "world"; }\n'
+            '}\n')
+        findings = result["warnings"] + result["blocks"]
+        assert not any("com.acme" in f or "com.other" in f
+                       or "unlisted" in f.lower() for f in findings), \
+            f"own package must be quiet in src/: {findings}"
+
+    def test_declared_dep_and_java_import_quiet(self, tmp_path):
+        result = self._java_scan(tmp_path,
+            'import java.util.List;\n'
+            'import com.google.gson.Gson;\n\n'
+            'public final class Module {\n'
+            '    private Module() {}\n'
+            '    public static String js(Object o) { return new Gson().toJson(o); }\n'
+            '}\n',
+            dependencies=["com.google.code.gson:gson>=2.11.0"])
+        findings = result["warnings"] + result["blocks"]
+        assert not any("unlisted" in f.lower() or "com.google.gson" in f
+                       or "java.util" in f for f in findings), \
+            f"declared Maven dep and java. import must be quiet: {findings}"
+
+    def test_nested_src_package_own(self, tmp_path):
+        """A package declared in a nested src/ file is own in every scanned file.
+
+        `package com.acme.widget` covers `import com.acme.widget.Helpers` from
+        a src file that declares `package org.example`. A sibling under the
+        first segment (`import com.other.Thing`) is not that package. The
+        per-file first-segment check still treats every `com.*` import as own
+        inside the file that declares `package com.acme.widget`.
+        """
+        _skip_if_missing("java")
+        wdir = _make_widget(
+            tmp_path, "java", "Module.java",
+            'package org.example;\n\n'
+            'import com.acme.widget.Helpers;\n'
+            'import com.other.Thing;\n\n'
+            'public final class Module {\n'
+            '    private Module() {}\n'
+            '    public static String hello() { return "world"; }\n'
+            '}\n')
+        _write(os.path.join(wdir, "src", "com", "acme", "Widget.java"),
+               'package com.acme.widget;\n\n'
+               'public final class Widget {\n'
+               '    private Widget() {}\n'
+               '    public static String hello() { return "world"; }\n'
+               '}\n')
+        result = JavaEngine().scan_contamination(
+            wdir, {"language": "java", "dependencies": []})
+        findings = result["warnings"] + result["blocks"]
+        assert not any("com.acme.widget" in f for f in findings), \
+            f"nested src package must be own: {findings}"
+        assert any("com.other.Thing" in b for b in result["blocks"]), \
+            f"sibling under the first segment must still block: {result['blocks']}"
+        assert not any("com.other.Thing" in w or "unlisted" in w.lower()
+                       for w in result["warnings"]), \
+            f"that sibling is in src/, so it must not warn: {result['warnings']}"
 
 
 class TestGDScriptSpecific:
