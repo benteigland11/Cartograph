@@ -117,7 +117,12 @@ def _canonical_dist(name: str) -> str:
 
 class PythonEngine(LanguageEngine):
     name = "python"
-    validation_version = 1
+    # 2: once a validation venv (or a fresh stamp) says what each declared
+    # package provides, an import none of them provides blocks in src/.
+    # The scan does not branch on this number. is_stamp_valid() requires it,
+    # so a version 1 stamp is stale and the next checkin re-validates;
+    # has_valid_stamp() ignores it, so those widgets are not mass-invalidated.
+    validation_version = 2
     file_ext = "py"
     env_dir = ".venv"
 

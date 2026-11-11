@@ -4089,3 +4089,40 @@ def test_the_stamp_carries_what_the_venv_provided_to_checkin(tmp_path):
     (tmp_path/"src"/"sim.py").write_text("import warp\nimport os\n")
     stale = lang.scan_contamination(str(tmp_path), deps)
     assert any("'warp'" in w for w in stale["warnings"]), stale
+
+
+def test_v1_stamp_warns_on_an_unresolved_import_v2_stamp_blocks(tmp_path):
+    """A stamp from validation_version 1 is not fresh, so checkin's scan does not
+    trust the import names it recorded and an import nothing local can verify
+    stays a warning. A stamp at the current version (2) does, and an import no
+    declared package provides blocks. has_valid_stamp still accepts the v1 stamp."""
+    import json
+    from cartograph.languages.python import PythonEngine
+    from cartograph.validation_stamp import has_valid_stamp, is_stamp_valid, read_stamp, write_stamp
+    (tmp_path/"src").mkdir()
+    (tmp_path/"src"/"sim.py").write_text("import warp\nimport some_unknown_module\n")
+    (tmp_path/"widget.json").write_text(json.dumps({"tech_stack": {"language": "python"}}))
+    lang = PythonEngine()
+    assert lang.validation_version == 2
+    deps = {"language": "python", "dependencies": ["warp-lang>=1.8.1"]}
+    recorded = {"dependency_modules": {"warp-lang": ["warp"]}}
+
+    lang.validation_version = 1
+    try:
+        write_stamp(str(tmp_path), "python", lang, extra=recorded)
+    finally:
+        del lang.validation_version
+    assert read_stamp(str(tmp_path))["engine_version"] == 1
+    assert has_valid_stamp(str(tmp_path), "python")
+    assert not is_stamp_valid(str(tmp_path), "python", lang)
+    warned = lang.scan_contamination(str(tmp_path), deps)
+    assert any("'some_unknown_module'" in w for w in warned["warnings"]), warned
+    assert not any("'some_unknown_module'" in b for b in warned["blocks"]), warned
+    assert any("'warp'" in w for w in warned["warnings"]), warned
+
+    write_stamp(str(tmp_path), "python", lang, extra=recorded)
+    assert read_stamp(str(tmp_path))["engine_version"] == 2
+    blocked = lang.scan_contamination(str(tmp_path), deps)
+    assert not any("'warp'" in f for f in blocked["blocks"] + blocked["warnings"]), blocked
+    assert any("'some_unknown_module'" in b for b in blocked["blocks"]), blocked
+    assert not any("'some_unknown_module'" in w for w in blocked["warnings"]), blocked
