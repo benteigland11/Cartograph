@@ -275,7 +275,7 @@ class BlenderEngine(LanguageEngine):
                     warnings.append(
                         f"bpy.ops.{op} in {rel}:{node.lineno} - operators depend on UI "
                         f"context and break headless; prefer the data API (bpy.data, bmesh)")
-        return {"blocks": blocks, "warnings": warnings}
+        return {"blocks": blocks, "warnings": warnings, "unverified": result.get("unverified", [])}
 
     # ---- dependencies ------------------------------------------------------
 

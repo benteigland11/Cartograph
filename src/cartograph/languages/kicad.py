@@ -495,7 +495,7 @@ class KicadEngine(LanguageEngine):
                             "variable such as ${KICAD10_3DMODEL_DIR} or a path relative "
                             "to the library")
         blocks.extend(_toolchain_skips(path))
-        return {"blocks": blocks, "warnings": warnings}
+        return {"blocks": blocks, "warnings": warnings, "unverified": result.get("unverified", [])}
 
     # ---- dependencies ------------------------------------------------------
 

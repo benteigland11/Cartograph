@@ -274,15 +274,21 @@ def _validate_item(carto, path):
         # 9. Language checks, install deps, run example, run tests
         from .contamination import scan_contamination
         contam = scan_contamination(path)
+        contam_start = len(contam_warnings)
         contam_warnings.extend(contam.get("warnings", []))
-        if contam["blocks"]:
-            check("Contamination scan clean", False,
-                  "Contamination blocked:\n" + "\n".join(contam["blocks"]))
-            _print_checklist(checklist, errors + contam["blocks"], failed=True)
-            return {"status": "error",
-                    "message": "Contamination scan failed - hard blocks found.",
-                    "blocks": contam["blocks"]}
-        check("Contamination scan clean", True)
+
+        def contamination_blocked(contam, label="Contamination scan clean"):
+            if not check(label, not contam["blocks"],
+                         "Contamination blocked:\n" + "\n".join(contam["blocks"])):
+                _print_checklist(checklist, errors + contam["blocks"], failed=True)
+                return {"status": "error",
+                        "message": "Contamination scan failed - hard blocks found.",
+                        "blocks": contam["blocks"]}
+            return None
+
+        failure = contamination_blocked(contam)
+        if failure:
+            return failure
 
         log.debug("Running language checks...")
         lang_check = engine.validate_widget(path, dependencies)
@@ -301,6 +307,15 @@ def _validate_item(carto, path):
             check("Dependencies installed", False, str(e))
             _print_checklist(checklist, errors, failed=True)
             return {"status": "error", "message": f"Dependency install failed: {e}"}
+
+        # An import a declared package might provide was only a warning while the package was not installed;
+        # it is installed now, so the scan sees what it really provides, and an import nothing provides blocks.
+        if contam.get("unverified"):
+            contam = scan_contamination(path)
+            contam_warnings[contam_start:] = contam.get("warnings", [])
+            failure = contamination_blocked(contam, "Imports provided by installed dependencies")
+            if failure:
+                return failure
 
         from . import leftovers
 
@@ -401,7 +416,7 @@ def _validate_item(carto, path):
         # Write a stamp so checkin can skip re-validation if nothing changes
         from .validation_stamp import write_stamp
         try:
-            write_stamp(path, language, engine)
+            write_stamp(path, language, engine, extra=engine.stamp_metadata(path, dependencies))
         except Exception as e:
             return {"status": "error", "message": f"Could not write validation stamp: {e}"}
 
