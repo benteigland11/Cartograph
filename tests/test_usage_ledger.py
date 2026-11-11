@@ -814,7 +814,7 @@ def test_prior_recalls_synonym_the_substring_rule_missed(monkeypatch, tmp_path):
         (root / "src" / "cartograph" / "search" / "synonyms.json").read_text(encoding="utf-8")
     )
     assert "request" in synonyms["http"]
-    project = tmp_path / "acme-app"
+    project = tmp_path / "tiger12-app"
     project.mkdir()
     purpose = "make requests to the registry"
     record_usage(
@@ -867,7 +867,7 @@ def test_prior_recalls_synonym_the_substring_rule_missed(monkeypatch, tmp_path):
 
 def test_prior_unrelated_query_returns_no_rows(monkeypatch, tmp_path):
     _isolate_config(monkeypatch, tmp_path)
-    project = tmp_path / "acme-app"
+    project = tmp_path / "tiger12-app"
     project.mkdir()
     record_usage(
         "note",
@@ -902,7 +902,7 @@ def test_prior_unrelated_query_returns_no_rows(monkeypatch, tmp_path):
 
 def test_prior_matches_project_basename_and_remote(monkeypatch, tmp_path):
     _isolate_config(monkeypatch, tmp_path)
-    project = tmp_path / "acme-checkout"
+    project = tmp_path / "tiger12-checkout"
     project.mkdir()
     record_usage(
         "note",
@@ -918,7 +918,7 @@ def test_prior_matches_project_basename_and_remote(monkeypatch, tmp_path):
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(json.dumps(rows[0]) + "\n")
     by_dir = prior_for_search(
-        "acme-checkout",
+        "tiger12-checkout",
         project_root=str(project),
         library_versions={},
         registry_rows=[],
@@ -1017,7 +1017,7 @@ def test_prior_orders_by_relevance_within_one_project(monkeypatch, tmp_path):
 
 def test_prior_collapses_to_latest_event(monkeypatch, tmp_path):
     _isolate_config(monkeypatch, tmp_path)
-    project = tmp_path / "acme-app"
+    project = tmp_path / "tiger12-app"
     project.mkdir()
     record_usage(
         "note",
