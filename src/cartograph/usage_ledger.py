@@ -2,14 +2,14 @@
 
 Records which widget was installed, upgraded, removed, or noted, for which
 project, and why. The file lives under the Cartograph data directory.
-Search and inspect read it. Nothing in this module is sent to a registry.
+Search ranks prior rows with the same hybrid scorer as local search.
+Inspect reads the latest line. Nothing in this module is sent to a registry.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 from datetime import datetime, timezone
 
@@ -23,8 +23,6 @@ PRIOR_LIMIT = 5
 GIT_TIMEOUT_SECONDS = 2
 LOCK_TIMEOUT_SECONDS = 30
 RECORD_ACTIONS = frozenset({"install", "upgrade", "uninstall", "note"})
-
-_TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
 
 
 def ledger_path() -> str:
@@ -290,8 +288,14 @@ def prior_for_search(
 
     Returns None when the pool should be omitted (disabled, missing,
     unreadable, or no matches). Does not reorder caller-supplied rows.
+    Matching uses the local hybrid scorer over the widget id, purpose,
+    project directory name, and git origin. Order inside the pool is the
+    current project first, then scorer relevance, then latest use when
+    those scores tie.
     """
     if not ledger_enabled():
+        return None
+    if not (query or "").strip():
         return None
     path = ledger_path()
     if not os.path.isfile(path):
@@ -300,36 +304,32 @@ def prior_for_search(
     if loaded is None:
         return None
 
-    tokens = _TOKEN_RE.findall((query or "").lower())
-    if not tokens:
-        raw = (query or "").strip().lower()
-        tokens = [raw] if len(raw) >= 2 else []
-    if not tokens:
-        return None
-
     latest: dict[str, dict] = {}
     for row in loaded["records"]:
         wid = row.get("widget_id")
         if isinstance(wid, str) and wid:
             latest[wid] = row
 
-    hits = [row for row in latest.values() if _haystack_hit(row, tokens)]
+    hits = _prior_hits(query, list(latest.values()))
     if not hits:
         return None
 
     project_key = project_identity(project_root)["project_key"]
-    hits.sort(key=lambda row: row.get("used_at") or "", reverse=True)
-    hits.sort(key=lambda row: 0 if row.get("project_key") == project_key else 1)
+    # Stable sorts: recency is the tiebreak, relevance orders the rest,
+    # and the current project stays in front of a higher score elsewhere.
+    hits.sort(key=lambda item: item[0].get("used_at") or "", reverse=True)
+    hits.sort(key=lambda item: item[1], reverse=True)
+    hits.sort(key=lambda item: 0 if item[0].get("project_key") == project_key else 1)
 
     flags = _registry_flags(registry_rows, prefixes)
     shown = hits[:PRIOR_LIMIT]
     omitted = len(hits) - len(shown)
     widgets = [
         _prior_row(row, project_key, library_versions, flags, prefixes)
-        for row in shown
+        for row, _score in shown
     ]
     annotations: dict[str, dict] = {}
-    for row in hits:
+    for row, _score in hits:
         wid = str(row.get("widget_id") or "")
         prior = _prior_use(row, project_key)
         annotations[wid] = prior
@@ -493,15 +493,69 @@ def _forget_project(path: str, *, project_key: str, widget_id: str | None) -> di
     return {"status": "success", "removed": removed, "kept": len(final["records"])}
 
 
-def _haystack_hit(row: dict, tokens: list[str]) -> bool:
+def _index_remote(remote: str) -> str:
+    """Drop a leading http(s) scheme before the text is indexed.
+
+    The hybrid scorer treats a vocabulary prefix as a hit, so the token
+    ``https`` matches the query ``http``. Stripping the scheme keeps an
+    unrelated origin from showing up for that query. The host and path
+    stay searchable. SSH origins have no scheme and are unchanged.
+    """
+    text = remote.strip()
+    lowered = text.lower()
+    for scheme in ("https://", "http://"):
+        if lowered.startswith(scheme):
+            return text[len(scheme):]
+    return text
+
+
+def _ledger_document(row: dict) -> dict:
+    """Map one ledger row onto the document shape local search already indexes.
+
+    Purpose uses the name field, which carries the same weight as a widget
+    name, so a synonym in the purpose can stay above the relevance floor
+    when a stronger id match is also in the ledger. The project directory
+    name and git origin use the description field.
+    """
     project_path = str(row.get("project_path") or "")
-    hay = " ".join([
-        str(row.get("widget_id") or ""),
-        str(row.get("purpose") or ""),
-        os.path.basename(project_path),
-        str(row.get("project_remote") or ""),
-    ]).lower()
-    return any(token in hay for token in tokens)
+    basename = os.path.basename(project_path)
+    remote = _index_remote(str(row.get("project_remote") or ""))
+    description = " ".join(part for part in (basename, remote) if part)
+    purpose = row.get("purpose") or ""
+    return {
+        "id": str(row.get("widget_id") or ""),
+        "name": str(purpose),
+        "tags": [],
+        "description": description,
+    }
+
+
+def _prior_hits(query: str, rows: list[dict]) -> list[tuple[dict, float]]:
+    """Return ``(row, score)`` pairs the local hybrid scorer keeps.
+
+    The score is the same combined value local search compares to
+    ``HybridBackend.min_score``. A row also needs a real term hit: raw
+    TF-IDF above zero (token, synonym, or fuzzy resolution) or the exact
+    name/id boost. Character n-gram overlap alone normalises to 0.60,
+    which is above that floor, so unrelated rows would show up. Local
+    search hides that case in result formatting once a library has 10 or
+    more widgets and no query term landed in a name or id. That cutoff
+    would also hide a purpose-only synonym, so the prior pool does not
+    apply it.
+    """
+    if not rows:
+        return []
+    from .search.hybrid import HybridBackend
+    backend = HybridBackend()
+    backend.build([_ledger_document(row) for row in rows])
+    kept = []
+    for row, detail in zip(rows, backend.scores(query)):
+        if detail["combined"] < backend.min_score:
+            continue
+        if detail["tfidf"] <= 0 and not detail["exact"]:
+            continue
+        kept.append((row, round(detail["combined"], 4)))
+    return kept
 
 
 def _registry_flags(rows: list[dict], prefixes: list[str]) -> dict:
