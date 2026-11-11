@@ -412,7 +412,8 @@ def cmd_search(args):
     if local_only and (registries_filter or owner_filter):
         err({"error": "--local-only cannot be combined with --registry or --owner."})
 
-    local = _carto().search(
+    carto = _carto()
+    local = carto.search(
         query=args.query,
         domain_filter=args.domain,
         language_filter=args.language,
@@ -515,6 +516,43 @@ def cmd_search(args):
     local_results = [_search_row(w) for w in local_sorted[:local_take]]
     registry_results = [_search_row(w) for w in registry_ordered[:registry_take]]
 
+    # Prior use is a separate pool. It does not reorder local or registry
+    # rows and it does not spend the top_k budget.
+    prior_block = None
+    if not getattr(args, "no_ledger", False):
+        from .usage_ledger import prior_for_search
+        library_versions = {
+            w["id"]: w.get("version") or "unknown"
+            for w in getattr(carto, "widgets", [])
+            if isinstance(w, dict) and w.get("id")
+        }
+        try:
+            prior = prior_for_search(
+                args.query,
+                project_root=os.getcwd(),
+                library_versions=library_versions,
+                registry_rows=registry_ordered,
+                prefixes=_all_prefixes,
+            )
+        except Exception:
+            prior = None
+        if prior:
+            prior_block = prior["block"]
+            annotations = prior["annotations"]
+
+            def _annotate(rows):
+                annotated = []
+                for row in rows:
+                    match = annotations.get(row.get("id")) or annotations.get(_base_id(row))
+                    if match:
+                        row = dict(row)
+                        row["prior_use"] = match
+                    annotated.append(row)
+                return annotated
+
+            local_results = _annotate(local_results)
+            registry_results = _annotate(registry_results)
+
     # Payload key order mirrors priority — agents read top-down.
     local_block = {"count": local_take, "widgets": local_results}
     registry_block = {"count": registry_take, "widgets": registry_results}
@@ -535,7 +573,10 @@ def cmd_search(args):
     if registry_errors:
         payload["registry_errors"] = registry_errors
 
-    if not local_results and not registry_results:
+    if prior_block:
+        payload = {"prior": prior_block, **payload}
+
+    if not local_results and not registry_results and not prior_block:
         payload["message"] = f"No widgets found for '{args.query}'."
         payload["suggestion"] = (
             "Try broadening your search by removing --domain or --language filters."
@@ -557,7 +598,7 @@ def cmd_inspect(args):
                                registry_url=registry_url)
         if "error" in result:
             err(result)
-        out(result)
+        out(_with_prior_use(result))
         return
 
     result_ref = _resolve_module_ref(token, path=".", lib=False)
@@ -573,7 +614,7 @@ def cmd_inspect(args):
         show_reviews=args.reviews,
         version=getattr(args, "version", None),
     )
-    out(result)
+    out(_with_prior_use(result))
 
 
 def _cloud_install_note(result):
@@ -586,6 +627,56 @@ def _cloud_install_note(result):
         print("    Note: Code is validated locally by the uploader. Review before use.", file=sys.stderr)
 
 
+def _with_prior_use(result):
+    """Attach the latest ledger hit to an inspect payload, when one exists."""
+    if not isinstance(result, dict) or "error" in result:
+        return result
+    try:
+        from .usage_ledger import prior_use_for
+        prior = prior_use_for(str(result.get("id") or ""))
+    except Exception:
+        return result
+    if prior:
+        result["prior_use"] = prior
+    return result
+
+
+def _stamp_usage(result, *, action, widget_token, project_root, purpose,
+                 version=None, previous_version=None, carry_purpose=False):
+    """Record a successful widget command. Ledger failures stay on the result."""
+    if not isinstance(result, dict):
+        return result
+    if result.get("status") == "error" or "error" in result:
+        return result
+    try:
+        from .blueprints import is_blueprint_id
+        from .engine import normalize_widget_id
+        from .usage_ledger import parse_widget_token, record_usage
+        wid = result.get("widget_id") or widget_token or ""
+        canonical, parsed_owner = parse_widget_token(str(wid))
+        if is_blueprint_id(normalize_widget_id(canonical)):
+            return result
+        owner = parsed_owner
+        token = str(widget_token or "")
+        if token.startswith("@"):
+            owner = token[1:].split("/", 1)[0] or owner
+        info = record_usage(
+            action,
+            widget_id=canonical,
+            version=version if version is not None else result.get("version"),
+            purpose=purpose,
+            project_root=project_root,
+            owner=owner,
+            previous_version=previous_version,
+            carry_purpose=carry_purpose,
+        )
+    except Exception as exc:
+        info = {"recorded": False, "error": str(exc)}
+    if info is not None:
+        result["usage_ledger"] = info
+    return result
+
+
 def cmd_install(args):
     result = _carto().install(
         widget_id=args.widget_id,
@@ -594,6 +685,13 @@ def cmd_install(args):
     )
     if result.get("status") == "error" or "error" in result:
         err(result)
+    result = _stamp_usage(
+        result,
+        action="install",
+        widget_token=args.widget_id,
+        project_root=os.path.abspath(args.target),
+        purpose=getattr(args, "purpose", None),
+    )
     out(result)
     _cloud_install_note(result)
 
@@ -705,9 +803,20 @@ def _resolve_installed_widget(widget_dir: str, default_target: str):
 
 def cmd_uninstall(args):
     widget_id, target_dir, _ = _resolve_installed_widget(args.widget_dir, os.getcwd())
+    from .usage_ledger import installed_version
+    version = installed_version(target_dir, widget_id)
     result = _carto().uninstall(widget_id=widget_id, target_dir=target_dir)
     if result.get("status") == "error" or "error" in result:
         err(result)
+    result = _stamp_usage(
+        result,
+        action="uninstall",
+        widget_token=widget_id,
+        project_root=target_dir,
+        purpose=getattr(args, "purpose", None),
+        version=version,
+        carry_purpose=True,
+    )
     out(result)
 
 
@@ -720,8 +829,99 @@ def cmd_upgrade(args):
     )
     if result.get("status") == "error" or "error" in result:
         err(result)
+    result = _stamp_usage(
+        result,
+        action="upgrade",
+        widget_token=widget_id,
+        project_root=target_dir,
+        purpose=getattr(args, "purpose", None),
+        previous_version=result.get("previous_version"),
+        carry_purpose=True,
+    )
     out(result)
     _cloud_install_note(result)
+
+
+def cmd_ledger(args):
+    """List, note, or forget local widget use history. Always JSON."""
+    from .usage_ledger import (
+        forget_events,
+        ledger_enabled,
+        list_events,
+        normalize_purpose,
+        record_usage,
+    )
+    action = getattr(args, "action", None) or "list"
+    project_root = os.path.abspath(getattr(args, "target", None) or ".")
+    if action == "list":
+        result = list_events(
+            limit=args.limit if getattr(args, "limit", None) is not None else 50,
+            widget_id=getattr(args, "widget_filter", None),
+            project_only=bool(getattr(args, "project", False)),
+            project_root=project_root,
+        )
+        if "error" in result:
+            err(result)
+        out(result)
+        return
+    if action == "note":
+        if not ledger_enabled():
+            err({
+                "error": "Usage ledger is disabled. Enable it with: "
+                         "cartograph config usage-ledger true",
+            })
+        widget_id = getattr(args, "widget_id", None)
+        if not widget_id:
+            err({"error": "Usage: cartograph ledger note <widget_id> --purpose TEXT"})
+        try:
+            purpose = normalize_purpose(getattr(args, "purpose", None))
+        except ValueError as exc:
+            err({"error": str(exc)})
+        if not purpose:
+            err({"error": "note requires --purpose"})
+        version = _note_version(widget_id, project_root, getattr(args, "version", None))
+        info = record_usage(
+            "note",
+            widget_id=widget_id,
+            version=version,
+            purpose=purpose,
+            project_root=project_root,
+        )
+        if not info or not info.get("recorded"):
+            err({"error": (info or {}).get("error") or "Could not record ledger note"})
+        out({
+            "status": "success",
+            "widget_id": widget_id,
+            "purpose": purpose,
+            "usage_ledger": info,
+        })
+        return
+    if action == "forget":
+        result = forget_events(
+            widget_id=getattr(args, "widget_filter", None) or getattr(args, "widget_id", None),
+            project_only=bool(getattr(args, "project", False)),
+            everything=bool(getattr(args, "forget_all", False)),
+            project_root=project_root,
+        )
+        if "error" in result:
+            err(result)
+        out(result)
+        return
+    err({"error": f"Unknown ledger action '{action}'. Use list, note, or forget."})
+
+
+def _note_version(widget_id: str, project_root: str, explicit: str | None) -> str:
+    if explicit:
+        return explicit
+    from .usage_ledger import installed_version, parse_widget_token
+    found = installed_version(project_root, widget_id)
+    if found != "unknown":
+        return found
+    canonical, _owner = parse_widget_token(widget_id)
+    for widget in _carto().widgets:
+        if widget.get("id") in (canonical, widget_id):
+            return widget.get("version") or "unknown"
+    return "unknown"
 
 
 def cmd_delete(args):
@@ -2915,7 +3115,7 @@ Only project specific wiring should not be made into widgets.
 
 1. Plan what components you need before building
 2. Decide whether new implementation can just be an improvement on currently used widgets. Read the widgets before deciding.
-3. Search the library before writing new logic
+3. Search the library before writing new logic. `cartograph search` lists prior uses from this machine first when any match. Pass `--purpose` on install so the next search can recall why that widget was chosen.
 4. Install widgets, then write glue code to connect them. Don't edit widget source directly for this step.
 5. If you do edit a widget, only do so if you intend to check it back in as an improvement for the general logic of the widget.
 6. Validate before checking in, check in before publishing
@@ -3904,6 +4104,42 @@ def _build_cli() -> AgentCLI:
                          "(owner is scoped per-registry)."},
                 {"name": "--local-only", "action": "store_true", "default": False, "dest": "local_only",
                  "help": "Search only the local library; skip all registry calls."},
+                {"name": "--no-ledger", "action": "store_true", "default": False, "dest": "no_ledger",
+                 "help": "Do not read the local usage ledger for this search."},
+            ],
+        },
+        {
+            "name": "ledger",
+            "help": "List, note, or forget local widget use history",
+            "description": (
+                "Machine-local record of widgets installed or noted on this computer.\n"
+                "The file is not synced and is never sent to a registry.\n\n"
+                "Actions:\n"
+                "  (none)   List recent events, newest first\n"
+                "  list     Same as omitting the action\n"
+                "  note     Record a use: cartograph ledger note <widget_id> --purpose \"...\"\n"
+                "  forget   Drop rows: --widget ID, --project, or --all"
+            ),
+            "handler": cmd_ledger,
+            "args": [
+                {"name": "action", "nargs": "?", "default": None,
+                 "help": "list | note | forget (omit to list)"},
+                {"name": "widget_id", "nargs": "?", "default": None,
+                 "help": "Widget id for note"},
+                {"name": "--purpose", "default": None,
+                 "help": "What the widget was used for (required for note, optional elsewhere)"},
+                {"name": "--version", "default": None,
+                 "help": "Version to record with note"},
+                {"name": "--target", "default": ".",
+                 "help": "Project root (default: .)"},
+                {"name": "--limit", "type": int, "default": 50,
+                 "help": "How many events to list (default: 50)"},
+                {"name": "--widget", "default": None, "dest": "widget_filter",
+                 "help": "Filter list or forget to this widget id"},
+                {"name": "--project", "action": "store_true", "default": False,
+                 "help": "Limit list or forget to the current project"},
+                {"name": "--all", "action": "store_true", "default": False, "dest": "forget_all",
+                 "help": "Forget every event. Required to wipe the file."},
             ],
         },
         {
@@ -3927,6 +4163,8 @@ def _build_cli() -> AgentCLI:
                 {"name": "widget_id"},
                 {"name": "--target", "default": ".", "help": "Project root (default: .)"},
                 {"name": "--version", "default": None},
+                {"name": "--purpose", "default": None,
+                 "help": "What this widget is being used for. Stored only in the local usage ledger."},
             ],
         },
         {
@@ -3936,6 +4174,9 @@ def _build_cli() -> AgentCLI:
             "args": [
                 {"name": "widget_dir",
                  "help": "Installed widget id, cg/ path, or basename"},
+                {"name": "--purpose", "default": None,
+                 "help": "Override the purpose recorded for this removal. "
+                         "When omitted, the previous purpose for this project is kept."},
             ],
         },
         {
@@ -3946,6 +4187,9 @@ def _build_cli() -> AgentCLI:
                 {"name": "widget_dir",
                  "help": "Installed widget id, cg/ path, or basename"},
                 {"name": "--version", "default": None},
+                {"name": "--purpose", "default": None,
+                 "help": "What the upgraded widget is being used for. "
+                         "When omitted, the previous purpose for this project is kept."},
             ],
         },
         {

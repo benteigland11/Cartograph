@@ -221,14 +221,15 @@ string- and comment-aware by construction. Compiled once to a cached binary
 because `go run scanner.go <files...>` would consume the target files as
 additional sources rather than passing them as argv. Blocks in src/:
 `fmt.Print*/print/println`, `os.Exit`/`log.Fatal*`, `panic` inside
-`init()`, credentials, absolute paths, hardcoded IPs, `time.Sleep`, and the
+`init()`, credentials, absolute paths, hardcoded IPs, `time.Sleep`, the
 deprecated `io/ioutil` import (named replacements live in `io`/`os` since
-Go 1.16). Warnings: hardcoded URLs, env var access
-(`os.Getenv`/`os.LookupEnv`), top-level mutable `var`s, hardcoded numeric
-tunables, unlisted module imports (resolved against go.mod's module path
+Go 1.16), and unlisted module imports (resolved against go.mod's module path
 and widget.json deps; stdlib detected by the no-dot-in-first-path-element
-rule). Sleeps in tests warn only above 1s, with durations estimated
-statically from `N * time.Second`-shaped expressions.
+rule). The same unlisted import warns in tests/ and examples/. Warnings:
+hardcoded URLs, env var access (`os.Getenv`/`os.LookupEnv`), top-level
+mutable `var`s, and hardcoded numeric tunables. Sleeps in tests warn only
+above 1s, with durations estimated statically from `N * time.Second`-shaped
+expressions.
 
 **Modern-standards warnings** (overridable at checkin, all src/-only):
 - `math/rand` -> prefer `math/rand/v2` (Go 1.22+); `math/rand/v2` is exempt
@@ -298,14 +299,16 @@ raw strings (`r"..."`, `r#"..."#`) before applying checks, which regex cannot
 do reliably across raw strings. The scanner skips its own source file (the
 harness passes the scanner path as the first argv, exactly like go_scanner).
 Blocks in src/: `println!/print!/eprintln!/eprint!`, `process::exit`/`abort`,
-`unsafe`, credentials, absolute paths, hardcoded IPs, `thread::sleep`.
-Warnings: hardcoded URLs (localhost/127.0.0.1/example.* /.test exempted), env
-var access (`env::var`), `todo!`/`unimplemented!`, hardcoded numeric tunables
-(`const`/`static` bound to a literal other than 0/1), unlisted external crate
-imports (resolved against widget.json deps and the crate's own Cargo package
-name; `std`/`core`/`alloc`/`crate`/`self`/`super` exempt), and public items
-without a `///` doc comment. Sleeps in tests warn only above 1s, with durations
-estimated statically from `Duration::from_secs/millis/...` calls.
+`unsafe`, credentials, absolute paths, hardcoded IPs, `thread::sleep`, and
+unlisted external crate imports (resolved against widget.json deps and the
+crate's own Cargo package name; `std`/`core`/`alloc`/`crate`/`self`/`super`
+exempt; a first path segment is also local when `src/<seg>.rs` or
+`src/<seg>/mod.rs` exists). The same unlisted import warns in tests/ and
+examples/. Warnings: hardcoded URLs (localhost/127.0.0.1/example.* /.test
+exempted), env var access (`env::var`), `todo!`/`unimplemented!`, hardcoded
+numeric tunables (`const`/`static` bound to a literal other than 0/1), and
+public items without a `///` doc comment. Sleeps in tests warn only above 1s,
+with durations estimated statically from `Duration::from_secs/millis/...` calls.
 
 **Blueprints:** Rust composition uses Cargo path dependencies
 (`<dep> = { path = "cg/<dep-widget>" }`) in the blueprint's Cargo.toml. Cargo
@@ -431,16 +434,26 @@ before applying code checks, while keeping string contents visible to the
 checks that look inside strings (paths, URLs, IPs, credentials).
 Blocks in src/: `System.out/System.err` printing, `System.exit`/
 `Runtime.getRuntime().halt/exit`, credentials, absolute paths, hardcoded
-IPs, `Thread.sleep`/`TimeUnit.*.sleep`. Warnings: hardcoded URLs
+IPs, `Thread.sleep`/`TimeUnit.*.sleep`, and unlisted package imports
+(resolved against widget.json deps with loose group/artifact matching,
+since Maven groups don't always equal package roots -
+`com.google.code.gson` ships `com.google.gson`; `java.*`/`javax.*`/`jdk.*`/
+`com.sun.*`/`org.w3c.*`/`org.xml.*` and `org.junit.*` are exempt). Own
+packages are every `package` declaration in the widget's `src/**/*.java`
+files, plus anything under those packages, and they count in every scanned
+file so the scaffolded test `import <module>.<Class>` stays quiet. A src/
+file also treats the first segment of the package it declares as own
+(`package com.acme.widget` treats every `com.*` import in that file as
+own). The same unlisted import warns in tests/ and examples/. The Maven
+match stays loose: it can miss some real unlisted imports and rarely flag
+a declared one. A star import (`import com.foo.*`) does not match the
+import pattern. Warnings: hardcoded URLs
 (localhost/127.0.0.1/example.* /.test exempted), env var access
 (`System.getenv`/`getProperty`), non-final static fields (shared mutable
-state), hardcoded numeric `final` constants other than 0/±1, and unlisted
-package imports (resolved against widget.json deps with loose group/artifact
-matching, since Maven groups don't always equal package roots -
-`com.google.code.gson` ships `com.google.gson`; `java.*`/`javax.*`/`jdk.*`
-and `org.junit.*` are exempt). Sleeps in tests warn only above 1s, estimated
-statically from the literal argument. Examples are exempt from the print
-block - they demonstrate by printing.
+state), and hardcoded numeric `final` constants other than 0/±1. Sleeps
+in tests warn only above 1s, estimated statically from the literal
+argument. Examples are exempt from the print block - they demonstrate by
+printing.
 
 **Blueprints:** Java composition adds the dep widget's sources to the
 blueprint's main source set (`srcDirs = ['src', 'cg/<dep-widget>/src']`) in
@@ -584,14 +597,17 @@ comments (`/- /- -/ -/`), doc comments, line comments, multi-line strings with
 escapes, interpolated strings, and char literals - so `sorry` in a docstring
 or an IP in a comment never trips. Blocks: `sorry`/`admit` (everywhere),
 `axiom` (src/), `IO.println`/`dbg_trace` (src/), `IO.sleep` (src/), absolute
-paths, credentials, hardcoded IPs (src/; warnings in tests/). Warnings:
+paths, credentials, hardcoded IPs (src/; warnings in tests/), and
+unlisted imports in src/ (declared deps read from widget.json, matched
+case-insensitively on the import root; `Init`/`Std`/`Lean`/`Lake` are exempt;
+own roots are scanned-file basenames, directory names directly under src/,
+and `[[lean_lib]]` names in lakefile.toml). The same unlisted import warns
+in tests/ and examples/. Warnings:
 `native_decide` (trusts the compiled evaluator instead of the kernel),
 `unsafe` and `partial` defs in src/ (totality is the point of a Lean widget),
-`IO.getEnv`, hardcoded URLs (localhost/example.* allowlisted), top-level
-numeric constants, unlisted imports (declared deps read from widget.json;
-`Init`/`Std`/`Lean`/`Lake` and the widget's own modules allowlisted). The
-scanner filters its own basename from the target list, so the self-scan trap
-is structurally avoided.
+`IO.getEnv`, hardcoded URLs (localhost/example.* allowlisted), and top-level
+numeric constants. The scanner filters its own basename from the target
+list, so the self-scan trap is structurally avoided.
 
 **Blueprints:** Lean composition uses lake path-requires: `blueprint add-dep`
 appends `[[require]] name = "<dep-lib>" path = "cg/<dep-widget>"` to the
@@ -661,14 +677,22 @@ IPs, credentials). Interpolated strings are treated as plain strings
 checks). Blocks in src/: `Console` printing (`Write`/`WriteLine` on
 `Console`, `Console.Out`, `Console.Error`), `Environment.Exit`/`FailFast`,
 credentials, absolute paths (drive-letter branch guarded so `https://` never
-matches via `s://`), hardcoded IPs, `Thread.Sleep`. Warnings: hardcoded URLs
+matches via `s://`), hardcoded IPs, `Thread.Sleep`, and unlisted `using` imports (resolved
+against widget.json deps with loose case-insensitive prefix matching,
+since package ids don't always equal namespace roots; `System.*`,
+`Microsoft.CSharp.*`, `Microsoft.VisualBasic.*`, `Xunit.*`, and the
+widget's own namespaces are exempt). Own namespaces are every `namespace`
+declaration in the widget's src/*.cs files, block form and file-scoped
+(`namespace Name;`), plus their sub-namespaces, and they count in every
+scanned file so the scaffolded test `using <Pascal>Widget` stays quiet. A
+src/ file also treats the first segment of the namespace it declares as
+own. The same unlisted using warns in tests/ and examples/. The NuGet
+match stays loose: it can miss some real unlisted usings and rarely flag
+a declared one. Warnings: hardcoded URLs
 (localhost/127.0.0.1/example.* /.test exempted), env var access
 (`Environment.GetEnvironmentVariable`), mutable static fields (shared
-mutable state; `static readonly` exempt), hardcoded numeric `const`s other
-than 0/±1, and unlisted `using` imports (resolved against widget.json deps
-with loose case-insensitive prefix matching, since package ids don't always
-equal namespace roots; `System.*`, `Microsoft.CSharp.*`, `Xunit.*`, and the
-widget's own namespace are exempt). `Task.Delay` is deliberately not
+mutable state; `static readonly` exempt), and hardcoded numeric `const`s
+other than 0/±1. `Task.Delay` is deliberately not
 flagged - awaited delays are non-blocking, and the async-abuse variants
 (`.Result`/`.Wait()`) are left to custom rules. Sleeps in tests warn only
 above 1s, estimated statically from the literal argument. Examples are
@@ -753,14 +777,15 @@ credentials, import URIs). Interpolation holes count as string content -
 acceptable for warning-grade checks. Blocks in src/: console output
 (`print`, `debugPrint`, `stdout`/`stderr` writes), `exit()`, credentials,
 absolute paths (drive-letter branch guarded so `https://` never matches
-via `s://`), hardcoded IPs, and blocking `sleep()` (`Future.delayed` is
-deliberately not flagged - awaited delays don't block the caller).
-Warnings: hardcoded URLs (localhost/127.0.0.1/example.* /.test exempted),
-`Platform.environment` access, top-level numeric `const`/`final`s other
-than 0/±1, and unlisted `package:` imports (resolved against widget.json
-deps plus pubspec path deps; `dart:*`, `package:flutter`,
-`package:flutter_test`, relative imports, and the widget's own package are
-exempt). Sleeps in tests warn only above 1s, statically estimated from
+via `s://`), hardcoded IPs, blocking `sleep()` (`Future.delayed` is
+deliberately not flagged - awaited delays don't block the caller), and
+unlisted `package:` imports (resolved against widget.json deps plus
+pubspec path deps; `dart:*`, `package:flutter`, `package:flutter_test`,
+relative imports, and the widget's own package are exempt). The same
+unlisted import warns in tests/ and examples/. Warnings: hardcoded URLs
+(localhost/127.0.0.1/example.* /.test exempted), `Platform.environment`
+access, and top-level numeric `const`/`final`s other than 0/±1. Sleeps
+in tests warn only above 1s, statically estimated from
 `Duration(unit: literal)` arguments; non-literal durations count as long.
 
 **Blueprints:** composition is wired as pub *path dependencies* -
@@ -949,8 +974,9 @@ The unifying rule for contamination checks:
 - **Tests keep real safety nets** (absolute home paths, credentials,
   unlisted imports). A real secret or real user path in a test is still
   wrong.
-- **Examples are not scanned** - they are validated by being executed
-  (Python/JS/Nim) or rendered (OpenSCAD/SV), not by static scanning.
+- **Examples are scanned.** An unlisted import in examples/ warns, the same
+  as in tests/. Executing the example (Python, JS, Nim) or rendering it
+  (OpenSCAD, SystemVerilog) is a separate check and does not replace the scan.
 
 **Unlisted imports policy (all languages):** an import that is not in
 widget.json `dependencies`, not stdlib, and not a local src/ module is

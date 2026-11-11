@@ -172,7 +172,7 @@ def _pascal_name(module_name: str) -> str:
 
 class CSharpEngine(LanguageEngine):
     name = "csharp"
-    validation_version = 1
+    validation_version = 2
     file_ext = "cs"
     aliases = ["cs", "c#", "dotnet"]
     toolchain = {

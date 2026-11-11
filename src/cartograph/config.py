@@ -34,6 +34,7 @@ _DEFAULTS = {
         "cloud": True,
         "auto_update": True,
         "search_priority": "local",
+        "usage_ledger": True,
     },
     "publish": {
         "auto_publish": False,
@@ -63,6 +64,8 @@ _SCHEMA = {
     "search-priority":  ("library", "search_priority", "str", ["local", "registry"],
                          "Which pool fills the search budget first: your local library "
                          "or the registry pool"),
+    "usage-ledger":     ("library", "usage_ledger", "bool", None,
+                         "Record local widget install and use history on this machine"),
     "heavy-deps-root":  ("heavy_deps", "root", "path", None,
                          "Directory holding pre-provisioned heavy dependencies "
                          "(e.g. <dir>/lean-mathlib/<pin>). Defaults to the data dir; "

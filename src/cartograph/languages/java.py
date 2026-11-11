@@ -196,7 +196,7 @@ def _java_class_name(module_name: str) -> str:
 
 class JavaEngine(LanguageEngine):
     name = "java"
-    validation_version = 1
+    validation_version = 2
     file_ext = "java"
     toolchain = {
         "java": "Install a JDK 21+ - adoptium.net",

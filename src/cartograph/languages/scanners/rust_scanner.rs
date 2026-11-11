@@ -16,6 +16,8 @@
 // checks (urls, ips, abs paths, credentials) run against captured string
 // literals. The declared dependency list is read from widget.json in the
 // working directory for the unlisted-import check, exactly like go_scanner.
+// A first path segment is also local when src/<seg>.rs or src/<seg>/mod.rs
+// exists, so `use child::Item` does not flag a module that lives in src/.
 
 use std::collections::HashSet;
 use std::env;
@@ -474,6 +476,26 @@ fn is_builtin_crate(seg: &str) -> bool {
     matches!(seg, "std" | "core" | "alloc" | "crate" | "self" | "super")
 }
 
+// A sibling module under the widget's src/: `use child::Item` is not an
+// external crate when src/child.rs or src/child/mod.rs exists. Inline
+// `mod child {}` with no file is not covered here. The segment is an
+// identifier from the lexer, so it cannot escape src/.
+fn is_local_module(seg: &str) -> bool {
+    if seg.is_empty() {
+        return false;
+    }
+    let file = format!("src/{seg}.rs");
+    let dir_mod = format!("src/{seg}/mod.rs");
+    path_is_file(&file) || path_is_file(&dir_mod)
+}
+
+fn path_is_file(path: &str) -> bool {
+    match fs::metadata(path) {
+        Ok(meta) => meta.is_file(),
+        Err(_) => false,
+    }
+}
+
 fn scan_file(
     path: &str,
     findings: &mut Vec<Finding>,
@@ -554,15 +576,18 @@ fn scan_file(
             push("todo_macro", line, "todo!/unimplemented!", "warning");
         }
 
-        // --- unlisted external crate imports: warn anywhere --------------
+        // --- unlisted external crate imports: block in src/, warn elsewhere
+        // sev is "block" in src/ and "warning" in tests/ and examples/. The
+        // severity string must be exactly "block": the engine only lets that
+        // value escape the scanner_warning_messages grouping.
         if let Some(seg) = use_crate_segment(code) {
             let norm = norm_crate(&seg);
             if !is_builtin_crate(&seg)
                 && norm != own_crate
                 && !deps.contains(&norm)
+                && !is_local_module(&seg)
             {
-                push("unlisted_import", line, &format!("use {}", seg),
-                     "warning");
+                push("unlisted_import", line, &format!("use {}", seg), sev);
             }
         }
 

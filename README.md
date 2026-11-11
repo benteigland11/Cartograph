@@ -89,8 +89,9 @@ Supporting a language means owning its full validation pipeline, not just genera
 The commands you'll reach for daily. All run from your project root.
 
 ```
-cartograph search <query>                              # find a widget
-cartograph install <widget_id>                         # install into cg/
+cartograph search <query>                              # find a widget; prior uses are listed first
+cartograph ledger                                      # local install and use history
+cartograph install <widget_id> [--purpose "..."]       # install into cg/
 cartograph create <name> --domain <d> --language <l>   # scaffold a new widget
 cartograph validate [path]                             # run the full pipeline
 cartograph checkin [path] --reason "..."               # push edits back
