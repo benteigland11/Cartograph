@@ -53,6 +53,10 @@ def _normalise(scores: list[float]) -> list[float]:
 
 
 class HybridBackend:
+    # Floor used by query() before domain formatting. Callers that rank
+    # non-widget documents (the usage ledger) use the same value.
+    min_score = _MIN_SCORE
+
     def __init__(self):
         self._tfidf = TFIDFBackend()
         self._ngram = NgramIndex()
@@ -63,32 +67,37 @@ class HybridBackend:
         self._tfidf.build(widgets)
         self._ngram.build(widgets)
 
-    def query(self, query: str, domain_filter: str | None = None,
-              language_filter: str | None = None, top_k: int = 10,
-              languages: set[str] | None = None) -> dict:
+    def scores(self, query: str) -> list[dict]:
+        """Combined hybrid score for every document passed to ``build``.
+
+        Documents use the same fields as library widgets: ``id``, ``name``,
+        ``tags``, ``description``, optional ``_code_tokens``, and optional
+        ``weighted_rating``. ``combined`` is the value ``query`` compares
+        to ``min_score`` (exact name/id boost and rating nudge included).
+        ``tfidf`` and ``ngram`` are the raw channel scores before min-max
+        normalisation. ``exact`` is true when a query term is a substring
+        of ``name`` or ``id``.
+        """
         if not self._widgets:
-            return {"results": []}
+            return []
 
         tfidf_raw = self._tfidf.score(query)
         ngram_raw = self._ngram.score(query)
-
         tfidf_norm = _normalise(tfidf_raw)
         ngram_norm = _normalise(ngram_raw)
-
         query_lower = query.lower()
-        # Score everything that clears the query + language bar, ignoring
-        # domain for now - we apply domain separately so we can tell an
-        # empty domain result apart from a weak query.
-        scored_all = []
+        detailed = []
         for idx, widget in enumerate(self._widgets):
             combined = _ALPHA * tfidf_norm[idx] + _BETA * ngram_norm[idx]
 
             # Hard boost for exact substring in name or id (per query term)
             name_lower = widget.get("name", "").lower()
             id_lower = widget.get("id", "").lower()
+            exact = False
             for term in query_lower.split():
                 if term in name_lower or term in id_lower:
                     combined += _EXACT_BOOST
+                    exact = True
                     break
 
             # Rating nudge - tiebreaker for equally relevant widgets
@@ -96,6 +105,27 @@ class HybridBackend:
             if wr > 0:
                 combined += _RATING_WEIGHT * (wr / 5.0)
 
+            detailed.append({
+                "combined": combined,
+                "tfidf": tfidf_raw[idx],
+                "ngram": ngram_raw[idx],
+                "exact": exact,
+            })
+        return detailed
+
+    def query(self, query: str, domain_filter: str | None = None,
+              language_filter: str | None = None, top_k: int = 10,
+              languages: set[str] | None = None) -> dict:
+        if not self._widgets:
+            return {"results": []}
+
+        # Score everything that clears the query + language bar, ignoring
+        # domain for now - we apply domain separately so we can tell an
+        # empty domain result apart from a weak query.
+        detailed = self.scores(query)
+        scored_all = []
+        for idx, widget in enumerate(self._widgets):
+            combined = detailed[idx]["combined"]
             if combined < _MIN_SCORE:
                 continue
 

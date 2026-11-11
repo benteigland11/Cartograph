@@ -3115,7 +3115,7 @@ Only project specific wiring should not be made into widgets.
 
 1. Plan what components you need before building
 2. Decide whether new implementation can just be an improvement on currently used widgets. Read the widgets before deciding.
-3. Search the library before writing new logic. `cartograph search` lists prior uses from this machine first when any match. Pass `--purpose` on install so the next search can recall why that widget was chosen.
+3. Search the library before writing new logic. `cartograph search` lists prior uses from this machine first when the local hybrid scorer matches the widget id, the recorded purpose, the project directory name, or the git origin. Pass `--purpose` on install so the next search can recall why that widget was chosen.
 4. Install widgets, then write glue code to connect them. Don't edit widget source directly for this step.
 5. If you do edit a widget, only do so if you intend to check it back in as an improvement for the general logic of the widget.
 6. Validate before checking in, check in before publishing
@@ -4090,6 +4090,13 @@ def _build_cli() -> AgentCLI:
         {
             "name": "search",
             "help": "Search the widget library",
+            "description": (
+                "Search the local library and configured registries.\n"
+                "When the usage ledger is on, a prior pool is listed first. "
+                "Those rows are ranked by the same hybrid scorer as local search, "
+                "over the widget id, the recorded purpose, the project directory name, "
+                "and the git origin. Pass --no-ledger to skip that read."
+            ),
             "handler": cmd_search,
             "args": [
                 {"name": "query", "help": "Search query"},
@@ -4105,7 +4112,7 @@ def _build_cli() -> AgentCLI:
                 {"name": "--local-only", "action": "store_true", "default": False, "dest": "local_only",
                  "help": "Search only the local library; skip all registry calls."},
                 {"name": "--no-ledger", "action": "store_true", "default": False, "dest": "no_ledger",
-                 "help": "Do not read the local usage ledger for this search."},
+                 "help": "Do not score the local usage ledger for this search."},
             ],
         },
         {
@@ -4164,7 +4171,8 @@ def _build_cli() -> AgentCLI:
                 {"name": "--target", "default": ".", "help": "Project root (default: .)"},
                 {"name": "--version", "default": None},
                 {"name": "--purpose", "default": None,
-                 "help": "What this widget is being used for. Stored only in the local usage ledger."},
+                 "help": "What this widget is being used for. Stored only in the local "
+                         "usage ledger. Search matches it with the local hybrid scorer."},
             ],
         },
         {

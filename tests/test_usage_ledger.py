@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -775,3 +776,377 @@ def test_prior_pool_omits_past_five(tmp_path):
     assert found["block"]["count"] == 5
     assert found["block"]["omitted"] == 1
     assert len(found["annotations"]) >= 6
+
+
+_OLD_TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
+
+
+def _old_substring_hit(row, query):
+    """The prior-pool rule this change replaced: any query token is a substring."""
+    tokens = _OLD_TOKEN_RE.findall((query or "").lower())
+    if not tokens:
+        raw = (query or "").strip().lower()
+        tokens = [raw] if len(raw) >= 2 else []
+    project_path = str(row.get("project_path") or "")
+    hay = " ".join([
+        str(row.get("widget_id") or ""),
+        str(row.get("purpose") or ""),
+        os.path.basename(project_path),
+        str(row.get("project_remote") or ""),
+    ]).lower()
+    return any(token in hay for token in tokens)
+
+
+def _prior_ids(found):
+    return [row["widget_id"] for row in found["block"]["widgets"]]
+
+
+def test_prior_recalls_synonym_the_substring_rule_missed(monkeypatch, tmp_path):
+    """'http client' recalls a urllib row whose purpose says 'requests'.
+
+    synonyms.json maps http -> request. The purpose has no 'http' or
+    'client' substring, and neither does the widget id, so the old
+    token rule does not match this row.
+    """
+    _isolate_config(monkeypatch, tmp_path)
+    root = Path(__file__).resolve().parents[1]
+    synonyms = json.loads(
+        (root / "src" / "cartograph" / "search" / "synonyms.json").read_text(encoding="utf-8")
+    )
+    assert "request" in synonyms["http"]
+    project = tmp_path / "tiger12-app"
+    project.mkdir()
+    purpose = "make requests to the registry"
+    record_usage(
+        "note",
+        widget_id="infra-urllib-python",
+        version="1.0.0",
+        purpose=purpose,
+        project_root=str(project),
+    )
+    record_usage(
+        "note",
+        widget_id="http-client",
+        version="1.0.0",
+        purpose="send payloads",
+        project_root=str(project),
+    )
+    record_usage(
+        "note",
+        widget_id="image-resize",
+        version="1.0.0",
+        purpose="scale photos for thumbnails",
+        project_root=str(project),
+    )
+    # An https origin must not count as an "http" hit via prefix matching.
+    path = ledger_path()
+    rewritten = []
+    for row in _rows(path):
+        if row["widget_id"] == "image-resize":
+            row["project_remote"] = "https://github.com/example/photos.git"
+        rewritten.append(row)
+    with open(path, "w", encoding="utf-8") as handle:
+        for row in rewritten:
+            handle.write(json.dumps(row) + "\n")
+    urllib = next(row for row in _rows(ledger_path()) if row["widget_id"] == "infra-urllib-python")
+    assert urllib["purpose"] == purpose
+    assert "http" not in purpose.lower()
+    assert "client" not in purpose.lower()
+    assert not _old_substring_hit(urllib, "http client")
+    found = prior_for_search(
+        "http client",
+        project_root=str(project),
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    )
+    ids = _prior_ids(found)
+    assert "infra-urllib-python" in ids
+    assert "image-resize" not in ids
+
+
+def test_prior_unrelated_query_returns_no_rows(monkeypatch, tmp_path):
+    _isolate_config(monkeypatch, tmp_path)
+    project = tmp_path / "tiger12-app"
+    project.mkdir()
+    record_usage(
+        "note",
+        widget_id="infra-urllib-python",
+        version="1.0.0",
+        purpose="make requests to the registry",
+        project_root=str(project),
+    )
+    record_usage(
+        "note",
+        widget_id="http-client",
+        version="1.0.0",
+        purpose="send payloads",
+        project_root=str(project),
+    )
+    record_usage(
+        "note",
+        widget_id="retry-backoff",
+        version="1.0.0",
+        purpose="retry with exponential backoff",
+        project_root=str(project),
+    )
+    found = prior_for_search(
+        "banana smoothie recipe",
+        project_root=str(project),
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    )
+    assert found is None
+
+
+def test_prior_matches_project_basename_and_remote(monkeypatch, tmp_path):
+    _isolate_config(monkeypatch, tmp_path)
+    project = tmp_path / "tiger12-checkout"
+    project.mkdir()
+    record_usage(
+        "note",
+        widget_id="temperature-log",
+        version="1.0.0",
+        purpose="record temperatures",
+        project_root=str(project),
+    )
+    # Rewrite the origin. record_usage leaves it null when the dir is not a repo.
+    path = ledger_path()
+    rows = _rows(path)
+    rows[0]["project_remote"] = "git@github.com:example/zephyr-remote.git"
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(rows[0]) + "\n")
+    by_dir = prior_for_search(
+        "tiger12-checkout",
+        project_root=str(project),
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    )
+    assert _prior_ids(by_dir) == ["temperature-log"]
+    by_remote = prior_for_search(
+        "zephyr-remote",
+        project_root=str(tmp_path / "elsewhere"),
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    )
+    assert _prior_ids(by_remote) == ["temperature-log"]
+    assert by_remote["block"]["widgets"][0]["same_project"] is False
+    rows[0]["project_remote"] = None
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(rows[0]) + "\n")
+    assert prior_for_search(
+        "zephyr-remote",
+        project_root=str(project),
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    ) is None
+
+
+def test_prior_orders_same_project_then_relevance(monkeypatch, tmp_path):
+    _isolate_config(monkeypatch, tmp_path)
+    current = tmp_path / "current"
+    other = tmp_path / "other"
+    current.mkdir()
+    other.mkdir()
+    record_usage(
+        "note",
+        widget_id="fetch-helper",
+        version="1.0.0",
+        purpose="fetch remote documents",
+        project_root=str(current),
+    )
+    record_usage(
+        "note",
+        widget_id="http-client",
+        version="1.0.0",
+        purpose="send payloads",
+        project_root=str(other),
+    )
+    record_usage(
+        "note",
+        widget_id="image-resize",
+        version="1.0.0",
+        purpose="scale photos for thumbnails",
+        project_root=str(current),
+    )
+    found = prior_for_search(
+        "http client",
+        project_root=str(current),
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    )
+    ids = _prior_ids(found)
+    assert ids == ["fetch-helper", "http-client"]
+    assert found["block"]["widgets"][0]["same_project"] is True
+    assert found["block"]["widgets"][1]["same_project"] is False
+    assert "image-resize" not in ids
+
+
+def test_prior_orders_by_relevance_within_one_project(monkeypatch, tmp_path):
+    _isolate_config(monkeypatch, tmp_path)
+    project = tmp_path / "current"
+    project.mkdir()
+    record_usage(
+        "note",
+        widget_id="fetch-helper",
+        version="1.0.0",
+        purpose="fetch remote documents",
+        project_root=str(project),
+    )
+    record_usage(
+        "note",
+        widget_id="http-client",
+        version="1.0.0",
+        purpose="send payloads",
+        project_root=str(project),
+    )
+    found = prior_for_search(
+        "http client",
+        project_root=str(project),
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    )
+    assert _prior_ids(found) == ["http-client", "fetch-helper"]
+
+
+def test_prior_collapses_to_latest_event(monkeypatch, tmp_path):
+    _isolate_config(monkeypatch, tmp_path)
+    project = tmp_path / "tiger12-app"
+    project.mkdir()
+    record_usage(
+        "note",
+        widget_id="infra-urllib-python",
+        version="1.0.0",
+        purpose="make requests to the registry",
+        project_root=str(project),
+    )
+    record_usage(
+        "note",
+        widget_id="infra-urllib-python",
+        version="1.0.1",
+        purpose="scale photos for thumbnails",
+        project_root=str(project),
+    )
+    missed = prior_for_search(
+        "http client",
+        project_root=str(project),
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    )
+    assert missed is None
+    record_usage(
+        "note",
+        widget_id="infra-urllib-python",
+        version="1.0.2",
+        purpose="make requests to the registry",
+        project_root=str(project),
+    )
+    found = prior_for_search(
+        "http client",
+        project_root=str(project),
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    )
+    assert _prior_ids(found) == ["infra-urllib-python"]
+    assert found["block"]["widgets"][0]["version_used"] == "1.0.2"
+    assert found["block"]["count"] == 1
+
+
+def test_prior_cap_keeps_newest_when_scores_tie(monkeypatch, tmp_path):
+    _isolate_config(monkeypatch, tmp_path)
+    project = str(tmp_path / "proj")
+    os.makedirs(project)
+    stamps = [f"2026-01-01T00:00:0{index}Z" for index in range(6)]
+    monkeypatch.setattr("cartograph.usage_ledger._now_text", lambda: stamps.pop(0))
+    for index in range(6):
+        record_usage(
+            "note",
+            widget_id=f"item-{index}",
+            version="1.0.0",
+            purpose="capme row",
+            project_root=project,
+        )
+    found = prior_for_search(
+        "capme",
+        project_root=project,
+        library_versions={},
+        registry_rows=[],
+        prefixes=["cg"],
+    )
+    assert found["block"]["count"] == 5
+    assert found["block"]["omitted"] == 1
+    assert _prior_ids(found) == [f"item-{index}" for index in range(5, 0, -1)]
+    assert "item-0" in found["annotations"]
+
+
+def _search_pool_bodies(payload):
+    def bodies(pool):
+        rows = []
+        for row in payload[pool]["widgets"]:
+            copy = dict(row)
+            copy.pop("prior_use", None)
+            rows.append(copy)
+        return rows
+    return {"local": bodies("local"), "registry": bodies("registry")}
+
+
+def test_local_and_registry_order_unchanged_by_ledger(monkeypatch, tmp_path, capsys):
+    from cartograph.cli import cmd_search
+
+    _isolate_config(monkeypatch, tmp_path)
+    captured = []
+
+    def fake_registries(query, domain, language, top_k, registry_filter=None, owner_filter=None):
+        captured.append((query, top_k))
+        rows = [
+            {"id": "@ada/cg-zeta-python", "name": "Zeta", "version": "3.0.0",
+             "description": "zeta tool", "language": "python", "domain": "data",
+             "registry_prefix": "cg"},
+            {"id": "@ada/cg-alpha-python", "name": "Alpha", "version": "1.0.0",
+             "description": "alpha tool", "language": "python", "domain": "data",
+             "registry_prefix": "cg"},
+        ]
+        return rows, {}, ["cg"]
+
+    monkeypatch.setattr("cartograph.cli._search_registries", fake_registries)
+    monkeypatch.setattr("cartograph.auth.cached_whoami", lambda: {})
+    widgets = _local_widgets()
+    monkeypatch.setattr("cartograph.cli._carto", lambda: _Carto(widgets, widgets))
+
+    cmd_search(_search_ns())
+    empty = json.loads(capsys.readouterr().out)
+    assert "prior" not in empty
+
+    record_usage(
+        "install",
+        widget_id="http-client",
+        version="1.0.0",
+        purpose="ledgerhit local only",
+        project_root=os.getcwd(),
+    )
+    cmd_search(_search_ns())
+    with_ledger = json.loads(capsys.readouterr().out)
+    assert list(with_ledger.keys())[0] == "prior"
+    assert with_ledger["local"]["widgets"][0]["prior_use"]["purpose"] == "ledgerhit local only"
+
+    cmd_search(_search_ns(no_ledger=True))
+    skipped = json.loads(capsys.readouterr().out)
+    assert "prior" not in skipped
+    assert "prior_use" not in skipped["local"]["widgets"][0]
+
+    assert _search_pool_bodies(empty) == _search_pool_bodies(with_ledger)
+    assert _search_pool_bodies(empty) == _search_pool_bodies(skipped)
+    assert [row["id"] for row in empty["local"]["widgets"]] == ["http-client", "json-parser"]
+    assert [row["id"] for row in empty["registry"]["widgets"]] == [
+        "@ada/cg-zeta-python",
+        "@ada/cg-alpha-python",
+    ]
+    assert captured == [("ledgerhit", 10), ("ledgerhit", 10), ("ledgerhit", 10)]

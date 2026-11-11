@@ -213,3 +213,104 @@ def test_apply_filters_languages_set():
     assert apply_filters(w, None, None, {"go", "nim"}) is False
     # alias members are normalized
     assert apply_filters(w, None, None, {"py"}) is True
+
+
+# Fixed corpus so a refactor of HybridBackend.scores cannot drift local
+# ranking. Numbers are the pre-refactor query() output for this corpus.
+_GOLDEN_WIDGETS = [
+    {
+        "id": "http-client",
+        "name": "HTTP Client",
+        "tags": ["http", "client", "requests"],
+        "description": "A lightweight HTTP client for making GET and POST requests.",
+        "language": "python",
+        "domain": "backend",
+        "weighted_rating": 0,
+        "version": "1.2.0",
+        "dependencies": [],
+        "rating": 0,
+        "install_count": 0,
+    },
+    {
+        "id": "json-parser",
+        "name": "JSON Parser",
+        "tags": ["json", "parser", "schema", "validation"],
+        "description": "JSON parsing with schema validation support.",
+        "language": "python",
+        "domain": "data",
+        "weighted_rating": 1.5,
+        "version": "1.0.0",
+        "dependencies": [],
+        "rating": 0,
+        "install_count": 0,
+    },
+    {
+        "id": "auth-middleware",
+        "name": "Auth Middleware",
+        "tags": ["auth", "jwt", "middleware"],
+        "description": "JWT authentication middleware for backend services.",
+        "language": "python",
+        "domain": "backend",
+        "weighted_rating": 3,
+        "version": "1.0.0",
+        "dependencies": [],
+        "rating": 0,
+        "install_count": 0,
+    },
+    {
+        "id": "universal-add-nim",
+        "name": "Nim Add",
+        "tags": ["math", "add"],
+        "description": "A simple add function.",
+        "language": "nim",
+        "domain": "universal",
+        "weighted_rating": 0,
+        "version": "1.0.0",
+        "dependencies": [],
+        "rating": 0,
+        "install_count": 0,
+    },
+    {
+        "id": "data-sum-javascript",
+        "name": "JS Sum",
+        "tags": ["math", "sum"],
+        "description": "A simple sum function.",
+        "language": "javascript",
+        "domain": "data",
+        "weighted_rating": 0,
+        "version": "1.0.0",
+        "dependencies": [],
+        "rating": 0,
+        "install_count": 0,
+    },
+]
+
+
+def test_hybrid_query_scores_stay_identical():
+    from cartograph.search.hybrid import HybridBackend
+    backend = HybridBackend()
+    backend.build(_GOLDEN_WIDGETS)
+    expected = {
+        ("http client", None, None): [("http-client", 1.3)],
+        ("jwt", None, None): [("auth-middleware", 1.03)],
+        ("schema validation", None, None): [
+            ("json-parser", 1.015),
+            ("data-sum-javascript", 0.1049),
+        ],
+        ("xyzzy_qqqq_zzzzzzzzz_abc", None, None): [],
+        ("json", None, None): [("json-parser", 1.315)],
+        ("auth", None, None): [("auth-middleware", 1.33)],
+        ("add", None, None): [("universal-add-nim", 1.3), ("auth-middleware", 0.1284)],
+        ("auth", "frontend", None): [],
+        ("add", "backend", None): [("auth-middleware", 0.1284)],
+        ("parser", None, "python"): [("json-parser", 1.315)],
+        ("math", "data", None): [("data-sum-javascript", 1.0)],
+    }
+    for (query, domain, language), rows in expected.items():
+        result = backend.query(query, domain_filter=domain, language_filter=language)
+        got = [(item["id"], item["relevance_score"]) for item in result["results"]]
+        assert got == rows, (query, domain, language, got)
+    detailed = backend.scores("http client")
+    top = backend.query("http client")["results"][0]
+    assert top["relevance_score"] == round(detailed[0]["combined"], 4)
+    assert backend.min_score == 0.10
